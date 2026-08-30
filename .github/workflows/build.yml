@@ -1,4 +1,4 @@
-name: Build Iris HDR Viewfinder Test V1
+name: Build Iris HDR Viewfinder Test V1.1
 
 on:
   workflow_dispatch:
@@ -9,7 +9,9 @@ on:
       - 'build.gradle.kts'
       - 'settings.gradle.kts'
       - 'gradle.properties'
+      - 'scripts/**'
       - '.github/workflows/build.yml'
+      - 'BUILD_WORKFLOW_COPY.yml'
 
 jobs:
   build:
@@ -20,6 +22,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Bootstrap source authority proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_REF_NAME" = "main"
+          cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
+          grep -Fq 'versionCode = 2' app/build.gradle.kts
+          grep -Fq 'versionName = "1.0-v1.1"' app/build.gradle.kts
+          bad_platform='platforms;android-37'
+          if grep -Fq "sdkmanager \"$bad_platform\"" .github/workflows/build.yml; then
+            echo 'REGRESSION FAIL: invalid API 37 package identifier survived' >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          root = Path('app/src')
+          files = sorted(p for p in root.rglob('*') if p.is_file())
+          if len(files) != 12:
+              raise SystemExit(f'BOOTSTRAP AUTHORITY FAIL: expected 12 app/src files, found {len(files)}')
+          rows = []
+          for p in files:
+              data = p.read_bytes()
+              lines = data.count(b'\n') + (1 if data and not data.endswith(b'\n') else 0)
+              rows.append(f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{p.as_posix()}\n")
+          manifest = ''.join(rows).encode()
+          digest = hashlib.sha256(manifest).hexdigest()
+          expected = '92ba893ca5fad9600ea895bcd611a7eae405899e093f3acdb106bbf66a09d15d'
+          if digest != expected:
+              raise SystemExit(f'BOOTSTRAP AUTHORITY FAIL: runtime manifest sha256 {digest} != {expected}')
+          Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
+          print(f'BOOTSTRAP SOURCE AUTHORITY PASS: 12 files, manifest sha256={digest}')
+          PY
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -29,11 +66,18 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android 37 SDK
+      - name: Install and prove Android 37 SDK
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-37" "build-tools;37.0.0"
+          set -euo pipefail
+          sdkmanager --list > "$RUNNER_TEMP/sdkmanager-list.txt"
+          if ! grep -Fq 'platforms;android-37.0' "$RUNNER_TEMP/sdkmanager-list.txt"; then
+            echo 'REGRESSION FAIL: platforms;android-37.0 is not discoverable by sdkmanager' >&2
+            exit 1
+          fi
+          sdkmanager "platforms;android-37.0"
+          test -f "$ANDROID_SDK_ROOT/platforms/android-37.0/android.jar"
+          echo 'API37 PACKAGE REGRESSION PASS: platforms;android-37.0 installed'
 
       - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v4
@@ -62,24 +106,48 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Verify exactly one APK
+      - name: Post-build invariance and freeze compiled candidate
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t apks < <(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print)
+          git diff --exit-code -- .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml app/build.gradle.kts app/src scripts/verify_shaders.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          expected = '92ba893ca5fad9600ea895bcd611a7eae405899e093f3acdb106bbf66a09d15d'
+          root = Path('app/src')
+          files = sorted(p for p in root.rglob('*') if p.is_file())
+          rows = []
+          for p in files:
+              data = p.read_bytes()
+              lines = data.count(b'\n') + (1 if data and not data.endswith(b'\n') else 0)
+              rows.append(f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{p.as_posix()}\n")
+          manifest = ''.join(rows).encode()
+          digest = hashlib.sha256(manifest).hexdigest()
+          if len(files) != 12 or digest != expected:
+              raise SystemExit(f'POST-BUILD INVARIANCE FAIL: files={len(files)} digest={digest}')
+          Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
+          print(f'POST-BUILD RUNTIME INVARIANCE PASS: 12 files, manifest sha256={digest}')
+          PY
+          mapfile -t apks < <(find . -type f -name '*.apk' -print)
           if [[ ${#apks[@]} -ne 1 ]]; then
             printf 'Expected exactly one APK, found %s\n' "${#apks[@]}" >&2
             printf '%s\n' "${apks[@]:-}" >&2
             exit 1
           fi
           mkdir -p output
-          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1-debug.apk
-          sha256sum output/Iris-HDR-Viewfinder-Test-V1-debug.apk | tee output/SHA256SUMS.txt
+          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.1-debug.apk
+          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.1-source-candidate.tar "$GITHUB_SHA"
+          printf '%s\n' "$GITHUB_SHA" > output/SOURCE_COMMIT.txt
+          cp bootstrap-runtime-manifest.tsv output/RUNTIME_SOURCE_MANIFEST.tsv
+          sha256sum output/Iris-HDR-Viewfinder-Test-V1.1-debug.apk \
+                    output/Iris-HDR-Viewfinder-Test-V1.1-source-candidate.tar \
+                    output/RUNTIME_SOURCE_MANIFEST.tsv | tee output/SHA256SUMS.txt
 
-      - name: Upload APK
+      - name: Upload compiled authority artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1
+          name: Iris-HDR-Viewfinder-Test-V1.1
           path: output/
           if-no-files-found: error
           retention-days: 14
