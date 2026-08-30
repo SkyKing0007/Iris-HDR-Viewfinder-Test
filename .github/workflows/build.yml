@@ -1,4 +1,4 @@
-name: Build Iris HDR Viewfinder Test V1.1
+name: Build Iris HDR Viewfinder Test V1.2
 
 on:
   workflow_dispatch:
@@ -22,39 +22,92 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Bootstrap source authority proof
+      - name: Bootstrap authority and upload-shape proof
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$GITHUB_REF_NAME" = "main"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
-          grep -Fq 'versionCode = 2' app/build.gradle.kts
-          grep -Fq 'versionName = "1.0-v1.1"' app/build.gradle.kts
+          grep -Fq 'versionCode = 3' app/build.gradle.kts
+          grep -Fq 'versionName = "1.0-v1.2"' app/build.gradle.kts
+          grep -Fq 'compileSdk = 37' app/build.gradle.kts
+          grep -Fq 'minSdk = 29' app/build.gradle.kts
+          grep -Fq 'targetSdk = 37' app/build.gradle.kts
+          grep -Fq 'version "9.2.1"' build.gradle.kts
+          sha256sum -c PACKAGE_MANIFEST_SHA256.txt
+
           bad_platform='platforms;android-37'
           if grep -Fq "sdkmanager \"$bad_platform\"" .github/workflows/build.yml; then
-            echo 'REGRESSION FAIL: invalid API 37 package identifier survived' >&2
+            echo 'REGRESSION FAIL 001: invalid API 37 package identifier survived' >&2
             exit 1
           fi
+
+          if grep -RFn 'readAllBytes(' app/src/main/java; then
+            echo 'REGRESSION FAIL 003: API-33 InputStream.readAllBytes survived minSdk 29 source' >&2
+            exit 1
+          fi
+
           python3 - <<'PY'
           from pathlib import Path
           import hashlib
+          import subprocess
+
+          expected_tracked = [
+              '.github/workflows/build.yml',
+              '.gitignore',
+              'BUILD_WORKFLOW_COPY.yml',
+              'PACKAGE_INFO.txt',
+              'PACKAGE_MANIFEST_SHA256.txt',
+              'README.md',
+              'VSCODE_DEV_UPLOAD.txt',
+              'app/build.gradle.kts',
+              'app/src/main/AndroidManifest.xml',
+              'app/src/main/assets/shaders/fullscreen.vert',
+              'app/src/main/assets/shaders/hdr_display.frag',
+              'app/src/main/assets/shaders/yuv_to_rgb.frag',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/YuvFrame.java',
+              'build.gradle.kts',
+              'gradle.properties',
+              'scripts/verify_shaders.py',
+              'settings.gradle.kts',
+          ]
+          tracked = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
+          if tracked != expected_tracked:
+              missing = sorted(set(expected_tracked) - set(tracked))
+              extra = sorted(set(tracked) - set(expected_tracked))
+              raise SystemExit(
+                  f'REGRESSION FAIL 002: upload shape mismatch; missing={missing} extra={extra}')
+
           root = Path('app/src')
           files = sorted(p for p in root.rglob('*') if p.is_file())
-          if len(files) != 12:
-              raise SystemExit(f'BOOTSTRAP AUTHORITY FAIL: expected 12 app/src files, found {len(files)}')
+          expected_runtime_paths = expected_tracked[8:20]
+          actual_runtime_paths = [p.as_posix() for p in files]
+          if actual_runtime_paths != expected_runtime_paths:
+              raise SystemExit(
+                  'BOOTSTRAP AUTHORITY FAIL: runtime path set mismatch: '
+                  f'{actual_runtime_paths}')
           rows = []
           for p in files:
               data = p.read_bytes()
               lines = data.count(b'\n') + (1 if data and not data.endswith(b'\n') else 0)
-              rows.append(f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{p.as_posix()}\n")
+              rows.append(
+                  f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{p.as_posix()}\n")
           manifest = ''.join(rows).encode()
           digest = hashlib.sha256(manifest).hexdigest()
-          expected = '92ba893ca5fad9600ea895bcd611a7eae405899e093f3acdb106bbf66a09d15d'
+          expected = '43e87cfee4aaa0c33fdd84a3b6b8eaa29b1ac0604d22b2f7b54561965877f515'
           if digest != expected:
-              raise SystemExit(f'BOOTSTRAP AUTHORITY FAIL: runtime manifest sha256 {digest} != {expected}')
+              raise SystemExit(
+                  f'BOOTSTRAP AUTHORITY FAIL: runtime manifest sha256 {digest} != {expected}')
           Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
-          print(f'BOOTSTRAP SOURCE AUTHORITY PASS: 12 files, manifest sha256={digest}')
+          print(f'BOOTSTRAP AUTHORITY PASS: 24 tracked files; 12 runtime files; manifest={digest}')
           PY
 
       - name: Set up Java 17
@@ -71,10 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           sdkmanager --list > "$RUNNER_TEMP/sdkmanager-list.txt"
-          if ! grep -Fq 'platforms;android-37.0' "$RUNNER_TEMP/sdkmanager-list.txt"; then
-            echo 'REGRESSION FAIL: platforms;android-37.0 is not discoverable by sdkmanager' >&2
-            exit 1
-          fi
+          grep -Fq 'platforms;android-37.0' "$RUNNER_TEMP/sdkmanager-list.txt"
           sdkmanager "platforms;android-37.0"
           test -f "$ANDROID_SDK_ROOT/platforms/android-37.0/android.jar"
           echo 'API37 PACKAGE REGRESSION PASS: platforms;android-37.0 installed'
@@ -84,9 +134,17 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
+      - name: Prove Gradle toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --version
+          java -version
+
       - name: Install real GLSL compiler
         shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y glslang-tools
           glslangValidator --version
@@ -111,43 +169,71 @@ jobs:
         run: |
           set -euo pipefail
           git diff --exit-code -- .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml app/build.gradle.kts app/src scripts/verify_shaders.py
+          if grep -RFn 'readAllBytes(' app/src/main/java; then
+            echo 'POST-BUILD REGRESSION FAIL: API-33 readAllBytes returned' >&2
+            exit 1
+          fi
           python3 - <<'PY'
           from pathlib import Path
           import hashlib
-          expected = '92ba893ca5fad9600ea895bcd611a7eae405899e093f3acdb106bbf66a09d15d'
+          import subprocess
+
+          expected_runtime = '43e87cfee4aaa0c33fdd84a3b6b8eaa29b1ac0604d22b2f7b54561965877f515'
           root = Path('app/src')
           files = sorted(p for p in root.rglob('*') if p.is_file())
           rows = []
           for p in files:
               data = p.read_bytes()
               lines = data.count(b'\n') + (1 if data and not data.endswith(b'\n') else 0)
-              rows.append(f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{p.as_posix()}\n")
+              rows.append(
+                  f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{p.as_posix()}\n")
           manifest = ''.join(rows).encode()
           digest = hashlib.sha256(manifest).hexdigest()
-          if len(files) != 12 or digest != expected:
-              raise SystemExit(f'POST-BUILD INVARIANCE FAIL: files={len(files)} digest={digest}')
+          if len(files) != 12 or digest != expected_runtime:
+              raise SystemExit(
+                  f'POST-BUILD RUNTIME INVARIANCE FAIL: files={len(files)} digest={digest}')
           Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
-          print(f'POST-BUILD RUNTIME INVARIANCE PASS: 12 files, manifest sha256={digest}')
+
+          tracked = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
+          repo_rows = []
+          for rel in tracked:
+              p = Path(rel)
+              data = p.read_bytes()
+              lines = data.count(b'\n') + (1 if data and not data.endswith(b'\n') else 0)
+              repo_rows.append(
+                  f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{rel}\n")
+          Path('compiled-repository-manifest.tsv').write_text(''.join(repo_rows))
+          print(f'POST-BUILD RUNTIME INVARIANCE PASS: 12 files, manifest={digest}')
           PY
-          mapfile -t apks < <(find . -type f -name '*.apk' -print)
+
+          mapfile -t apks < <(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print | sort)
           if [[ ${#apks[@]} -ne 1 ]]; then
             printf 'Expected exactly one APK, found %s\n' "${#apks[@]}" >&2
             printf '%s\n' "${apks[@]:-}" >&2
             exit 1
           fi
+
           mkdir -p output
-          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.1-debug.apk
-          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.1-source-candidate.tar "$GITHUB_SHA"
+          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.2-debug.apk
+          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.2-source-candidate.tar "$GITHUB_SHA"
           printf '%s\n' "$GITHUB_SHA" > output/SOURCE_COMMIT.txt
           cp bootstrap-runtime-manifest.tsv output/RUNTIME_SOURCE_MANIFEST.tsv
-          sha256sum output/Iris-HDR-Viewfinder-Test-V1.1-debug.apk \
-                    output/Iris-HDR-Viewfinder-Test-V1.1-source-candidate.tar \
-                    output/RUNTIME_SOURCE_MANIFEST.tsv | tee output/SHA256SUMS.txt
+          cp compiled-repository-manifest.tsv output/REPOSITORY_SOURCE_MANIFEST.tsv
+          cat > output/REGRESSIONS.txt <<'EOF'
+          001 - API 37 sdkmanager package must be platforms;android-37.0, never platforms;android-37.
+          002 - vscode.dev upload must preserve the complete 24-file tracked candidate and all 12 app/src runtime files.
+          003 - minSdk 29 runtime source must not call InputStream.readAllBytes(), which is Android API 33+.
+          EOF
+          sha256sum output/Iris-HDR-Viewfinder-Test-V1.2-debug.apk \
+                    output/Iris-HDR-Viewfinder-Test-V1.2-source-candidate.tar \
+                    output/RUNTIME_SOURCE_MANIFEST.tsv \
+                    output/REPOSITORY_SOURCE_MANIFEST.tsv \
+                    output/REGRESSIONS.txt | tee output/SHA256SUMS.txt
 
       - name: Upload compiled authority artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1.1
+          name: Iris-HDR-Viewfinder-Test-V1.2
           path: output/
           if-no-files-found: error
           retention-days: 14

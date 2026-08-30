@@ -1,7 +1,10 @@
-Iris HDR Viewfinder Test V1
+Iris HDR Viewfinder Test V1.2
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
-Status: PREPARED FOR FIRST GITHUB ACTIONS BUILD - NOT YET BUILD-PROVEN
+Status: PREPARED FOR GITHUB ACTIONS BUILD - NOT YET BUILD-PROVEN
+Bootstrap runtime authority: exact original V1 Git tree c7163c4717e539381d83945ffd2454a08f531349
+Failed V1.1 HEAD repaired by this full-tree package: 735593436a1f90327de57863e3b2bdc9608e159a
 Reference behavior: Android historical Camera2 HDR Viewfinder alternating-exposure concept
 Implementation: fresh standalone Java/Camera2/OpenGL ES 3.0 code; no RenderScript; no Photon source
-Toolchain: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37
+Toolchain: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29
+V1.2 corrections: full upload-tree restoration, Android 37 package regression, API-29-safe shader asset reader
 Outputs per HDR capture: SHORT.dng, LONG.dng, SHORT.jpg, LONG.jpg, FUSED_HDR.jpg, metadata.json
