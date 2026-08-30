@@ -1,4 +1,4 @@
-# Iris HDR Viewfinder Test V1
+# Iris HDR Viewfinder Test V1.3
 
 Standalone Camera2 experiment for proving alternating-exposure HDR preview behavior without modifying Photon/Iris.
 
@@ -18,6 +18,19 @@ Standalone Camera2 experiment for proving alternating-exposure HDR preview behav
   - `*_FUSED_HDR.jpg`
   - `*_metadata.json`
 - Files are written to `Downloads/IrisHDRViewfinder`.
+
+
+## V1.3 orientation/display behavior
+
+- Follows Android's user orientation policy instead of forcing landscape.
+- With auto-rotate enabled, portrait and landscape each use a dedicated responsive control layout.
+- With the device orientation lock enabled, the app respects the locked orientation instead of rotating anyway.
+- Camera sensor/display rotation is applied once.
+- Camera2 YUV top-left memory origin is corrected once during YUV->RGB conversion; the final display pass does not flip it again.
+- Normal/HDR preview and each SPLIT half use aspect-preserving center crop, so the viewfinder fills its measured area without stretching.
+- Controls occupy their own measured area below the preview instead of covering the camera surface.
+- Camera selection, mode, exposure sliders and ISO are restored across Android orientation recreation.
+- SHORT/LONG JPEG requests use device-correct orientation; fused JPEG input bitmaps normalize EXIF-only HAL rotation before the unchanged fusion math.
 
 ## Important scope
 

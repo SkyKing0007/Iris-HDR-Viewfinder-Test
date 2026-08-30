@@ -1,10 +1,16 @@
-Iris HDR Viewfinder Test V1.2
+Iris HDR Viewfinder Test V1.3
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED FOR GITHUB ACTIONS BUILD - NOT YET BUILD-PROVEN
-Bootstrap runtime authority: exact original V1 Git tree c7163c4717e539381d83945ffd2454a08f531349
-Failed V1.1 HEAD repaired by this full-tree package: 735593436a1f90327de57863e3b2bdc9608e159a
+Runtime authority: exact successful V1.2 Actions artifact Iris-HDR-Viewfinder-Test-V1.2
+Authority commit: 89082c0233d8bb3d77b21c3d63c6c0774f9e9753
+Authority Actions run: 33323384977
+Authority artifact ID: 9735549542
+Authority artifact ZIP SHA-256: 7a9209ad80155f3e050cbb1ef7a02b1597e4e97998140a025a1489489cd619d0
+Authority V1.2 runtime manifest SHA-256: 43e87cfee4aaa0c33fdd84a3b6b8eaa29b1ac0604d22b2f7b54561965877f515
+Backup branch: none; orientation/UI correction is localized and reversible by canonical rollback patch
 Reference behavior: Android historical Camera2 HDR Viewfinder alternating-exposure concept
 Implementation: fresh standalone Java/Camera2/OpenGL ES 3.0 code; no RenderScript; no Photon source
 Toolchain: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29
-V1.2 corrections: full upload-tree restoration, Android 37 package regression, API-29-safe shader asset reader
+V1.3 runtime changes: fullUser orientation policy, responsive portrait/landscape controls, Android-documented back-camera preview rotation, single YUV-origin correction, aspect-preserving center crop in NORMAL/HDR/SPLIT, UI state preservation across rotation recreation, device-correct SHORT/LONG JPEG orientation, EXIF-normalized fused JPEG inputs
+Unchanged image math from V1.2: manual exposure/frame routing, RAW/DNG saving, frame matching, YUV conversion shader, HDR fusion/tone math. CameraController changes only still-JPEG orientation metadata; JpegFusion changes only input orientation normalization before the existing fusion math.
 Outputs per HDR capture: SHORT.dng, LONG.dng, SHORT.jpg, LONG.jpg, FUSED_HDR.jpg, metadata.json

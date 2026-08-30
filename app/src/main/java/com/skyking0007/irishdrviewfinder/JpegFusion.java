@@ -2,7 +2,10 @@ package com.skyking0007.irishdrviewfinder;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import android.media.ExifInterface;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 
 final class JpegFusion {
@@ -12,8 +15,8 @@ final class JpegFusion {
     private JpegFusion() {}
 
     static byte[] fuse(byte[] shortJpeg, byte[] longJpeg, double exposureRatio) throws Exception {
-        Bitmap shortBitmap = BitmapFactory.decodeByteArray(shortJpeg, 0, shortJpeg.length);
-        Bitmap longBitmap = BitmapFactory.decodeByteArray(longJpeg, 0, longJpeg.length);
+        Bitmap shortBitmap = decodeUpright(shortJpeg);
+        Bitmap longBitmap = decodeUpright(longJpeg);
         if (shortBitmap == null || longBitmap == null) {
             recycle(shortBitmap);
             recycle(longBitmap);
@@ -72,6 +75,45 @@ final class JpegFusion {
             throw new IllegalStateException("JPEG encoder rejected fused bitmap");
         }
         return bytes.toByteArray();
+    }
+
+    private static Bitmap decodeUpright(byte[] jpeg) throws Exception {
+        Bitmap decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
+        if (decoded == null) {
+            throw new IllegalStateException("Unable to decode capture JPEG");
+        }
+
+        int orientation = ExifInterface.ORIENTATION_NORMAL;
+        try (ByteArrayInputStream input = new ByteArrayInputStream(jpeg)) {
+            ExifInterface exif = new ExifInterface(input);
+            orientation = exif.getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL);
+        } catch (Exception ignored) {
+            // A HAL is allowed to rotate JPEG pixel data directly and omit an EXIF rotation tag.
+        }
+
+        Matrix matrix = new Matrix();
+        if (orientation == ExifInterface.ORIENTATION_ROTATE_90) {
+            matrix.postRotate(90.0f);
+        } else if (orientation == ExifInterface.ORIENTATION_ROTATE_180) {
+            matrix.postRotate(180.0f);
+        } else if (orientation == ExifInterface.ORIENTATION_ROTATE_270) {
+            matrix.postRotate(270.0f);
+        } else {
+            return decoded;
+        }
+
+        Bitmap upright = Bitmap.createBitmap(
+                decoded,
+                0,
+                0,
+                decoded.getWidth(),
+                decoded.getHeight(),
+                matrix,
+                true);
+        if (upright != decoded) decoded.recycle();
+        return upright;
     }
 
     private static float fuseChannel(int short8, int long8, float ratio, float highlightWeight) {

@@ -91,6 +91,7 @@ final class CameraController {
     private long shortExposureNs = 1_000_000_000L / 120;
     private long longExposureNs = 1_000_000_000L / 30;
     private int manualIso = 400;
+    private volatile int jpegOrientationDegrees;
     private long lastAeExposureNs = 1_000_000_000L / 60;
     private int lastAeIso = 400;
     private Size previewSize;
@@ -182,6 +183,14 @@ final class CameraController {
 
     void captureHdrSet() {
         cameraHandler.post(this::beginCaptureLocked);
+    }
+
+    void setJpegOrientationDegrees(int degrees) {
+        int normalized = ((degrees % 360) + 360) % 360;
+        if ((normalized % 90) != 0) {
+            throw new IllegalArgumentException("JPEG orientation must be a multiple of 90: " + degrees);
+        }
+        jpegOrientationDegrees = normalized;
     }
 
     void stopCamera() {
@@ -466,7 +475,7 @@ final class CameraController {
             shortBuilder.addTarget(jpegReader.getSurface());
             configureManualRequest(shortBuilder, shortExposureNs, manualIso);
             shortBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) 95);
-            shortBuilder.set(CaptureRequest.JPEG_ORIENTATION, 0);
+            shortBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientationDegrees);
             shortBuilder.setTag(TAG_CAPTURE_SHORT);
 
             CaptureRequest.Builder longBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
@@ -474,7 +483,7 @@ final class CameraController {
             longBuilder.addTarget(jpegReader.getSurface());
             configureManualRequest(longBuilder, longExposureNs, manualIso);
             longBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) 95);
-            longBuilder.set(CaptureRequest.JPEG_ORIENTATION, 0);
+            longBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientationDegrees);
             longBuilder.setTag(TAG_CAPTURE_LONG);
 
             captureSession.captureBurst(

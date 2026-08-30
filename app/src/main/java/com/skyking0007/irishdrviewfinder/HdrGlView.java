@@ -71,7 +71,8 @@ final class HdrGlView extends GLSurfaceView {
         private final Context context;
         private final ArrayBlockingQueue<Packet> queue = new ArrayBlockingQueue<>(6);
         private final FloatBuffer vertexBuffer;
-        private final FloatBuffer uvBuffer;
+        private final FloatBuffer rawUvBuffer;
+        private final FloatBuffer displayUvBuffer;
 
         volatile Mode mode = Mode.HDR;
         volatile int rotationQuarterTurns = 0;
@@ -102,9 +103,11 @@ final class HdrGlView extends GLSurfaceView {
         HdrRenderer(Context context) {
             this.context = context;
             float[] vertices = {-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f};
-            float[] uvs = {0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f};
+            float[] rawUvs = {0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f};
+            float[] displayUvs = {0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f};
             vertexBuffer = directFloatBuffer(vertices);
-            uvBuffer = directFloatBuffer(uvs);
+            rawUvBuffer = directFloatBuffer(rawUvs);
+            displayUvBuffer = directFloatBuffer(displayUvs);
         }
 
         void enqueue(YuvFrame frame, FrameMeta meta) {
@@ -196,7 +199,7 @@ final class HdrGlView extends GLSurfaceView {
                     0);
             GLES30.glViewport(0, 0, frameWidth, frameHeight);
             GLES30.glUseProgram(yuvProgram);
-            bindQuad();
+            bindQuad(rawUvBuffer);
             bindSampler(yuvProgram, "yTex", yTexture, 0);
             bindSampler(yuvProgram, "uTex", uTexture, 1);
             bindSampler(yuvProgram, "vTex", vTexture, 2);
@@ -209,7 +212,7 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight);
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT);
             GLES30.glUseProgram(displayProgram);
-            bindQuad();
+            bindQuad(displayUvBuffer);
             bindSampler(displayProgram, "normalTex", normalTexture, 0);
             bindSampler(displayProgram, "shortTex", shortTexture, 1);
             bindSampler(displayProgram, "longTex", longTexture, 2);
@@ -217,6 +220,8 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1i(
                     GLES30.glGetUniformLocation(displayProgram, "rotationQuarterTurns"),
                     rotationQuarterTurns);
+            setCropScaleUniform(displayProgram, "fullCropScale", surfaceWidth, surfaceHeight);
+            setCropScaleUniform(displayProgram, "splitCropScale", surfaceWidth * 0.5f, surfaceHeight);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveNormal"), haveNormal ? 1 : 0);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveShort"), haveShort ? 1 : 0);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveLong"), haveLong ? 1 : 0);
@@ -229,13 +234,34 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 
-        private void bindQuad() {
+        private void bindQuad(FloatBuffer textureCoordinates) {
             vertexBuffer.position(0);
-            uvBuffer.position(0);
+            textureCoordinates.position(0);
             GLES30.glEnableVertexAttribArray(0);
             GLES30.glEnableVertexAttribArray(1);
             GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 0, vertexBuffer);
-            GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 0, uvBuffer);
+            GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 0, textureCoordinates);
+        }
+
+        private void setCropScaleUniform(int program, String name, float viewportWidth, float viewportHeight) {
+            float scaleX = 1.0f;
+            float scaleY = 1.0f;
+            if (frameWidth > 0 && frameHeight > 0 && viewportWidth > 0.0f && viewportHeight > 0.0f) {
+                boolean quarterTurn = (rotationQuarterTurns & 1) != 0;
+                float rotatedWidth = quarterTurn ? frameHeight : frameWidth;
+                float rotatedHeight = quarterTurn ? frameWidth : frameHeight;
+                float imageAspect = rotatedWidth / rotatedHeight;
+                float viewportAspect = viewportWidth / viewportHeight;
+                if (viewportAspect > imageAspect) {
+                    scaleY = imageAspect / viewportAspect;
+                } else if (viewportAspect < imageAspect) {
+                    scaleX = viewportAspect / imageAspect;
+                }
+            }
+            GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(program, name),
+                    scaleX,
+                    scaleY);
         }
 
         private static void bindSampler(int program, String name, int texture, int unit) {

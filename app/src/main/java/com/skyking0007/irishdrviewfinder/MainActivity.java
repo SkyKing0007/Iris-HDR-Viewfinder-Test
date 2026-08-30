@@ -3,6 +3,7 @@ package com.skyking0007.irishdrviewfinder;
 import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.hardware.camera2.CameraAccessException;
 import android.os.Bundle;
@@ -14,7 +15,6 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.Spinner;
@@ -27,6 +27,11 @@ import java.util.Locale;
 
 public final class MainActivity extends Activity implements CameraController.Listener {
     private static final int CAMERA_PERMISSION_REQUEST = 1001;
+    private static final String STATE_CAMERA_ID = "cameraId";
+    private static final String STATE_MODE_INDEX = "modeIndex";
+    private static final String STATE_SHORT_INDEX = "shortIndex";
+    private static final String STATE_LONG_INDEX = "longIndex";
+    private static final String STATE_ISO_INDEX = "isoIndex";
     private static final long[] EXPOSURES_NS = {
             1_000_000_000L / 1000,
             1_000_000_000L / 500,
@@ -54,13 +59,19 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private final List<CameraController.CameraDescriptor> cameras = new ArrayList<>();
     private boolean updatingControls;
     private String selectedCameraId;
+    private volatile int modeIndex = 2;
+    private volatile int shortIndex = 3;
+    private volatile int longIndex = 5;
+    private volatile int isoIndex = 2;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        restoreUiState(savedInstanceState);
         buildUi();
         controller = new CameraController(this, this);
+        controller.setPreviewMode(previewModeForIndex(modeIndex));
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             loadCameras();
         } else {
@@ -68,26 +79,49 @@ public final class MainActivity extends Activity implements CameraController.Lis
         }
     }
 
+    private void restoreUiState(Bundle state) {
+        if (state == null) return;
+        selectedCameraId = state.getString(STATE_CAMERA_ID);
+        modeIndex = clampIndex(state.getInt(STATE_MODE_INDEX, modeIndex), 3);
+        shortIndex = clampIndex(state.getInt(STATE_SHORT_INDEX, shortIndex), EXPOSURES_NS.length);
+        longIndex = clampIndex(state.getInt(STATE_LONG_INDEX, longIndex), EXPOSURES_NS.length);
+        isoIndex = clampIndex(state.getInt(STATE_ISO_INDEX, isoIndex), ISO_VALUES.length);
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putString(STATE_CAMERA_ID, selectedCameraId);
+        outState.putInt(STATE_MODE_INDEX, modeIndex);
+        outState.putInt(STATE_SHORT_INDEX, shortIndex);
+        outState.putInt(STATE_LONG_INDEX, longIndex);
+        outState.putInt(STATE_ISO_INDEX, isoIndex);
+    }
+
     private void buildUi() {
-        FrameLayout root = new FrameLayout(this);
+        boolean portrait = getResources().getConfiguration().orientation
+                == Configuration.ORIENTATION_PORTRAIT;
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.BLACK);
+
         glView = new HdrGlView(this);
-        root.addView(glView, new FrameLayout.LayoutParams(
+        root.addView(glView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
+                0,
+                1f));
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(8), dp(6), dp(8), dp(6));
-        panel.setBackgroundColor(0x99000000);
+        panel.setBackgroundColor(0xCC000000);
 
-        statusText = textView("Waiting for camera permission…", 13);
+        statusText = textView("Waiting for camera permission…", portrait ? 12 : 13);
         panel.addView(statusText, matchWrap());
 
-        LinearLayout row1 = makeHorizontalRow();
         cameraSpinner = new Spinner(this);
         cameraSpinner.setBackgroundColor(0xCCEEEEEE);
-        row1.addView(cameraSpinner, weighted(2f));
 
         modeSpinner = new Spinner(this);
         ArrayAdapter<String> modes = new ArrayAdapter<>(
@@ -96,61 +130,49 @@ public final class MainActivity extends Activity implements CameraController.Lis
                 new String[]{"NORMAL AE", "SPLIT", "HDR FUSED"});
         modes.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         modeSpinner.setAdapter(modes);
-        modeSpinner.setSelection(2);
-        row1.addView(modeSpinner, weighted(1f));
+        modeSpinner.setSelection(modeIndex, false);
 
         Button autoButton = new Button(this);
         autoButton.setText("AUTO BRACKET");
-        row1.addView(autoButton, weighted(1f));
 
         captureButton = new Button(this);
         captureButton.setText("CAPTURE HDR SET");
-        row1.addView(captureButton, weighted(1.2f));
-        panel.addView(row1, matchWrap());
 
-        LinearLayout row2 = makeHorizontalRow();
-        shortLabel = textView("Short 1/120s", 12);
-        row2.addView(shortLabel, weighted(0.7f));
+        shortLabel = textView("Short " + CameraController.exposureText(EXPOSURES_NS[shortIndex]), 12);
         shortBar = new SeekBar(this);
         shortBar.setMax(EXPOSURES_NS.length - 1);
-        shortBar.setProgress(3);
-        row2.addView(shortBar, weighted(1.3f));
+        shortBar.setProgress(shortIndex);
 
-        longLabel = textView("Long 1/30s", 12);
-        row2.addView(longLabel, weighted(0.7f));
+        longLabel = textView("Long " + CameraController.exposureText(EXPOSURES_NS[longIndex]), 12);
         longBar = new SeekBar(this);
         longBar.setMax(EXPOSURES_NS.length - 1);
-        longBar.setProgress(5);
-        row2.addView(longBar, weighted(1.3f));
+        longBar.setProgress(longIndex);
 
-        isoLabel = textView("ISO 400", 12);
-        row2.addView(isoLabel, weighted(0.5f));
+        isoLabel = textView("ISO " + ISO_VALUES[isoIndex], 12);
         isoBar = new SeekBar(this);
         isoBar.setMax(ISO_VALUES.length - 1);
-        isoBar.setProgress(2);
-        row2.addView(isoBar, weighted(1f));
-        panel.addView(row2, matchWrap());
+        isoBar.setProgress(isoIndex);
 
-        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
+        if (portrait) {
+            buildPortraitControls(panel, autoButton);
+        } else {
+            buildLandscapeControls(panel, autoButton);
+        }
+
+        root.addView(panel, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM);
-        root.addView(panel, panelParams);
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
 
         modeSpinner.setOnItemSelectedListener(new SimpleItemSelectedListener(position -> {
-            HdrGlView.Mode glMode = position == 0
-                    ? HdrGlView.Mode.NORMAL
-                    : position == 1 ? HdrGlView.Mode.SPLIT : HdrGlView.Mode.HDR;
-            CameraController.PreviewMode cameraMode = position == 0
-                    ? CameraController.PreviewMode.NORMAL
-                    : position == 1 ? CameraController.PreviewMode.SPLIT : CameraController.PreviewMode.HDR;
+            modeIndex = clampIndex(position, 3);
+            HdrGlView.Mode glMode = glModeForIndex(modeIndex);
             glView.setMode(glMode);
-            if (controller != null) controller.setPreviewMode(cameraMode);
+            if (controller != null) controller.setPreviewMode(previewModeForIndex(modeIndex));
         }));
 
         cameraSpinner.setOnItemSelectedListener(new SimpleItemSelectedListener(position -> {
-            if (position < 0 || position >= cameras.size() || controller == null) return;
+            if (updatingControls || position < 0 || position >= cameras.size() || controller == null) return;
             selectedCameraId = cameras.get(position).id;
             controller.openCamera(selectedCameraId);
         }));
@@ -159,10 +181,13 @@ public final class MainActivity extends Activity implements CameraController.Lis
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 if (!fromUser || updatingControls || controller == null) return;
+                shortIndex = shortBar.getProgress();
+                longIndex = longBar.getProgress();
+                isoIndex = isoBar.getProgress();
                 controller.setManualSettings(
-                        EXPOSURES_NS[shortBar.getProgress()],
-                        EXPOSURES_NS[longBar.getProgress()],
-                        ISO_VALUES[isoBar.getProgress()]);
+                        EXPOSURES_NS[shortIndex],
+                        EXPOSURES_NS[longIndex],
+                        ISO_VALUES[isoIndex]);
             }
 
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -184,6 +209,45 @@ public final class MainActivity extends Activity implements CameraController.Lis
         });
     }
 
+    private void buildPortraitControls(LinearLayout panel, Button autoButton) {
+        panel.addView(cameraSpinner, matchWrap());
+
+        LinearLayout modeRow = makeHorizontalRow();
+        modeRow.addView(modeSpinner, weighted(1f));
+        modeRow.addView(autoButton, weighted(1f));
+        panel.addView(modeRow, matchWrap());
+
+        panel.addView(captureButton, matchWrap());
+        panel.addView(makeSliderRow(shortLabel, shortBar), matchWrap());
+        panel.addView(makeSliderRow(longLabel, longBar), matchWrap());
+        panel.addView(makeSliderRow(isoLabel, isoBar), matchWrap());
+    }
+
+    private void buildLandscapeControls(LinearLayout panel, Button autoButton) {
+        LinearLayout row1 = makeHorizontalRow();
+        row1.addView(cameraSpinner, weighted(2f));
+        row1.addView(modeSpinner, weighted(1f));
+        row1.addView(autoButton, weighted(1f));
+        row1.addView(captureButton, weighted(1.2f));
+        panel.addView(row1, matchWrap());
+
+        LinearLayout row2 = makeHorizontalRow();
+        row2.addView(shortLabel, weighted(0.7f));
+        row2.addView(shortBar, weighted(1.3f));
+        row2.addView(longLabel, weighted(0.7f));
+        row2.addView(longBar, weighted(1.3f));
+        row2.addView(isoLabel, weighted(0.5f));
+        row2.addView(isoBar, weighted(1f));
+        panel.addView(row2, matchWrap());
+    }
+
+    private LinearLayout makeSliderRow(TextView label, SeekBar bar) {
+        LinearLayout row = makeHorizontalRow();
+        row.addView(label, weighted(0.35f));
+        row.addView(bar, weighted(0.65f));
+        return row;
+    }
+
     private void loadCameras() {
         try {
             cameras.clear();
@@ -197,11 +261,25 @@ public final class MainActivity extends Activity implements CameraController.Lis
                     android.R.layout.simple_spinner_item,
                     cameras);
             adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            int selectedIndex = findCameraIndex(selectedCameraId);
+            if (selectedIndex < 0) selectedIndex = 0;
+            updatingControls = true;
             cameraSpinner.setAdapter(adapter);
-            selectedCameraId = cameras.get(0).id;
+            cameraSpinner.setSelection(selectedIndex, false);
+            selectedCameraId = cameras.get(selectedIndex).id;
+            updatingControls = false;
+            controller.openCamera(selectedCameraId);
         } catch (CameraAccessException e) {
             statusText.setText("Camera discovery failed: " + e.getMessage());
         }
+    }
+
+    private int findCameraIndex(String id) {
+        if (id == null) return -1;
+        for (int i = 0; i < cameras.size(); i++) {
+            if (id.equals(cameras.get(i).id)) return i;
+        }
+        return -1;
     }
 
     @Override
@@ -263,13 +341,22 @@ public final class MainActivity extends Activity implements CameraController.Lis
             Size jpegSize,
             Integer syncLatency) {
         int displayDegrees = rotationToDegrees(getWindowManager().getDefaultDisplay().getRotation());
-        int relative = (sensorOrientation - displayDegrees + 360) % 360;
-        glView.setRelativeRotationDegrees(relative);
+        int previewRotation = (sensorOrientation + displayDegrees + 360) % 360;
+        int jpegOrientation = (sensorOrientation - displayDegrees + 360) % 360;
+        glView.setRelativeRotationDegrees(previewRotation);
+        controller.setJpegOrientationDegrees(jpegOrientation);
+        controller.setPreviewMode(previewModeForIndex(modeIndex));
+        controller.setManualSettings(
+                EXPOSURES_NS[shortIndex],
+                EXPOSURES_NS[longIndex],
+                ISO_VALUES[isoIndex]);
         runOnUiThread(() -> statusText.setText(
                 "Camera " + cameraId
                         + " | preview " + previewSize
                         + " | RAW " + rawSize
                         + " | JPEG " + jpegSize
+                        + " | preview rotation=" + previewRotation + "°"
+                        + " | JPEG orientation=" + jpegOrientation + "°"
                         + " | sync latency=" + (syncLatency == null ? "?" : syncLatency)
                         + " | files -> Downloads/IrisHDRViewfinder"));
     }
@@ -278,9 +365,12 @@ public final class MainActivity extends Activity implements CameraController.Lis
     public void onManualSettings(long shortExposureNs, long longExposureNs, int iso) {
         runOnUiThread(() -> {
             updatingControls = true;
-            shortBar.setProgress(nearestExposureIndex(shortExposureNs));
-            longBar.setProgress(nearestExposureIndex(longExposureNs));
-            isoBar.setProgress(nearestIsoIndex(iso));
+            shortIndex = nearestExposureIndex(shortExposureNs);
+            longIndex = nearestExposureIndex(longExposureNs);
+            isoIndex = nearestIsoIndex(iso);
+            shortBar.setProgress(shortIndex);
+            longBar.setProgress(longIndex);
+            isoBar.setProgress(isoIndex);
             shortLabel.setText("Short " + CameraController.exposureText(shortExposureNs));
             longLabel.setText("Long " + CameraController.exposureText(longExposureNs));
             isoLabel.setText("ISO " + iso);
@@ -298,6 +388,22 @@ public final class MainActivity extends Activity implements CameraController.Lis
                     Toast.LENGTH_LONG).show();
             statusText.setText(message);
         });
+    }
+
+    private static HdrGlView.Mode glModeForIndex(int index) {
+        if (index == 0) return HdrGlView.Mode.NORMAL;
+        if (index == 1) return HdrGlView.Mode.SPLIT;
+        return HdrGlView.Mode.HDR;
+    }
+
+    private static CameraController.PreviewMode previewModeForIndex(int index) {
+        if (index == 0) return CameraController.PreviewMode.NORMAL;
+        if (index == 1) return CameraController.PreviewMode.SPLIT;
+        return CameraController.PreviewMode.HDR;
+    }
+
+    private static int clampIndex(int index, int count) {
+        return Math.max(0, Math.min(count - 1, index));
     }
 
     private static int nearestExposureIndex(long exposureNs) {

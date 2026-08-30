@@ -11,11 +11,17 @@ uniform int haveNormal;
 uniform int haveShort;
 uniform int haveLong;
 uniform float exposureRatio;
+uniform vec2 fullCropScale;
+uniform vec2 splitCropScale;
+
+vec2 centerCropUv(vec2 uv, vec2 cropScale) {
+    return vec2(0.5) + (uv - vec2(0.5)) * cropScale;
+}
 
 vec2 rotateUv(vec2 uv) {
-    if (rotationQuarterTurns == 1) return vec2(uv.y, 1.0 - uv.x);
+    if (rotationQuarterTurns == 1) return vec2(1.0 - uv.y, uv.x);
     if (rotationQuarterTurns == 2) return vec2(1.0 - uv.x, 1.0 - uv.y);
-    if (rotationQuarterTurns == 3) return vec2(1.0 - uv.y, uv.x);
+    if (rotationQuarterTurns == 3) return vec2(uv.y, 1.0 - uv.x);
     return uv;
 }
 
@@ -27,7 +33,8 @@ vec3 fallbackColor(vec2 uv) {
 }
 
 void main() {
-    vec2 uv = rotateUv(vUv);
+    vec2 fullDisplayUv = centerCropUv(vUv, fullCropScale);
+    vec2 uv = rotateUv(fullDisplayUv);
     if (mode == 0) {
         outColor = vec4(fallbackColor(uv), 1.0);
         return;
@@ -37,14 +44,15 @@ void main() {
             outColor = vec4(fallbackColor(uv), 1.0);
             return;
         }
-        vec2 halfUv = uv;
-        if (vUv.x < 0.5) {
-            halfUv.x = uv.x * 2.0;
-            outColor = vec4(texture(shortTex, halfUv).rgb, 1.0);
-        } else {
-            halfUv.x = (uv.x - 0.5) * 2.0;
-            outColor = vec4(texture(longTex, halfUv).rgb, 1.0);
-        }
+        bool leftHalf = vUv.x < 0.5;
+        vec2 localUv = vec2(
+            leftHalf ? vUv.x * 2.0 : (vUv.x - 0.5) * 2.0,
+            vUv.y);
+        vec2 splitDisplayUv = centerCropUv(localUv, splitCropScale);
+        vec2 splitUv = rotateUv(splitDisplayUv);
+        outColor = vec4(
+            leftHalf ? texture(shortTex, splitUv).rgb : texture(longTex, splitUv).rgb,
+            1.0);
         return;
     }
     if (haveShort == 0 || haveLong == 0) {
