@@ -1,0 +1,85 @@
+name: Build Iris HDR Viewfinder Test V1
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'app/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 37 SDK
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-37" "build-tools;37.0.0"
+
+      - name: Set up Gradle 9.6.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.6.0'
+
+      - name: Install real GLSL compiler
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y glslang-tools
+          glslangValidator --version
+
+      - name: Scan GLSL reserved identifiers
+        shell: bash
+        run: python3 scripts/verify_shaders.py
+
+      - name: Compile exact runtime GLSL assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          glslangValidator -l app/src/main/assets/shaders/fullscreen.vert app/src/main/assets/shaders/yuv_to_rgb.frag
+          glslangValidator -l app/src/main/assets/shaders/fullscreen.vert app/src/main/assets/shaders/hdr_display.frag
+
+      - name: Build debug APK
+        shell: bash
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Verify exactly one APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t apks < <(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print)
+          if [[ ${#apks[@]} -ne 1 ]]; then
+            printf 'Expected exactly one APK, found %s\n' "${#apks[@]}" >&2
+            printf '%s\n' "${apks[@]:-}" >&2
+            exit 1
+          fi
+          mkdir -p output
+          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1-debug.apk
+          sha256sum output/Iris-HDR-Viewfinder-Test-V1-debug.apk | tee output/SHA256SUMS.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Iris-HDR-Viewfinder-Test-V1
+          path: output/
+          if-no-files-found: error
+          retention-days: 14

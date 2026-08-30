@@ -1,0 +1,35 @@
+Iris HDR Viewfinder Test V1 - vscode.dev + GitHub Actions upload
+
+Repository:
+https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
+
+1. Extract this ZIP in the iOS Files app or on your computer.
+2. Open:
+   https://vscode.dev/github/SkyKing0007/Iris-HDR-Viewfinder-Test
+3. Upload the CONTENTS of the extracted folder into the repository root.
+   The repo root must end up containing:
+     .github/
+     app/
+     .gitignore
+     README.md
+     build.gradle.kts
+     gradle.properties
+     settings.gradle.kts
+4. In Source Control, confirm those are the only new project files.
+5. Commit with:
+   Initial standalone HDR viewfinder experiment
+6. Push/sync the commit.
+7. Open GitHub -> Actions -> "Build Iris HDR Viewfinder Test V1".
+8. The workflow must complete successfully.
+9. Download the artifact named:
+   Iris-HDR-Viewfinder-Test-V1
+10. Inside it, install exactly:
+   Iris-HDR-Viewfinder-Test-V1-debug.apk
+
+Do not upload or copy any Photon/Iris project source into this repository.
+
+If your iOS file picker does not show the hidden .github folder:
+- In vscode.dev create folders `.github` then `workflows`.
+- Create `.github/workflows/build.yml`.
+- Copy the contents of BUILD_WORKFLOW_COPY.yml into it.
+- BUILD_WORKFLOW_COPY.yml itself is only a visible backup and may be deleted afterward.
