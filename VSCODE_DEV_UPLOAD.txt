@@ -1,10 +1,10 @@
-Iris HDR Viewfinder Test V1.4.2 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.3 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 IMPORTANT:
-Use only the V1.4.2 FULL-UPLOAD ZIP. Upload ALL CONTENTS of the extracted folder into the repository root.
+Use only the V1.4.3 FULL-UPLOAD ZIP. Upload ALL CONTENTS of the extracted folder into the repository root.
 Do not upload the strict-proof ZIP, and do not upload only app/ or only changed files.
 
 Before committing, confirm these paths exist:
@@ -12,6 +12,7 @@ Before committing, confirm these paths exist:
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
@@ -23,7 +24,7 @@ Also confirm these retired CPU live-preview files remain GONE:
 - app/src/main/java/com/skyking0007/irishdrviewfinder/YuvFrame.java
 
 Commit message:
-V1.4.2 fix paired auto-HDR preview and flicker/orientation ownership
+V1.4.3 fix uninterrupted auto HDR and portrait RAW orientation
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.2.
-Do not install/call V1.4.2 build-proven until the workflow succeeds and its compiled artifact is verified.
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.3.
+Do not install/call V1.4.3 build-proven until the workflow succeeds and its compiled artifact is verified.

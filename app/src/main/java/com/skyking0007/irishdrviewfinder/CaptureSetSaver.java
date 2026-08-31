@@ -5,6 +5,7 @@ import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.DngCreator;
 import android.hardware.camera2.TotalCaptureResult;
+import android.media.ExifInterface;
 import android.media.Image;
 
 import org.json.JSONArray;
@@ -39,6 +40,7 @@ final class CaptureSetSaver {
     private final CameraCharacteristics characteristics;
     private final String cameraId;
     private final String captureId;
+    private final int dngOrientation;
     private final Listener listener;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Map<Long, String> labelByTimestamp = new HashMap<>();
@@ -59,11 +61,13 @@ final class CaptureSetSaver {
             CameraCharacteristics characteristics,
             String cameraId,
             String captureId,
+            int captureOrientationDegrees,
             Listener listener) {
         this.context = context.getApplicationContext();
         this.characteristics = characteristics;
         this.cameraId = cameraId;
         this.captureId = captureId;
+        this.dngOrientation = dngOrientationForDegrees(captureOrientationDegrees);
         this.listener = listener;
     }
 
@@ -161,6 +165,7 @@ final class CaptureSetSaver {
         TotalCaptureResult result = data.result;
         io.execute(() -> {
             try (DngCreator creator = new DngCreator(characteristics, result)) {
+                creator.setOrientation(dngOrientation);
                 String name = captureId + "_" + label + ".dng";
                 MediaStoreWriter.write(
                         context,
@@ -289,6 +294,16 @@ final class CaptureSetSaver {
         double shortProduct = Math.max(1.0, (se == null ? 1.0 : se) * (si == null ? 1.0 : si));
         double longProduct = Math.max(1.0, (le == null ? 1.0 : le) * (li == null ? 1.0 : li));
         return Math.max(1.0, Math.min(32.0, longProduct / shortProduct));
+    }
+
+    private static int dngOrientationForDegrees(int degrees) {
+        int normalized = ((degrees % 360) + 360) % 360;
+        if (normalized == 0) return ExifInterface.ORIENTATION_NORMAL;
+        if (normalized == 90) return ExifInterface.ORIENTATION_ROTATE_90;
+        if (normalized == 180) return ExifInterface.ORIENTATION_ROTATE_180;
+        if (normalized == 270) return ExifInterface.ORIENTATION_ROTATE_270;
+        throw new IllegalArgumentException(
+                "DNG orientation must be a multiple of 90 degrees: " + degrees);
     }
 
     private CaptureData dataFor(String label) {

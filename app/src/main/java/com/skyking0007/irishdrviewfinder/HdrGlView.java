@@ -78,12 +78,14 @@ final class HdrGlView extends GLSurfaceView {
         requestRender();
     }
 
-    void setRelativeRotationDegrees(int degrees) {
+    void setProducerOwnedOrientationDegrees(int degrees) {
         int normalized = ((degrees % 360) + 360) % 360;
-        // hdr_display.frag maps display UV -> source UV, so use the inverse of the
-        // physical sensor-to-display rotation. The Camera2 preview request opts out
-        // of HAL rotate-and-crop; this is the only remaining view rotation owner.
-        renderer.rotationQuarterTurns = ((360 - normalized) % 360) / 90;
+        // SurfaceTexture.getTransformMatrix() is consumed in the OES pass and the
+        // V1.4.2 device result proved that adding a second display quarter-turn leaves
+        // portrait preview sideways. Keep display sampling unrotated and retain only
+        // the axis-swap information required for correct FIT geometry.
+        renderer.rotationQuarterTurns = 0;
+        renderer.producerAxisSwap = ((normalized / 90) & 1) != 0;
         requestRender();
     }
 
@@ -119,6 +121,7 @@ final class HdrGlView extends GLSurfaceView {
 
         volatile Mode mode = Mode.HDR;
         volatile int rotationQuarterTurns = 0;
+        volatile boolean producerAxisSwap;
         volatile long droppedFrames = 0;
         volatile double inputFps = 0.0;
         volatile double hdrPairFps = 0.0;
@@ -447,9 +450,8 @@ final class HdrGlView extends GLSurfaceView {
             float scaleX = 1.0f;
             float scaleY = 1.0f;
             if (frameWidth > 0 && frameHeight > 0 && viewportWidth > 0.0f && viewportHeight > 0.0f) {
-                boolean quarterTurn = (rotationQuarterTurns & 1) != 0;
-                float rotatedWidth = quarterTurn ? frameHeight : frameWidth;
-                float rotatedHeight = quarterTurn ? frameWidth : frameHeight;
+                float rotatedWidth = producerAxisSwap ? frameHeight : frameWidth;
+                float rotatedHeight = producerAxisSwap ? frameWidth : frameHeight;
                 float imageAspect = rotatedWidth / rotatedHeight;
                 float viewportAspect = viewportWidth / viewportHeight;
                 if (viewportAspect > imageAspect) {

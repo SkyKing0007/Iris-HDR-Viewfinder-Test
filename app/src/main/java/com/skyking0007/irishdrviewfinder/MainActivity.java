@@ -388,9 +388,9 @@ public final class MainActivity extends Activity implements CameraController.Lis
             android.util.Range<Integer> aeFpsRange,
             boolean srgbTonemap) {
         int displayDegrees = rotationToDegrees(getWindowManager().getDefaultDisplay().getRotation());
-        int previewRotation = (sensorOrientation - displayDegrees + 360) % 360;
+        int previewRelation = (sensorOrientation - displayDegrees + 360) % 360;
         int jpegOrientation = (sensorOrientation - displayDegrees + 360) % 360;
-        glView.setRelativeRotationDegrees(previewRotation);
+        glView.setProducerOwnedOrientationDegrees(previewRelation);
         controller.setJpegOrientationDegrees(jpegOrientation);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
         controller.setAutoHdrExposure(autoHdrEnabled);
@@ -403,8 +403,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
                         + " | preview " + previewSize
                         + " | RAW " + rawSize
                         + " | JPEG " + jpegSize
-                        + " | preview rotation=" + previewRotation + "°"
-                        + " | JPEG orientation=" + jpegOrientation + "°"
+                        + " | preview orientation=SurfaceTexture relation=" + previewRelation + "°"
+                        + " | JPEG/DNG orientation=" + jpegOrientation + "°"
                         + " | target=" + targetPreviewFps + " fps"
                         + " | AE fps=" + (aeFpsRange == null ? "auto" : aeFpsRange)
                         + " | sRGB tonemap=" + (srgbTonemap ? "preset" : "HAL default")

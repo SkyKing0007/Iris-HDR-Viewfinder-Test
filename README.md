@@ -1,46 +1,50 @@
-# Iris HDR Viewfinder Test V1.4.2
+# Iris HDR Viewfinder Test V1.4.3
 
 Standalone Camera2 experiment for a responsive alternating-exposure HDR viewfinder plus matched RAW/JPEG capture, without modifying Photon/Iris.
 
-## V1.4.2 live architecture
+## V1.4.3 live architecture
 
 `Camera2 PRIVATE Surface -> SurfaceTexture/external OES -> timestamp-matched staging -> atomic SHORT/LONG GPU pair -> HDR shader -> display`
 
-The steady-state live session contains only the PRIVATE preview Surface. `CAPTURE HDR SET` temporarily configures PRIVATE + JPEG + RAW, acquires the matched SHORT/LONG inputs, then restores preview while DNG/JPEG writing and fused-JPEG generation continue.
+The steady-state live session still contains only the PRIVATE preview Surface. `CAPTURE HDR SET` temporarily configures PRIVATE + JPEG + RAW, acquires matched SHORT/LONG inputs, then restores preview while DNG/JPEG writing and fused-JPEG generation continue.
 
-## Orientation and field of view
+## AUTO HDR cadence correction
 
-- Android `fullUser` orientation follows portrait/landscape auto-rotate and respects the device orientation lock.
-- On API 31+, preview requests explicitly select `SCALER_ROTATE_AND_CROP_NONE` when supported, preventing Camera2 compatibility rotate/crop from becoming a second orientation/FOV owner.
-- The standard back-camera relation `(sensorOrientation - displayRotation)` is applied once by the display path; because the shader maps display UV back to source UV, HdrGlView uses the inverse sampling quarter-turn.
-- RAW/native sensor aspect drives PRIVATE preview and JPEG selection. Preview remains FIT/letterbox/pillarbox, never center-crop-to-fill.
-- The proven V1.4.1 still-JPEG orientation and EXIF-normalized fused-JPEG path are retained.
+V1.4.2 inserted a separate AE `capture()` about every 500 ms. On the tested LEVEL_3 camera that broke the otherwise healthy repeating schedule: AUTO fell to roughly 9-11 CaptureResults/s, while the exact same build delivered about 30 fps in NORMAL AE and HDR MANUAL and about 14.8 complete HDR pairs/s in MANUAL.
 
-## AUTO HDR and MANUAL HDR
+V1.4.3 removes the third hidden request completely. AUTO remains one two-request repeating burst:
 
-- `NORMAL AE` remains ordinary Camera2 automatic exposure.
-- `HDR AUTO: ON` is the default for HDR/SPLIT. A low-duty hidden AE probe runs about twice per second with AE + AUTO antibanding, reads actual shutter/ISO and `STATISTICS_SCENE_FLICKER`, and updates the manual SHORT/LONG repeating pair only when the metered exposure changes materially. Meter frames are timestamp-matched and discarded from display.
-- `HDR MANUAL` preserves direct user ownership of Short shutter, Long shutter, and shared ISO through the existing sliders.
-- Capture uses the currently active AUTO or MANUAL exposure pair; the proven CaptureSetSaver/JpegFusion/MediaStoreWriter implementation is unchanged.
+`SHORT manual bracket -> LONG Camera2 AE meter -> SHORT -> LONG -> ...`
+
+The LONG member uses `AE_MODE_ON`, `AE_ANTIBANDING_MODE_AUTO`, and the selected target FPS range. Its real CaptureResult shutter/ISO/flicker evidence becomes the exposure authority. SHORT is updated from that evidence only when the bracket changes materially, with a 500 ms minimum rebuild interval. The selected FPS-range key is also carried on the manual SHORT request (where AE is OFF and therefore does not use it), so the repeating pair does not alternate a Camera2 session-sensitive FPS parameter frame by frame. AUTO UI reporting is limited to about 2 Hz instead of posting work on every LONG frame. MANUAL retains the proven all-manual exposure schedule.
+
+At a real 30 sensor fps, the architectural ceiling is therefore about 15 complete SHORT/LONG pairs/s, matching the V1.4.2 MANUAL device proof.
 
 ## Flicker policy
 
-- Detected 50 Hz lighting uses a 10 ms full-wave integration target when sensor gain limits permit.
-- Detected 60 Hz lighting uses an 8.333 ms integration target when permitted.
-- Under artificial or unknown/PWM lighting, SHORT and LONG use the same temporal integration window and create most of the bracket with sensor gain. This avoids the V1.4.1 failure where a 1/480 s SHORT frame sampled a different LED/PWM phase than the LONG frame.
-- Stable bright/no-flicker scenes may use shutter separation for additional highlight headroom.
-- The target remains 8x / 3 EV, but AUTO HDR reports the actual EV separation after sensor shutter/ISO clamping instead of forcing an unsafe bracket.
+For 50 Hz, 60 Hz, or unknown/PWM lighting, Camera2 AUTO antibanding owns the real LONG shutter and SHORT uses the same integration window while reducing sensor gain. That prevents the short member from sampling a different LED/PWM phase. Stable bright/no-flicker scenes may spend the bracket in shutter time for additional highlight headroom. The target remains 8x / 3 EV, but actual EV is reported after sensor limits.
 
-## Atomic HDR presentation and cadence
+## Live orientation correction
 
-SHORT and LONG images first land in staging textures. HDR/SPLIT only publishes a new displayed pair after a temporally adjacent SHORT then LONG have both arrived. A half-updated `new SHORT + old LONG` image is never presented.
+V1.4.2 still showed a sideways portrait preview in NORMAL and HDR. The direct OES pass already consumes `SurfaceTexture.getTransformMatrix()`. V1.4.3 therefore disables the rejected second display quarter-turn instead of applying another 90-degree mapping. The sensor/display relation is retained only as an axis-swap signal for FIT geometry, so portrait stays aspect-correct without a second image rotation.
 
-Diagnostics distinguish requested target FPS, actual `CaptureResult` FPS/frame duration, GPU camera-input FPS, complete HDR-pair FPS, and dropped GPU frames. A device is not considered to be delivering 60 fps merely because its capability table advertises 60; after two sustained measurement windows below 45 CaptureResults/s, the live controller falls back to a 30-fps target.
+Camera2 processed preview continues to select `SCALER_ROTATE_AND_CROP_NONE` where supported, preventing compatibility rotate/crop from becoming an additional FOV owner. RAW/native sensor aspect still drives PRIVATE preview and JPEG selection, and presentation remains FIT rather than center-crop-to-fill.
 
-## Color/HDR preview
+## DNG orientation correction
 
-The V1.4.1 sRGB/HDR shader bytes are protected unchanged: Camera2 requests `TONEMAP_MODE_PRESET_CURVE` + `TONEMAP_PRESET_CURVE_SRGB` where supported, and live/saved fusion retain exact piecewise sRGB transfer functions, exposure normalization, highlight-aware SHORT admission and bounded highlight rolloff.
+RAW Bayer bytes remain sensor-native. V1.4.2 DNGs were correctly 4096x3072 but had TIFF Orientation=9 because `DngCreator.setOrientation()` was never called. V1.4.3 explicitly maps capture orientation to valid TIFF/EXIF values and sets it before writing:
+
+- 0 degrees -> 1 (normal)
+- 90 degrees -> 6 (rotate 90)
+- 180 degrees -> 3 (rotate 180)
+- 270 degrees -> 8 (rotate 270)
+
+The good JPEG orientation/fusion path remains separate and protected.
+
+## Atomic HDR presentation and color
+
+SHORT and LONG still land in staging textures and publish only as a complete temporally adjacent pair. No `new SHORT + old LONG` half-pair is displayed. All four GLSL files and `JpegFusion.java` remain byte-identical to successful V1.4.2, preserving the existing sRGB transfer functions, exposure normalization, highlight-aware SHORT admission and bounded rolloff.
 
 ## Capture outputs
 
-Each `CAPTURE HDR SET` produces SHORT DNG, LONG DNG, SHORT JPEG, LONG JPEG, FUSED_HDR JPEG, and metadata JSON in `Downloads/IrisHDRViewfinder`. DNGs remain diagnostic sensor references only.
+Each `CAPTURE HDR SET` produces SHORT DNG, LONG DNG, SHORT JPEG, LONG JPEG, FUSED_HDR JPEG, and metadata JSON in `Downloads/IrisHDRViewfinder`.
