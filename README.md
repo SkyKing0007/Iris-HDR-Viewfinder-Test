@@ -1,27 +1,46 @@
-# Iris HDR Viewfinder Test V1.4.7
+# Iris HDR Viewfinder Test V1.4.8
 
-V1.4.7 is a localized HDR highlight-reconstruction/display correction built directly on the successful V1.4.6 compiled candidate. Capture scheduling, FOV/cadence policy, SHORT/LONG request ownership, AUTO metering, RAW/JPEG still capture, orientation and GPU/session lifecycle are unchanged.
+V1.4.8 is built directly on the build-proven V1.4.7 candidate. V1.4.7 remains the golden image-quality baseline: its SHORT/LONG fusion, recovered highlight structure, LONG-owned clean shadows, noise behavior, color path, FOV/cadence policy and still-capture topology are preserved.
 
-## Adaptive HDR highlight recovery
+## Adaptive brightness parity
 
-V1.4.6 proved that the SHORT processed frame already contains recoverable bright-window detail, while the prior fixed HDR shoulder collapsed much of that recovered range back into near-white output codes. V1.4.7 corrects only the live/saved merge and display mapping.
+The V1.4.7 HDR reconstruction completes first. V1.4.8 then applies one monotonic, hue-preserving pointwise appearance lift to the reconstructed linear RGB result before the existing sRGB output transform.
 
-- LONG is the clean shadow and ordinary-midtone owner. SHORT contributes zero until LONG approaches saturation.
-- SHORT is normalized in linear light using the actual exposure relationship already tracked by the pipeline.
-- Wider SHORT/LONG brackets move SHORT admission closer to LONG clipping, so dark/noisy SHORT data is not imported unnecessarily.
-- Near clipping, the handoff uses the full normalized SHORT RGB vector rather than switching R/G/B independently.
-- Highlight compression is hue-preserving and exposure-ratio aware. It reserves visible 8-bit output space for scene values above LONG white instead of forcing recovered HDR values back to 252-255.
-- Live HDR FUSED and saved FUSED JPEG use equivalent constants and equations.
+- Darker lower/mid tones receive the strongest lift, targeting the stock-camera-like brightness gap seen in the darker office sample.
+- Already-brighter lower midtones receive a smaller lift, preventing a generally well-exposed scene from being pushed too far.
+- Deep shadows move only slightly so the V1.4.7 clean/noise-controlled shadow appearance is retained.
+- Recovered highlights rapidly converge back to the V1.4.7 output, so bright-window and ceiling-light highlight structure is not traded for overall brightness.
+- Live HDR FUSED and saved FUSED JPEG use equivalent appearance math.
 
-The result is designed to retain V1.4.6's clean LONG-owned shadows while recovering significantly more bright-window structure autonomously.
+The mapping is scene-value driven rather than tuned to a specific phone model and adds no extra GPU pass, texture, framebuffer, neighborhood sampling or full-frame CPU float buffer.
 
-## Cross-device performance contract
+## Source-supported fused color
 
-The HDR policy is based on exposure ratio and pixel values, not Xiaomi/device IDs or SoC/GPU classes. The live path remains one GLES 3.0 pass over the existing three textures with no new texture allocations, neighborhood samples, compute stages or extra frame buffers. Saved JPEG fusion retains the existing 32-row strip processing and does not add full-frame float buffers. This keeps the correction applicable from lower-end supported Camera2/GLES3 devices through flagship hardware.
+The FUSED luminance/HDR result remains authoritative, but its final encoded chroma is now constrained by the actual SHORT/LONG source colors. This is a universal signal-domain rule, not a semantic skin/white detector.
 
-## Preserved V1.4.6 camera pipeline
+- SHORT is the exposure-safe color reference when it has usable signal; LONG remains the fallback where SHORT approaches its noise floor.
+- Strong source-supported saturation passes unchanged.
+- Only low-amplitude SHORT chroma is attenuated as display gain rises, preventing dark-frame chroma noise from becoming orange/pink/green specks after HDR brightening.
+- FUSED encoded chroma may never exceed the stronger chroma present in SHORT or LONG, and gamut fitting scales chroma around fixed luma rather than clipping RGB channels independently.
+- No extra texture samples, GPU passes, neighborhood filter, device IDs, semantic classifier, or universal sensor color matrix are added.
 
-The explicit Camera2 sRGB contrast curve remains unchanged. `NOISE_REDUCTION_MODE_OFF` and `EDGE_MODE_OFF` remain requested where supported. FOV SAFE remains fixed 30 fps, optional cropped 60 remains explicit, AUTO HDR meter frames remain isolated from displayed cadence/FOV evidence, and the full RAW/JPEG still session remains independent from live-preview cadence.
+## Adaptive AUTO SHORT highlight headroom
+
+A second real-device condition showed a compact bright ceiling lamp already clipped in the SHORT input on a wide-aperture camera. V1.4.8 therefore changes only AUTO SHORT headroom policy while keeping LONG as the clean absolute exposure anchor.
+
+- The base AUTO target remains 3 EV.
+- Measured `LENS_APERTURE` is used when available; `LENS_INFO_AVAILABLE_APERTURES` is the fallback.
+- Wider-than-f/2 optics gain physically-derived SHORT headroom from the `1/N²` light-gathering relationship, capped at 4.25 EV.
+- f/2 and slower optics retain the proven 3-EV baseline.
+- Under known 50/60-Hz lighting, only a material wide-aperture headroom need may shorten SHORT to a closer power-of-two submultiple of the flicker period. Ordinary apertures keep the existing same-integration behavior.
+- Unknown/PWM lighting retains the conservative V1.4.7 same-integration policy rather than guessing at a banding-prone cadence.
+- All shutter/ISO values remain clamped to the selected camera's actual Camera2 ranges.
+
+No device IDs, vendor models, focal-length tables or SoC/GPU classes participate in this policy.
+
+## Preserved V1.4.7 camera/HDR pipeline
+
+The V1.4.7 full-RGB near-clipping SHORT handoff, exposure-ratio normalization, bracket-aware hue-preserving HDR compression, explicit Camera2 sRGB curve, `NOISE_REDUCTION_MODE_OFF`, `EDGE_MODE_OFF`, FOV SAFE fixed-30 mode, optional explicit cropped 60 mode, isolated AUTO meter phase, full RAW/JPEG still session, orientation contract and runtime logger remain unchanged except for the bounded AUTO SHORT derivation described above.
 
 Runtime logs are written to:
 

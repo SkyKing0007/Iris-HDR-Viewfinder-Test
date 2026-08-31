@@ -39,6 +39,7 @@ final class JpegFusion {
         int[] shortPixels = new int[width * rowsPerStrip];
         int[] longPixels = new int[width * rowsPerStrip];
         int[] outPixels = new int[width * rowsPerStrip];
+        float[] colorSafe = new float[3];
 
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
         float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 1.0f, 6.0f);
@@ -103,9 +104,21 @@ final class JpegFusion {
 
                 // One scale for all channels preserves recovered highlight hue.
                 float toneScale = scenePeak > 0.000001f ? mappedPeak / scenePeak : 1.0f;
-                int ro = encode(mr * toneScale);
-                int go = encode(mg * toneScale);
-                int bo = encode(mb * toneScale);
+                float tr = mr * toneScale;
+                float tg = mg * toneScale;
+                float tb = mb * toneScale;
+                float appearanceScale = appearanceLiftScale(tr, tg, tb);
+                float fusedR = encode(tr * appearanceScale) / 255.0f;
+                float fusedG = encode(tg * appearanceScale) / 255.0f;
+                float fusedB = encode(tb * appearanceScale) / 255.0f;
+                colorSafeFromSources(
+                        fusedR, fusedG, fusedB,
+                        sr8 / 255.0f, sg8 / 255.0f, sb8 / 255.0f,
+                        lr8 / 255.0f, lg8 / 255.0f, lb8 / 255.0f,
+                        colorSafe);
+                int ro = encodeSrgb(colorSafe[0]);
+                int go = encodeSrgb(colorSafe[1]);
+                int bo = encodeSrgb(colorSafe[2]);
                 outPixels[i] = 0xFF000000 | (ro << 16) | (go << 8) | bo;
             }
             output.setPixels(outPixels, 0, width, 0, y, width, rows);
@@ -160,6 +173,125 @@ final class JpegFusion {
                 true);
         if (upright != decoded) decoded.recycle();
         return upright;
+    }
+
+    private static float appearanceLiftScale(float r, float g, float b) {
+        // Mathematically matches the live shader. Fusion/highlight recovery is
+        // already finished; this only lifts lower/mid-tone appearance while deep
+        // shadows and recovered highlights converge toward the V1.4.7 result.
+        float linearY = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+        if (linearY <= 0.000001f) return 1.0f;
+        float perceptualY = linearToSrgbFloat(clamp(linearY, 0.0f, 1.0f));
+        float centered = (perceptualY - 0.20f) / 0.11f;
+        float targetY = perceptualY
+                + 0.70f * perceptualY * (1.0f - perceptualY)
+                        * (float) Math.exp(-(centered * centered));
+        targetY = clamp(targetY, 0.0f, 1.0f);
+        float targetLinearY = srgbToLinearFloat(targetY);
+        float scale = targetLinearY / linearY;
+        float peak = Math.max(r, Math.max(g, b));
+        if (peak > 0.000001f) scale = Math.min(scale, 0.98f / peak);
+        return scale;
+    }
+
+    private static float encodedLuma(float r, float g, float b) {
+        return 0.2126f * r + 0.7152f * g + 0.0722f * b;
+    }
+
+    private static void colorSafeFromSources(
+            float fusedR, float fusedG, float fusedB,
+            float shortR, float shortG, float shortB,
+            float longR, float longG, float longB,
+            float[] out) {
+        // Mathematically matches the live shader. HDR luminance is already final;
+        // only chroma is reconstructed from source-supported colors. No semantic
+        // skin/white/device classification is used.
+        float targetY = encodedLuma(fusedR, fusedG, fusedB);
+        float shortY = encodedLuma(shortR, shortG, shortB);
+        float longY = encodedLuma(longR, longG, longB);
+
+        float fusedCr = fusedR - targetY;
+        float fusedCg = fusedG - targetY;
+        float fusedCb = fusedB - targetY;
+        float shortCr = shortR - shortY;
+        float shortCg = shortG - shortY;
+        float shortCb = shortB - shortY;
+        float longCr = longR - longY;
+        float longCg = longG - longY;
+        float longCb = longB - longY;
+
+        float shortPeak = Math.max(shortR, Math.max(shortG, shortB));
+        float shortSignal = smoothstep(0.03f, 0.12f, shortPeak);
+        float shortMag = length3(shortCr, shortCg, shortCb);
+        float longMag = length3(longCr, longCg, longCb);
+        float strongColor = smoothstep(0.025f, 0.085f, shortMag);
+        float displayGain = Math.max(targetY, 0.0001f) / Math.max(shortY, 0.0001f);
+        float chromaExponent = 0.35f * (1.0f - strongColor);
+        float shortChromaScale = (float) Math.pow(
+                Math.max(displayGain, 1.0f),
+                -chromaExponent);
+
+        float supportedShortCr = shortCr * shortChromaScale;
+        float supportedShortCg = shortCg * shortChromaScale;
+        float supportedShortCb = shortCb * shortChromaScale;
+        float supportedCr = longCr + (supportedShortCr - longCr) * shortSignal;
+        float supportedCg = longCg + (supportedShortCg - longCg) * shortSignal;
+        float supportedCb = longCb + (supportedShortCb - longCb) * shortSignal;
+
+        float colorApply = smoothstep(0.18f, 0.48f, targetY);
+        float outCr = fusedCr + (supportedCr - fusedCr) * colorApply;
+        float outCg = fusedCg + (supportedCg - fusedCg) * colorApply;
+        float outCb = fusedCb + (supportedCb - fusedCb) * colorApply;
+
+        float outputMag = length3(outCr, outCg, outCb);
+        float sourceMaxMag = Math.max(shortMag, longMag);
+        if (outputMag > sourceMaxMag && outputMag > 0.000001f) {
+            float sourceScale = sourceMaxMag / outputMag;
+            outCr *= sourceScale;
+            outCg *= sourceScale;
+            outCb *= sourceScale;
+        }
+
+        float gamutScale = 1.0f;
+        gamutScale = gamutScaleForChannel(gamutScale, targetY, outCr);
+        gamutScale = gamutScaleForChannel(gamutScale, targetY, outCg);
+        gamutScale = gamutScaleForChannel(gamutScale, targetY, outCb);
+        gamutScale = clamp(gamutScale, 0.0f, 1.0f);
+
+        out[0] = clamp(targetY + outCr * gamutScale, 0.0f, 1.0f);
+        out[1] = clamp(targetY + outCg * gamutScale, 0.0f, 1.0f);
+        out[2] = clamp(targetY + outCb * gamutScale, 0.0f, 1.0f);
+    }
+
+    private static float gamutScaleForChannel(float current, float targetY, float chroma) {
+        if (chroma > 0.000001f) {
+            return Math.min(current, (1.0f - targetY) / chroma);
+        }
+        if (chroma < -0.000001f) {
+            return Math.min(current, targetY / (-chroma));
+        }
+        return current;
+    }
+
+    private static float length3(float r, float g, float b) {
+        return (float) Math.sqrt(r * r + g * g + b * b);
+    }
+
+    private static int encodeSrgb(float encoded) {
+        return Math.round(255.0f * clamp(encoded, 0.0f, 1.0f));
+    }
+
+    private static float srgbToLinearFloat(float encoded) {
+        return encoded <= 0.04045f
+                ? encoded / 12.92f
+                : (float) Math.pow((encoded + 0.055f) / 1.055f, 2.4);
+    }
+
+    private static float linearToSrgbFloat(float linear) {
+        float value = Math.max(0.0f, linear);
+        return value <= 0.0031308f
+                ? 12.92f * value
+                : 1.055f * (float) Math.pow(value, 1.0 / 2.4) - 0.055f;
     }
 
     private static int encode(float linear) {

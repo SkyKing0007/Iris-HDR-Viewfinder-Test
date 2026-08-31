@@ -12,11 +12,12 @@ saver = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetS
 frame_meta = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java").read_text()
 hdr_shader = (ROOT / "app/src/main/assets/shaders/hdr_display.frag").read_text()
 oes_shader = (ROOT / "app/src/main/assets/shaders/oes_to_rgb.frag").read_text()
+workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.7 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.8 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -160,9 +161,14 @@ require('TONEMAP_AVAILABLE_TONE_MAP_MODES' in camera and 'TONEMAP_MAX_CURVE_POIN
 require('TONEMAP_MODE_PRESET_CURVE' not in camera and 'TONEMAP_PRESET_CURVE_SRGB' not in camera,
         "retired PRESET_CURVE sRGB path returned")
 
-# 012 / 029 - Bracket target remains 8x while absolute AUTO brightness comes from clean AE authority.
-require('HDR_BRACKET_RATIO = 8.0' in camera,
-        "3 EV / 8x target bracket constant missing")
+# 012 / 029 / 037 - Absolute AUTO brightness remains clean-AE owned. V1.4.8
+# preserves the 3-EV baseline and adds capability/aperture-derived SHORT headroom only.
+require('AUTO_BASE_BRACKET_EV = 3.0' in camera and 'AUTO_MAX_BRACKET_EV = 4.25' in camera,
+        "AUTO adaptive bracket bounds missing")
+require('AUTO_APERTURE_REFERENCE_F = 2.0' in camera and 'autoTargetBracketEvLocked' in camera,
+        "aperture-derived AUTO SHORT headroom owner missing")
+require('CaptureResult.LENS_APERTURE' in camera and 'LENS_INFO_AVAILABLE_APERTURES' in camera,
+        "AUTO headroom must use measured/advertised aperture rather than device IDs")
 require('shortExposureNs = ONE_SECOND_NS / 480' in camera,
         "manual default short exposure must remain 1/480s")
 require('longExposureNs = ONE_SECOND_NS / 60' in camera,
@@ -171,8 +177,8 @@ require('AUTO_METER_MIN_FRAMES' in camera and 'buildMeterPreviewRequest' in came
         "clean AE anchor phase missing")
 require('commitAutoAnchorFromResultLocked' in camera and 'deriveAutoPairFromAnchorLocked' in camera,
         "clean AE result must own absolute AUTO exposure")
-require('targetShortProduct' in camera and '/ HDR_BRACKET_RATIO' in camera,
-        "AUTO no-flicker SHORT target must derive from anchored LONG exposure product")
+require('targetShortProduct' in camera and 'Math.pow(2.0, autoTargetBracketEvLocked())' in camera,
+        "AUTO SHORT target must derive from anchored LONG product and adaptive EV")
 require('autoShortIso = minIso;' in camera,
         "AUTO SHORT must use the camera minimum sensor gain")
 require('double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);' in camera,
@@ -205,6 +211,16 @@ require('float mr = lr + (sr - lr) * highlightWeight;' in fusion
         "saved fusion must use a full-RGB handoff")
 require('toneScale = scenePeak > 0.000001f ? mappedPeak / scenePeak : 1.0f;' in fusion,
         "saved HDR compression must use one hue-preserving RGB scale")
+require('adaptiveAppearanceLift' in hdr_shader and 'appearanceLiftScale' in fusion,
+        "live/save post-fusion appearance lift missing")
+require('0.70 * perceptualY * (1.0 - perceptualY)' in hdr_shader
+        and '0.70f * perceptualY * (1.0f - perceptualY)' in fusion,
+        "live/save appearance curve constants must match")
+require('(perceptualY - 0.20) / 0.11' in hdr_shader
+        and '(perceptualY - 0.20f) / 0.11f' in fusion,
+        "appearance lift must target lower/mid tones consistently")
+require('displayLinear = adaptiveAppearanceLift(displayLinear);' in hdr_shader,
+        "brightness lift must occur after completed V1.4.7 HDR reconstruction")
 require('0.82 - 0.04 * (bracketStops - 1.0)' in hdr_shader
         and '0.82f - 0.04f * (bracketStops - 1.0f)' in fusion,
         "live/save display headroom must adapt to bracket width")
@@ -300,12 +316,16 @@ require('CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO' in camera,
         "clean AE meter must request HAL automatic antibanding")
 require('STATISTICS_SCENE_FLICKER_50HZ' in camera and 'STATISTICS_SCENE_FLICKER_60HZ' in camera,
         "50/60-Hz evidence labels must remain explicit")
+require('chooseAutoFlickerAlignedShortLocked' in camera,
+        "known-flicker wide-aperture highlight-headroom solver missing")
+require('autoTargetBracketEvLocked() > AUTO_BASE_BRACKET_EV + 0.20' in camera,
+        "known-flicker shutter separation must require a material wide-aperture headroom need")
 require('autoShortExposureNs = autoLongExposureNs;' in camera,
-        "artificial/unknown AUTO HDR must match SHORT shutter to anchored LONG shutter")
-require('unknown/PWM-safe' in camera,
-        "unknown/PWM conservative fallback label missing")
+        "ordinary-aperture and unknown/PWM conservative same-integration fallback missing")
+require('Unknown/PWM lighting keeps the proven V1.4.7 same-integration safety' in camera,
+        "unknown/PWM conservative fallback contract missing")
 require('sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE' in camera,
-        "shutter-separated AUTO bracket must require no-flicker evidence")
+        "no-flicker direct desired-SHORT branch missing")
 
 # 023 - On-device DNG Orientation=9 regression: DNG must always receive explicit valid TIFF orientation.
 require('import android.media.ExifInterface;' in saver,
@@ -494,6 +514,174 @@ _, _, clip64, anchor64, ceiling64 = v147_policy(64.0)
 require(clip64 > clip8 and anchor64 <= anchor8 and ceiling64 <= ceiling8,
         "wider brackets must adapt by protecting SHORT noise and reserving more display headroom")
 
+# 038 - V1.4.8 pre-handoff authority pin regression.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.7' in workflow
+        and 'run-id: 33424140112' in workflow,
+        "workflow must download the exact successful V1.4.7 Actions authority")
+require('run-id: 33415267140' not in workflow,
+        "stale V1.4.6 Actions run-id must never be reused for V1.4.7 authority")
+
+# 037 - V1.4.8 two-device adaptive exposure/appearance regression.
+def target_bracket_ev(aperture):
+    bonus = 0.0 if not aperture or aperture <= 0 else max(0.0, 2.0 * math.log(2.0 / aperture, 2.0))
+    return max(3.0, min(4.25, 3.0 + bonus))
+
+def choose_known_flicker_short(long_ns, long_iso, min_iso, aperture, hz):
+    target_ev = target_bracket_ev(aperture)
+    desired = min(long_ns, round((long_ns * long_iso) / (2.0 ** target_ev) / min_iso))
+    if target_ev <= 3.20:
+        return long_ns
+    candidate = min(long_ns, 1_000_000_000.0 / (100.0 if hz == 50 else 120.0))
+    for _ in range(8):
+        if candidate <= desired:
+            break
+        nxt = candidate / 2.0
+        if abs(math.log(nxt / max(1.0, desired))) >= abs(math.log(candidate / max(1.0, desired))):
+            break
+        candidate = nxt
+    return candidate
+
+require(math.isclose(target_bracket_ev(2.0), 3.0, abs_tol=1e-6),
+        "f/2 must retain the proven 3-EV AUTO baseline")
+require(4.0 < target_bracket_ev(1.4) < 4.1,
+        "f/1.4 must gain about one EV of physically-derived SHORT headroom")
+long_60 = 1_000_000_000.0 / 120.0
+moto_short = choose_known_flicker_short(long_60, 227.0, 50.0, 1.4, 60)
+require(1_900_000.0 < moto_short < 2_200_000.0,
+        "f/1.4 60-Hz sample must resolve near 1/480 SHORT")
+moto_ev = math.log((long_60 * 227.0) / (moto_short * 50.0), 2.0)
+require(moto_ev > 4.0,
+        "f/1.4 sample must gain enough SHORT headroom to address clipped lamp core")
+require(math.isclose(choose_known_flicker_short(long_60, 227.0, 50.0, 2.0, 60), long_60, rel_tol=1e-9),
+        "ordinary f/2 known-flicker scene must preserve V1.4.7 same-integration behavior")
+
+def srgb_to_linear_math(v):
+    return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+
+def appearance_map_encoded(v):
+    centered = (v - 0.20) / 0.11
+    return max(0.0, min(1.0, v + 0.70 * v * (1.0 - v) * math.exp(-(centered * centered))))
+
+samples = [i / 2000.0 for i in range(2001)]
+mapped = [appearance_map_encoded(v) for v in samples]
+require(all(mapped[i + 1] >= mapped[i] - 1e-12 for i in range(len(mapped) - 1)),
+        "appearance lift must remain monotonic and never reverse local contrast")
+def gain_ev(v):
+    out = appearance_map_encoded(v)
+    return math.log(srgb_to_linear_math(out) / srgb_to_linear_math(v), 2.0)
+require(1.0 < gain_ev(0.22) < 1.4,
+        "darker Xiaomi-like lower midtones must receive the intended stock-parity lift")
+require(0.25 < gain_ev(0.31) < 0.70,
+        "brighter Motorola-like lower midtones must receive a smaller balanced lift")
+require(gain_ev(0.05) < 0.20,
+        "deep shadows must remain effectively protected from noise-revealing lift")
+require(abs(appearance_map_encoded(0.60) - 0.60) < 1e-5,
+        "recovered highlights must converge back to the V1.4.7 appearance")
+
+# 039 - Exact V1.4.7 processed-JPEG color-normalization failure class.
+# Exposure normalization is allowed to change luminance, but it may not invent
+# unsupported hue/chroma anywhere in the frame. This is content-agnostic: the
+# regression uses source RGB evidence only, not skin/white/object semantics.
+require('colorSafeFromSources(displayRgb, shortRgb, longRgb)' in hdr_shader,
+        "live HDR must apply source-supported color reconstruction after luminance fusion")
+require('colorSafeFromSources(' in fusion and 'float[] colorSafe = new float[3];' in fusion,
+        "saved fusion must use equivalent source-supported color reconstruction with reusable scratch")
+require('return new float[]' not in fusion,
+        "saved color reconstruction must not allocate a float array per output pixel")
+require(hdr_shader.count('texture(shortTex') == 3 and hdr_shader.count('texture(longTex') == 3,
+        "color safety must not add neighborhood texture sampling or extra GPU bandwidth")
+require('sourceMaxMag = max(shortChromaMag, longChromaMag)' in hdr_shader
+        and 'sourceMaxMag = Math.max(shortMag, longMag)' in fusion,
+        "FUSED encoded chroma must be capped by actual source-supported chroma")
+require('strongColor = smoothstep(0.025' in hdr_shader
+        and 'strongColor = smoothstep(0.025f' in fusion,
+        "strong source-supported colors must bypass low-amplitude chroma attenuation")
+
+def encoded_luma(rgb):
+    r, g, b = rgb
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+def chroma_vec(rgb):
+    y = encoded_luma(rgb)
+    return (rgb[0] - y, rgb[1] - y, rgb[2] - y)
+
+def vec_len(v):
+    return math.sqrt(sum(x * x for x in v))
+
+def color_safe_math(fused8, short8, long8):
+    fused = tuple(v / 255.0 for v in fused8)
+    short = tuple(v / 255.0 for v in short8)
+    long = tuple(v / 255.0 for v in long8)
+    target_y = encoded_luma(fused)
+    short_y = encoded_luma(short)
+    fused_c = chroma_vec(fused)
+    short_c = chroma_vec(short)
+    long_c = chroma_vec(long)
+    short_peak = max(short)
+    short_signal = smoothstep_math(0.03, 0.12, short_peak)
+    short_mag = vec_len(short_c)
+    long_mag = vec_len(long_c)
+    strong_color = smoothstep_math(0.025, 0.085, short_mag)
+    display_gain = max(target_y, 0.0001) / max(short_y, 0.0001)
+    chroma_exponent = 0.35 * (1.0 - strong_color)
+    short_scale = max(display_gain, 1.0) ** (-chroma_exponent)
+    supported_short = tuple(v * short_scale for v in short_c)
+    supported = tuple(long_c[i] + (supported_short[i] - long_c[i]) * short_signal for i in range(3))
+    color_apply = smoothstep_math(0.18, 0.48, target_y)
+    out_c = [fused_c[i] + (supported[i] - fused_c[i]) * color_apply for i in range(3)]
+    out_mag = vec_len(out_c)
+    source_max = max(short_mag, long_mag)
+    if out_mag > source_max and out_mag > 1e-6:
+        source_scale = source_max / out_mag
+        out_c = [v * source_scale for v in out_c]
+    gamut = 1.0
+    for c in out_c:
+        if c > 1e-6:
+            gamut = min(gamut, (1.0 - target_y) / c)
+        elif c < -1e-6:
+            gamut = min(gamut, target_y / (-c))
+    gamut = max(0.0, min(1.0, gamut))
+    out = tuple(max(0.0, min(1.0, target_y + c * gamut)) for c in out_c)
+    return out, short_scale, strong_color
+
+# Exact representative failure pixels from the supplied V1.4.7 set. The old FUSED
+# values have substantially more encoded chroma than either source. The repaired
+# color must keep the exact fused luma while bringing chroma back inside source support.
+color_failures = [
+    ((210, 159, 132), (70, 55, 50), (244, 255, 250)),
+    ((216, 128, 108), (57, 30, 23), (255, 249, 223)),
+    ((220, 160, 159), (74, 56, 56), (255, 244, 238)),
+]
+for fused8, short8, long8 in color_failures:
+    fused = tuple(v / 255.0 for v in fused8)
+    short = tuple(v / 255.0 for v in short8)
+    long = tuple(v / 255.0 for v in long8)
+    before_mag = vec_len(chroma_vec(fused))
+    source_max = max(vec_len(chroma_vec(short)), vec_len(chroma_vec(long)))
+    require(before_mag > source_max + 0.04,
+            "representative V1.4.7 failure must retain the original unsupported-chroma condition")
+    repaired, _, _ = color_safe_math(fused8, short8, long8)
+    require(abs(encoded_luma(repaired) - encoded_luma(fused)) < 1e-6,
+            "color repair must preserve the already-approved FUSED luminance exactly")
+    require(vec_len(chroma_vec(repaired)) <= source_max + 1e-6,
+            "color repair must never exceed source-supported chroma")
+
+# Saturation protection: clearly source-supported chroma is not attenuated merely
+# because the FUSED result is brighter. This guards against cross-device desaturation.
+strong_short = (100 / 255.0, 20 / 255.0, 60 / 255.0)
+strong_mag = vec_len(chroma_vec(strong_short))
+require(strong_mag > 0.085, "strong-color fixture must exceed the chroma-noise gate")
+_, strong_scale, strong_gate = color_safe_math((210, 80, 120), (100, 20, 60), (240, 90, 130))
+require(strong_gate > 0.999 and abs(strong_scale - 1.0) < 1e-6,
+        "strong source-supported saturation must remain unattenuated")
+
+# Deep-shadow protection: when FUSED already equals LONG, source-color safety is an
+# identity operation and cannot expose extra SHORT chroma noise.
+shadow = (24, 22, 21)
+shadow_out, _, _ = color_safe_math(shadow, (5, 5, 5), shadow)
+require(max(abs(shadow_out[i] - shadow[i] / 255.0) for i in range(3)) < 1e-6,
+        "deep-shadow LONG-owned color must remain unchanged")
+
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
     rotated_w = frame_h if axis_swap else frame_w
@@ -554,4 +742,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.7 REGRESSION PASS: adaptive highlight-only HDR, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.8 REGRESSION PASS: adaptive headroom/brightness, source-supported color, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")

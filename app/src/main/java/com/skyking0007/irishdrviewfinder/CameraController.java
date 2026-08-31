@@ -86,7 +86,9 @@ final class CameraController {
     private static final long ONE_SECOND_NS = 1_000_000_000L;
     private static final long SIXTY_FPS_DURATION_NS = 16_666_666L;
     private static final long THIRTY_FPS_DURATION_NS = 33_333_333L;
-    private static final double HDR_BRACKET_RATIO = 8.0;
+    private static final double AUTO_BASE_BRACKET_EV = 3.0;
+    private static final double AUTO_MAX_BRACKET_EV = 4.25;
+    private static final double AUTO_APERTURE_REFERENCE_F = 2.0;
     private static final int AUTO_METER_MIN_FRAMES = 4;
     private static final int AUTO_METER_MAX_FRAMES = 12;
     private static final int AUTO_METER_STABLE_FRAMES = 3;
@@ -145,6 +147,7 @@ final class CameraController {
     private volatile int jpegOrientationDegrees;
     private long lastAeExposureNs = ONE_SECOND_NS / 60;
     private int lastAeIso = 400;
+    private float lastAeAperture = Float.NaN;
     private Size previewSize;
     private Size rawSize;
     private Size jpegSize;
@@ -1303,6 +1306,10 @@ final class CameraController {
         boolean firstAnchor = !haveAeSample;
         lastAeExposureNs = clampExposure(exposureNs);
         lastAeIso = clampIso(iso);
+        Float measuredAperture = result.get(CaptureResult.LENS_APERTURE);
+        lastAeAperture = measuredAperture != null && measuredAperture > 0.0f
+                ? measuredAperture
+                : characteristicApertureLocked();
         autoPostRawBoost = resultPostRawBoost(result);
         sceneFlicker = flicker;
         haveAeSample = true;
@@ -1320,6 +1327,8 @@ final class CameraController {
                     "AUTO_ANCHOR",
                     "meter=" + exposureText(lastAeExposureNs) + " ISO" + lastAeIso
                             + " boost=" + autoPostRawBoost + "%"
+                            + (Float.isNaN(lastAeAperture) ? "" : String.format(Locale.US, " f/%.2f", lastAeAperture))
+                            + String.format(Locale.US, " targetBracket=%.2fEV", autoTargetBracketEvLocked())
                             + " -> short=" + exposureText(autoShortExposureNs) + " ISO" + autoShortIso
                             + " long=" + exposureText(autoLongExposureNs) + " ISO" + autoLongIso
                             + String.format(Locale.US, " bracket=%.2fEV", bracketEv)
@@ -1352,17 +1361,82 @@ final class CameraController {
         autoLongExposureNs = longExposure;
         autoLongIso = longIso;
         autoShortIso = minIso;
-        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
-            double targetShortProduct = Math.max(1.0,
-                    ((double) autoLongExposureNs * autoLongIso) / HDR_BRACKET_RATIO);
-            long desiredShort = Math.round(targetShortProduct / Math.max(1, minIso));
-            autoShortExposureNs = Math.min(autoLongExposureNs, clampExposure(desiredShort));
+
+        double targetRatio = Math.pow(2.0, autoTargetBracketEvLocked());
+        double targetShortProduct = Math.max(1.0,
+                ((double) autoLongExposureNs * autoLongIso) / targetRatio);
+        long desiredShort = Math.min(
+                autoLongExposureNs,
+                clampExposure(Math.round(targetShortProduct / Math.max(1, minIso))));
+
+        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ
+                || sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) {
+            // Preserve the proven same-integration flicker behavior for ordinary
+            // apertures. Only a materially wider aperture (and therefore a larger
+            // physically-derived target bracket) is allowed to spend temporal
+            // integration for extra highlight headroom.
+            if (autoTargetBracketEvLocked() > AUTO_BASE_BRACKET_EV + 0.20) {
+                autoShortExposureNs = chooseAutoFlickerAlignedShortLocked(desiredShort, sceneFlicker);
+            } else {
+                autoShortExposureNs = autoLongExposureNs;
+            }
+        } else if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
+            autoShortExposureNs = desiredShort;
         } else {
-            // Under 50/60-Hz or unknown/PWM lighting, SHORT keeps the exact LONG
-            // integration window and lowest sensor gain. The actual safe bracket is
-            // whatever that physical combination provides.
+            // Unknown/PWM lighting keeps the proven V1.4.7 same-integration safety
+            // rather than guessing at a banding-prone short cadence.
             autoShortExposureNs = autoLongExposureNs;
         }
+    }
+
+    private double autoTargetBracketEvLocked() {
+        float aperture = !Float.isNaN(lastAeAperture) && lastAeAperture > 0.0f
+                ? lastAeAperture
+                : characteristicApertureLocked();
+        double apertureBonusEv = 0.0;
+        if (!Float.isNaN(aperture) && aperture > 0.0f) {
+            // Entrance-pupil light gathering scales with 1/N^2. Wide apertures need
+            // extra SHORT headroom for compact bright sources, while f/2 and slower
+            // retain the proven 3-EV baseline.
+            apertureBonusEv = Math.max(0.0,
+                    2.0 * (Math.log(AUTO_APERTURE_REFERENCE_F / aperture) / Math.log(2.0)));
+        }
+        return Math.max(AUTO_BASE_BRACKET_EV,
+                Math.min(AUTO_MAX_BRACKET_EV, AUTO_BASE_BRACKET_EV + apertureBonusEv));
+    }
+
+    private float characteristicApertureLocked() {
+        if (characteristics == null) return Float.NaN;
+        float[] available = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES);
+        if (available == null || available.length == 0) return Float.NaN;
+        float widest = Float.POSITIVE_INFINITY;
+        for (float aperture : available) {
+            if (aperture > 0.0f) widest = Math.min(widest, aperture);
+        }
+        return Float.isInfinite(widest) ? Float.NaN : widest;
+    }
+
+    private long chooseAutoFlickerAlignedShortLocked(long desiredShortNs, int flicker) {
+        long basePeriodNs = flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ
+                ? ONE_SECOND_NS / 100
+                : ONE_SECOND_NS / 120;
+        long candidate = clampExposure(basePeriodNs);
+        for (int i = 0; i < 8 && candidate > autoLongExposureNs; i++) {
+            long next = clampExposure(Math.max(1L, candidate / 2L));
+            if (next >= candidate) break;
+            candidate = next;
+        }
+        candidate = Math.min(autoLongExposureNs, candidate);
+        long desired = Math.min(autoLongExposureNs, clampExposure(desiredShortNs));
+        for (int i = 0; i < 8 && candidate > desired; i++) {
+            long next = clampExposure(Math.max(1L, candidate / 2L));
+            if (next >= candidate) break;
+            double currentError = Math.abs(Math.log((double) candidate / Math.max(1L, desired)));
+            double nextError = Math.abs(Math.log((double) next / Math.max(1L, desired)));
+            if (nextError >= currentError) break;
+            candidate = next;
+        }
+        return Math.min(autoLongExposureNs, candidate);
     }
 
     private int resultPostRawBoost(TotalCaptureResult result) {

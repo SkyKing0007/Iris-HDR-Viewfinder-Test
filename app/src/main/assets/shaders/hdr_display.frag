@@ -97,6 +97,88 @@ vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
     return sceneLinear * (mappedPeak / scenePeak);
 }
 
+vec3 adaptiveAppearanceLift(vec3 displayLinear) {
+    // V1.4.7 HDR reconstruction is already complete here. Apply a monotonic,
+    // pointwise perceptual lift only to lower/mid tones. Deep shadows barely move
+    // and recovered highlights converge back to identity, preserving noise and HDR.
+    float linearY = dot(displayLinear, vec3(0.2126, 0.7152, 0.0722));
+    if (linearY <= 0.000001) return displayLinear;
+    float perceptualY = linearToSrgbChannel(clamp(linearY, 0.0, 1.0));
+    float centered = (perceptualY - 0.20) / 0.11;
+    float targetY = perceptualY
+            + 0.70 * perceptualY * (1.0 - perceptualY) * exp(-(centered * centered));
+    targetY = clamp(targetY, 0.0, 1.0);
+    float targetLinearY = srgbToLinearChannel(targetY);
+    float scale = targetLinearY / linearY;
+    float peak = max3(displayLinear);
+    if (peak > 0.000001) scale = min(scale, 0.98 / peak);
+    return displayLinear * scale;
+}
+
+float encodedLuma(vec3 rgb) {
+    return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+}
+
+vec3 colorSafeFromSources(vec3 fusedRgb, vec3 shortRgb, vec3 longRgb) {
+    // HDR luminance is already complete. Rebuild only encoded chroma from actual
+    // source colors so exposure normalization cannot invent orange/pink/green
+    // specks. This is content-agnostic: no skin/white/scene/device classification.
+    float targetY = encodedLuma(fusedRgb);
+    float shortY = encodedLuma(shortRgb);
+    float longY = encodedLuma(longRgb);
+    vec3 fusedChroma = fusedRgb - vec3(targetY);
+    vec3 shortChroma = shortRgb - vec3(shortY);
+    vec3 longChroma = longRgb - vec3(longY);
+
+    float shortPeak = max3(shortRgb);
+    float shortSignal = smoothstep(0.03, 0.12, shortPeak);
+    float shortChromaMag = length(shortChroma);
+    float longChromaMag = length(longChroma);
+
+    // A dark SHORT may contain harmless low-level chroma noise that becomes visible
+    // only after HDR raises its luminance. Preserve strong source-supported color
+    // unchanged; attenuate only that low-amplitude component as display gain grows.
+    float strongColor = smoothstep(0.025, 0.085, shortChromaMag);
+    float displayGain = max(targetY, 0.0001) / max(shortY, 0.0001);
+    float chromaExponent = 0.35 * (1.0 - strongColor);
+    float shortChromaScale = pow(max(displayGain, 1.0), -chromaExponent);
+    vec3 supportedShortChroma = shortChroma * shortChromaScale;
+
+    // SHORT supplies color when it has usable signal; otherwise retain LONG color.
+    // This keeps the clean LONG-owned shadow contract and avoids brightening SHORT
+    // chroma noise where the SHORT exposure is near its noise floor.
+    vec3 supportedChroma = mix(longChroma, supportedShortChroma, shortSignal);
+
+    // Deep shadows keep the exact pre-existing fused color. The source-supported
+    // reconstruction ramps in only through lower/mid tones where the failure was
+    // observed and where SHORT has enough signal to be a trustworthy color source.
+    float colorApply = smoothstep(0.18, 0.48, targetY);
+    vec3 outputChroma = mix(fusedChroma, supportedChroma, colorApply);
+
+    // Universal no-amplification contract: FUSED encoded chroma may not exceed the
+    // stronger chroma actually present in either source frame. This never suppresses
+    // a source-supported vivid color merely because it is saturated.
+    float outputMag = length(outputChroma);
+    float sourceMaxMag = max(shortChromaMag, longChromaMag);
+    if (outputMag > sourceMaxMag && outputMag > 0.000001) {
+        outputChroma *= sourceMaxMag / outputMag;
+    }
+
+    // Gamut-fit by scaling chroma toward the same luma; never clip channels
+    // independently because that would rotate hue.
+    float gamutScale = 1.0;
+    for (int channel = 0; channel < 3; ++channel) {
+        float chroma = outputChroma[channel];
+        if (chroma > 0.000001) {
+            gamutScale = min(gamutScale, (1.0 - targetY) / chroma);
+        } else if (chroma < -0.000001) {
+            gamutScale = min(gamutScale, targetY / (-chroma));
+        }
+    }
+    gamutScale = clamp(gamutScale, 0.0, 1.0);
+    return vec3(targetY) + outputChroma * gamutScale;
+}
+
 void main() {
     vec2 uv;
     if (!fitSourceUv(vUv, fullFitScale, uv)) {
@@ -153,6 +235,8 @@ void main() {
     // Full-RGB handoff avoids per-channel clipping seams and preserves highlight hue.
     vec3 mergedScene = mix(longScene, shortScene, highlightWeight);
     vec3 displayLinear = adaptiveHdrToneMap(mergedScene, ratio, bracketStops);
+    displayLinear = adaptiveAppearanceLift(displayLinear);
     vec3 displayRgb = linearToSrgb(displayLinear);
+    displayRgb = colorSafeFromSources(displayRgb, shortRgb, longRgb);
     outColor = vec4(clamp(displayRgb, 0.0, 1.0), 1.0);
 }

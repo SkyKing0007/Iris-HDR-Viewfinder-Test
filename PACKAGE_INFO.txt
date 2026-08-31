@@ -1,35 +1,36 @@
-Iris HDR Viewfinder Test V1.4.7
+Iris HDR Viewfinder Test V1.4.8
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
-Runtime authority: exact successful V1.4.6 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.6
-Authority commit: ebb57a3f9da1874e990587a16e65549349ab643b
-Authority tree: 2541541f34a467c14d3b93edb2e5373610a1ccd6
-Authority Actions run: 33415267140
-Authority job: 99564285053
-Authority artifact ID: 9766787904
-Authority artifact ZIP SHA-256: a2d1a6eb21e7da82fa60fdd4cac48bb00c9fe533206e0eab2fb2141af77b14d0
-Authority V1.4.6 source TAR SHA-256: 71931f0a1b5bdbb6cf693c4ce6319408a84fd52fa12a31dcd59aacf31f760134
-Authority V1.4.6 runtime manifest SHA-256: 0ff26f689f295e9e86e8e643bd381b9443be35f1436c573d591c21af7f3bf0a7
-Authority V1.4.6 repository manifest SHA-256: 16352e39e5840c501141f06531489a09871043068132f7bd4a61df7ccd544cd7
-Authority V1.4.6 regressions SHA-256: 4971ec03b8b37c087ef4aef1e7485c91fa180ebbe18bf280e59f1a42ce6691e4
-Authority V1.4.6 APK SHA-256: 4b1b7c83dca234c57e24d38f500c9dbbe1f28bee634bf909805e9216695df526
-Existing architecture backup retained (no new backup required): backup-v1.4.4-pre-hdr-exposure-parity -> 172c628445edb6d28617de77748ceeb76203b2d1
+Runtime authority: exact successful V1.4.7 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.7
+Authority commit: cb91702446d18b963b25f9ae2d8e84a0651be2ff
+Authority tree: cdd8b454b559ab903cc0742d77bc7792791a631e
+Authority Actions run: 33424140112
+Authority job: 99593463941
+Authority artifact ID: 9770100434
+Authority artifact ZIP SHA-256: 7e096cc9607a65aae300ccdfb6285cf011bca57c178dc5d2c6937aee6cd6fcfa
+Authority V1.4.7 source TAR SHA-256: a047849b4bcba464aabb70cb5478fa74479151691de3eca75bdafd592f11ac55
+Authority V1.4.7 runtime manifest SHA-256: 9790e8e97b6324c976e5385e484317a23d5d269ed35754f90c7b48d01b54dae7
+Authority V1.4.7 repository manifest SHA-256: b16abed7e4796e6b75337265411b29b00890b1ea06e62cab69569e39e8236195
+Authority V1.4.7 regressions SHA-256: f9505d323ac7b4d2f86f080a1efa3c50414e306a36bf8ea3335cf233e2f911b2
+Authority V1.4.7 APK SHA-256: 2b4ae474f33f228073cf22010d6e9498477efa2cde7d4950eff74e0d9fd2da41
+Required architectural backup verified before runtime write: backup-v1.4.7-pre-adaptive-exposure-headroom -> cb91702446d18b963b25f9ae2d8e84a0651be2ff
 
-V1.4.7 runtime scope: exactly two files:
+V1.4.8 runtime scope: exactly three files:
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 
-V1.4.7 correction:
-- LONG remains the sole owner of shadows and ordinary midtones; SHORT contributes exactly zero until LONG approaches saturation.
-- SHORT admission is exposure-ratio adaptive: wider brackets begin handoff closer to LONG clipping, protecting low-SNR SHORT data without device-specific model tables.
-- SHORT is normalized in linear light by the actual exposure ratio already produced from shutter x ISO x post-RAW boost metadata.
-- Highlight replacement is full-RGB, not per-channel, preventing clipping seams and preserving recovered highlight hue.
-- The rejected fixed asymptotic shoulder is replaced by bracket-width-aware scene-to-display compression. It reserves output code space for values above LONG white instead of collapsing recovered 1/2/3-stop detail back into 250-255.
-- One hue-preserving RGB scale performs the final highlight compression before the existing sRGB OETF / 8-bit output.
-- A lightweight SHORT plausibility guard rejects implausibly dark normalized SHORT samples only in the clipped-highlight handoff region.
-- Live HDR and saved JPEG fusion use the same constants and equations.
-- Low-end/flagship portability: no camera/vendor IDs, no additional GPU textures, no neighborhood sampling, no extra rendering pass, no new full-frame CPU buffers or runtime allocations.
+V1.4.8 correction:
+- V1.4.7 HDR fusion/highlight reconstruction remains the golden baseline and is not redesigned.
+- Post-fusion appearance lift is monotonic and hue-preserving. It primarily lifts darker lower/mid tones, barely moves deep shadows, gives smaller lift to already-brighter lower midtones, and converges to the V1.4.7 output through recovered highlights.
+- The brightness lift is applied only after V1.4.7 adaptive HDR reconstruction in both the live GLES shader and saved JPEG fusion.
+- Source-supported color reconstruction is applied after fused luminance is final: SHORT supplies exposure-safe color when it has usable signal, strong source saturation is preserved, low-amplitude chroma is gain-aware so it cannot turn into bright orange/pink/green specks, and FUSED encoded chroma is capped by the stronger actual source frame.
+- The color fix is content-agnostic: there is no skin/white/foliage/device classifier, no universal sensor color matrix, no extra GPU sampling/pass, and no per-pixel Java allocation.
+- AUTO SHORT headroom is capability/aperture derived, not device-ID specific. f/2 and slower retain the proven 3-EV baseline; materially wider apertures gain physically-derived target headroom from the 1/N^2 light-gathering relationship, capped at 4.25 EV.
+- Under known 50/60-Hz lighting, only materially wide-aperture cases may select a closer power-of-two submultiple of the flicker period for SHORT. Ordinary apertures and unknown/PWM retain the conservative V1.4.7 same-integration behavior.
+- Exposure/ISO choices remain bounded by each selected camera's actual Camera2 ranges. Measured LENS_APERTURE is preferred; advertised available apertures are the fallback.
+- No Xiaomi/Motorola IDs, focal-length tables, SoC/GPU tiers, extra GPU passes, extra textures/framebuffers, neighborhood sampling, or full-frame float CPU allocations are introduced.
 
-Preserved byte-for-byte runtime from successful V1.4.6: AndroidManifest.xml, copy_2d.frag, fullscreen.vert, oes_to_rgb.frag, CameraController.java, CaptureSetSaver.java, FrameMeta.java, HdrGlView.java, MainActivity.java, MediaStoreWriter.java.
-Preserved behavior: FOV-safe fixed-30 semantics, explicit fixed-60 crop policy, isolated AUTO metering, SHORT/LONG request ownership, atomic GL pairing, clean AE brightness anchor, post-RAW boost parity, explicit Camera2 sRGB contrast curve, NOISE_REDUCTION_MODE_OFF, EDGE_MODE_OFF, MANUAL SAFE flicker behavior, full RAW/JPEG still session, DNG/JPEG orientation, logger and GPU/session lifecycle.
-Toolchain/build mechanics: inherited unchanged from successful V1.4.6 / V1.4.5 / V1.4.4 sequence (AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2).
+Preserved byte-for-byte runtime from successful V1.4.7: AndroidManifest.xml, copy_2d.frag, fullscreen.vert, oes_to_rgb.frag, CaptureSetSaver.java, FrameMeta.java, HdrGlView.java, MainActivity.java, MediaStoreWriter.java.
+Preserved behavior: V1.4.7 full-RGB SHORT/LONG fusion, LONG-owned clean shadows, adaptive highlight admission/compression, sRGB transfer, FOV-safe fixed-30 semantics, explicit fixed-60 crop policy, isolated AUTO metering, atomic GL pairing, post-RAW boost parity, NOISE_REDUCTION_MODE_OFF, EDGE_MODE_OFF, MANUAL SAFE behavior, full RAW/JPEG still session, DNG/JPEG orientation, logger and GPU/session lifecycle.
+Toolchain/build mechanics: inherited unchanged from successful V1.4.7 / V1.4.6 sequence (AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2).
