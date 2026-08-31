@@ -156,7 +156,7 @@ final class HdrGlView extends GLSurfaceView {
         }
 
         void enqueueMeta(FrameMeta meta) {
-            metaByTimestamp.put(meta.timestampNs, meta);
+            metaByTimestamp.put(meta.sensorTimestampNs, meta);
             if (metaByTimestamp.size() > 64) {
                 Long oldest = null;
                 for (Long timestamp : metaByTimestamp.keySet()) {

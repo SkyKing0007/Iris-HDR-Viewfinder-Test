@@ -17,8 +17,17 @@ copy_shader = (ROOT / "app/src/main/assets/shaders/copy_2d.frag").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.1 REGRESSION FAIL: " + message)
 
+
+# 015 - Actions Java compiler regression: FrameMeta timestamp field is sensorTimestampNs.
+frame_meta = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java").read_text()
+require('final long sensorTimestampNs;' in frame_meta,
+        "FrameMeta sensorTimestampNs contract missing")
+require('metaByTimestamp.put(meta.sensorTimestampNs, meta);' in gl,
+        "HdrGlView must use FrameMeta.sensorTimestampNs for timestamp matching")
+require('meta.timestampNs' not in gl,
+        "failed V1.4 meta.timestampNs compiler reference returned")
 
 # 014 - Upload/package hygiene: temporary Python bytecode must never enter the candidate.
 require(not any(ROOT.rglob("__pycache__")) and not any(ROOT.rglob("*.pyc")),
@@ -211,4 +220,4 @@ require(aspect_error(1280, 720) > 0.015, "16:9 preview must fail 4:3 native-aspe
 # 3 EV means exactly an 8x exposure-product ratio.
 require(math.isclose(math.log2(8.0), 3.0), "8x bracket must equal 3 EV")
 
-print("V1.4 REGRESSION PASS: orientation, native FOV, direct GPU, 60/30 cadence, sRGB, 3EV, capture resume, HDR rolloff")
+print("V1.4.1 REGRESSION PASS: orientation, native FOV, direct GPU, 60/30 cadence, sRGB, 3EV, capture resume, HDR rolloff")

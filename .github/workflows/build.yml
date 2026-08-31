@@ -1,4 +1,4 @@
-name: Build Iris HDR Viewfinder Test V1.4
+name: Build Iris HDR Viewfinder Test V1.4.1
 
 on:
   workflow_dispatch:
@@ -22,22 +22,24 @@ jobs:
       - name: Checkout exact candidate history
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
-      - name: V1.3 authority, backup, allowlist, upload-shape and runtime proof
+      - name: V1.3 authority, failed V1.4 lineage, backup, allowlist, upload-shape and runtime proof
         shell: bash
         run: |
           set -euo pipefail
           authority='e205b6b9acdf9ff091eb46a6c521ccd72d287356'
+          failed_v14='a5412721d09d365e97021fce8bcfe3a678464951'
           backup='backup-v1.3-pre-direct-gpu-hdr'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$GITHUB_REF_NAME" = "main"
-          test "$(git rev-parse HEAD^)" = "$authority"
+          test "$(git rev-parse HEAD^)" = "$failed_v14"
+          test "$(git rev-parse HEAD^^)" = "$authority"
           backup_sha="$(git ls-remote origin "refs/heads/$backup" | awk '{print $1}')"
           test "$backup_sha" = "$authority"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
-          grep -Fq 'versionCode = 5' app/build.gradle.kts
-          grep -Fq 'versionName = "1.0-v1.4"' app/build.gradle.kts
+          grep -Fq 'versionCode = 6' app/build.gradle.kts
+          grep -Fq 'versionName = "1.0-v1.4.1"' app/build.gradle.kts
           grep -Fq 'compileSdk = 37' app/build.gradle.kts
           grep -Fq 'minSdk = 29' app/build.gradle.kts
           grep -Fq 'targetSdk = 37' app/build.gradle.kts
@@ -53,6 +55,14 @@ jobs:
             echo 'REGRESSION FAIL 003: API-33 InputStream.readAllBytes survived minSdk 29 source' >&2
             exit 1
           fi
+          if grep -RFn 'meta.timestampNs' app/src/main/java; then
+            echo 'REGRESSION FAIL 015: failed V1.4 FrameMeta timestamp field reference returned' >&2
+            exit 1
+          fi
+          grep -Fq 'metaByTimestamp.put(meta.sensorTimestampNs, meta);' \
+            app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+          grep -Fq 'final long sensorTimestampNs;' \
+            app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 
           python3 scripts/verify_orientation.py
           python3 scripts/verify_shaders.py
@@ -93,7 +103,7 @@ jobs:
               actual_changes[path] = status
           if actual_changes != expected_changes:
               raise SystemExit(
-                  f'V1.4 ALLOWLIST FAIL: actual={actual_changes} expected={expected_changes}')
+                  f'V1.4.1 ALLOWLIST FAIL: actual={actual_changes} expected={expected_changes}')
 
           expected_tracked = [
               '.github/workflows/build.yml',
@@ -148,7 +158,7 @@ jobs:
           actual_runtime_paths = [p.as_posix() for p in files]
           if actual_runtime_paths != expected_runtime_paths:
               raise SystemExit(
-                  'V1.4 RUNTIME PATH FAIL: ' + repr(actual_runtime_paths))
+                  'V1.4.1 RUNTIME PATH FAIL: ' + repr(actual_runtime_paths))
 
           rows = []
           for p in files:
@@ -158,10 +168,10 @@ jobs:
                   f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{p.as_posix()}\n")
           manifest = ''.join(rows).encode()
           digest = hashlib.sha256(manifest).hexdigest()
-          expected = 'e45bfb01045c021772610c254c59d80dbabdcf792655b114fb8d8bd9dbc553fb'
+          expected = 'c86707b4b94a325f35102e422ab2a41e81397710cd88f3d26764baac9f37d978'
           if digest != expected:
               raise SystemExit(
-                  f'V1.4 RUNTIME MANIFEST FAIL: {digest} != {expected}')
+                  f'V1.4.1 RUNTIME MANIFEST FAIL: {digest} != {expected}')
           Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
 
           protected = {
@@ -181,7 +191,7 @@ jobs:
           if Path('app/src/main/assets/shaders/yuv_to_rgb.frag').exists():
               raise SystemExit('REGRESSION FAIL 009: retired YUV upload shader exists')
           print(
-              f'V1.4 BOOTSTRAP PASS: authority={authority}; changed={len(actual_changes)}; '
+              f'V1.4.1 BOOTSTRAP PASS: authority={authority}; changed={len(actual_changes)}; '
               f'tracked=25; runtime=12; manifest={digest}; protected=4/4')
           PY
 
@@ -248,7 +258,7 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Post-build invariance and freeze compiled V1.4 authority candidate
+      - name: Post-build invariance and freeze compiled V1.4.1 authority candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -257,6 +267,12 @@ jobs:
             echo 'POST-BUILD REGRESSION FAIL: API-33 readAllBytes returned' >&2
             exit 1
           fi
+          if grep -RFn 'meta.timestampNs' app/src/main/java; then
+            echo 'POST-BUILD REGRESSION FAIL 015: failed V1.4 timestamp field reference returned' >&2
+            exit 1
+          fi
+          grep -Fq 'metaByTimestamp.put(meta.sensorTimestampNs, meta);' \
+            app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
           python3 scripts/verify_orientation.py
           python3 scripts/verify_shaders.py
           python3 - <<'PY'
@@ -264,7 +280,7 @@ jobs:
           import hashlib
           import subprocess
 
-          expected_runtime = 'e45bfb01045c021772610c254c59d80dbabdcf792655b114fb8d8bd9dbc553fb'
+          expected_runtime = 'c86707b4b94a325f35102e422ab2a41e81397710cd88f3d26764baac9f37d978'
           files = sorted(p for p in Path('app/src').rglob('*') if p.is_file())
           rows = []
           for p in files:
@@ -299,8 +315,8 @@ jobs:
           fi
 
           mkdir -p output
-          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4-debug.apk
-          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4-source-candidate.tar "$GITHUB_SHA"
+          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.1-debug.apk
+          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.1-source-candidate.tar "$GITHUB_SHA"
           printf '%s\n' "$GITHUB_SHA" > output/SOURCE_COMMIT.txt
           cp bootstrap-runtime-manifest.tsv output/RUNTIME_SOURCE_MANIFEST.tsv
           cp compiled-repository-manifest.tsv output/REPOSITORY_SOURCE_MANIFEST.tsv
@@ -319,17 +335,18 @@ jobs:
           012 - Default/auto HDR bracket is 8x / 3 EV and auto long exposure is cadence-constrained where possible.
           013 - Live and saved fusion must use piecewise sRGB decode/encode, exposure normalization, highlight-aware short admission and bounded highlight rolloff.
           014 - Upload/source candidate must contain no temporary Python __pycache__ directories or .pyc bytecode.
+          015 - HdrGlView GPU timestamp matcher must use FrameMeta.sensorTimestampNs; the failed V1.4 meta.timestampNs Java compiler error must never return.
           REGRESSIONS
-          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4-debug.apk \
-                    output/Iris-HDR-Viewfinder-Test-V1.4-source-candidate.tar \
+          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.1-debug.apk \
+                    output/Iris-HDR-Viewfinder-Test-V1.4.1-source-candidate.tar \
                     output/RUNTIME_SOURCE_MANIFEST.tsv \
                     output/REPOSITORY_SOURCE_MANIFEST.tsv \
                     output/REGRESSIONS.txt | tee output/SHA256SUMS.txt
 
-      - name: Upload compiled V1.4 authority artifact
+      - name: Upload compiled V1.4.1 authority artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1.4
+          name: Iris-HDR-Viewfinder-Test-V1.4.1
           path: output/
           if-no-files-found: error
           retention-days: 14

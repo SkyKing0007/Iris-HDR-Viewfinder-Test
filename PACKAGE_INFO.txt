@@ -1,4 +1,4 @@
-Iris HDR Viewfinder Test V1.4
+Iris HDR Viewfinder Test V1.4.1
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED FOR GITHUB ACTIONS BUILD - NOT YET BUILD-PROVEN
 Runtime authority: exact successful V1.3 Actions artifact Iris-HDR-Viewfinder-Test-V1.3
@@ -15,3 +15,9 @@ Preserved: responsive fullUser portrait/landscape behavior, device orientation l
 Reference behavior: Android historical Camera2 HDR Viewfinder alternating-exposure concept; implementation is fresh Java/Camera2/OpenGL ES 3.0 code, no RenderScript and no Photon source.
 Toolchain: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2 in Actions.
 Outputs per HDR capture: SHORT.dng, LONG.dng, SHORT.jpg, LONG.jpg, FUSED_HDR.jpg, metadata.json
+
+Failed V1.4 candidate commit: a5412721d09d365e97021fce8bcfe3a678464951
+Failed V1.4 tree: e541a8e2878d2ac8dbafa09d142ceacf124e29b0
+Failed Actions run/job: 33343565701 / 99343431087
+Failure: real :app:compileDebugJavaWithJavac rejected HdrGlView meta.timestampNs; FrameMeta contract is sensorTimestampNs.
+V1.4.1 correction: only HdrGlView runtime semantics change from failed V1.4 is meta.timestampNs -> meta.sensorTimestampNs; version/workflow/docs/proof are updated and regression 015 permanently enforces the exact compiler condition.

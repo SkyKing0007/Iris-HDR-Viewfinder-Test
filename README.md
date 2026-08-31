@@ -1,8 +1,8 @@
-# Iris HDR Viewfinder Test V1.4
+# Iris HDR Viewfinder Test V1.4.1
 
 Standalone Camera2 experiment for a responsive alternating-exposure HDR viewfinder plus matched RAW/JPEG capture, without modifying Photon/Iris.
 
-## V1.4 live architecture
+## V1.4.1 live architecture
 
 `Camera2 PRIVATE Surface -> SurfaceTexture/external OES -> timestamp-matched SHORT/LONG GPU textures -> HDR shader -> display`
 
@@ -42,4 +42,7 @@ Files are written to `Downloads/IrisHDRViewfinder`. DNGs are diagnostic sensor r
 
 ## Reference lineage
 
-The behavioral reference is Android's historical Camera2 HDR Viewfinder concept: alternating per-frame manual exposures and combining the latest two exposures. V1.4 is a fresh OpenGL ES 3.0 implementation and does not use the historical RenderScript code or Photon/Iris source.
+The behavioral reference is Android's historical Camera2 HDR Viewfinder concept: alternating per-frame manual exposures and combining the latest two exposures. V1.4.1 preserves the V1.4 fresh OpenGL ES 3.0 implementation and does not use the historical RenderScript code or Photon/Iris source.
+
+
+V1.4.1 is a narrow compiler correction over the V1.4 architecture: the direct-GPU timestamp matcher now uses the existing FrameMeta.sensorTimestampNs field. No HDR math, stream selection, FPS policy, capture routing, shader, or color behavior changed from V1.4.

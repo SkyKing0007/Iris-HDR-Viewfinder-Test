@@ -1,10 +1,10 @@
-Iris HDR Viewfinder Test V1.4 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.1 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 IMPORTANT:
-Use only the V1.4 FULL-UPLOAD ZIP. Upload ALL CONTENTS of the extracted folder into the repository root.
+Use only the V1.4.1 FULL-UPLOAD ZIP. Upload ALL CONTENTS of the extracted folder into the repository root.
 Do not upload the strict-proof ZIP, and do not upload only app/ or only changed files.
 
 Before committing, confirm these paths exist:
@@ -21,7 +21,7 @@ Also confirm these retired V1.3 live-preview files are GONE:
 - app/src/main/java/com/skyking0007/irishdrviewfinder/YuvFrame.java
 
 Commit message:
-V1.4 native-FOV direct-GPU HDR preview
+V1.4.1 fix direct-GPU FrameMeta timestamp compiler contract
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.
-Do not install/call V1.4 build-proven until the workflow succeeds and its compiled artifact is verified.
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.1.
+Do not install/call V1.4.1 build-proven until the workflow succeeds and its compiled artifact is verified.

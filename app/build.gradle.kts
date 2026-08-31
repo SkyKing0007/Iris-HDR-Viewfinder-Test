@@ -10,8 +10,8 @@ android {
         applicationId = "com.skyking0007.irishdrviewfinder"
         minSdk = 29
         targetSdk = 37
-        versionCode = 5
-        versionName = "1.0-v1.4"
+        versionCode = 6
+        versionName = "1.0-v1.4.1"
     }
 
     compileOptions {
