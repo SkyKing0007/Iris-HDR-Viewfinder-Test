@@ -17,7 +17,7 @@ copy_shader = (ROOT / "app/src/main/assets/shaders/copy_2d.frag").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.1 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.2 REGRESSION FAIL: " + message)
 
 
 # 015 - Actions Java compiler regression: FrameMeta timestamp field is sensorTimestampNs.
@@ -94,8 +94,8 @@ require('setFitScaleUniform(displayProgram, "splitFitScale"' in gl,
 # 007 - Device-correct still orientation and fused input normalization remain intact.
 require(camera.count('CaptureRequest.JPEG_ORIENTATION, jpegOrientationDegrees') == 2,
         "SHORT/LONG JPEG requests must share device-relative orientation")
-require('int previewRotation = (sensorOrientation + displayDegrees + 360) % 360;' in main,
-        "preview rotation convention changed")
+require('int previewRotation = (sensorOrientation - displayDegrees + 360) % 360;' in main,
+        "standard back-camera sensor/display preview relation missing")
 require('int jpegOrientation = (sensorOrientation - displayDegrees + 360) % 360;' in main,
         "JPEG orientation convention changed")
 require('ExifInterface.TAG_ORIENTATION' in fusion,
@@ -151,17 +151,18 @@ require('TONEMAP_AVAILABLE_TONE_MAP_MODES' in camera,
 require('TONEMAP_MODE_CONTRAST_CURVE' not in camera,
         "CONTRAST_CURVE must not be mislabeled as built-in sRGB")
 
-# 012 - Default/manual auto bracket is 3 EV / 8x without slowing below the selected cadence.
+# 012 - Manual default remains 3 EV / 8x; AUTO HDR targets 8x but may reduce
+# separation when flicker-safe common-shutter bracketing reaches the sensor ISO floor.
 require('HDR_BRACKET_RATIO = 8.0' in camera,
-        "3 EV / 8x bracket constant missing")
+        "3 EV / 8x target bracket constant missing")
 require('shortExposureNs = ONE_SECOND_NS / 480' in camera,
-        "default short exposure must be 1/480s")
+        "manual default short exposure must remain 1/480s")
 require('longExposureNs = ONE_SECOND_NS / 60' in camera,
-        "default long exposure must be 1/60s")
-require('Math.sqrt(HDR_BRACKET_RATIO)' in camera,
-        "auto bracket must be log-centered around AE before cadence clamping")
-require('long liveCap = Math.max(minExposure, manualFrameDurationNs);' in camera,
-        "auto bracket long exposure must respect selected live frame duration")
+        "manual default long exposure must remain 1/60s")
+require('targetLongProduct / HDR_BRACKET_RATIO' in camera,
+        "AUTO HDR short target must derive from the metered long exposure product")
+require('double bracketEv = Math.log(actualLongProduct / actualShortProduct) / Math.log(2.0);' in camera,
+        "AUTO HDR must report the actual bracket after sensor-range clamping")
 
 # 013 - Live and saved HDR use exact sRGB transfer functions and highlight-aware rolloff.
 for text, owner in ((hdr_shader, 'live shader'), (fusion, 'JPEG fusion')):
@@ -179,6 +180,90 @@ require('Math.min(32.0, exposureRatio)' in fusion,
         "saved JPEG must preserve wider exposure ratios")
 require('Math.min(32.0, longProduct / shortProduct)' in saver,
         "capture metadata/fusion ratio must preserve wider exposure ratios")
+
+# 016 - V1.4.1 device regression: preview orientation must have one owner.
+# Camera2 processed preview explicitly opts out of HAL AUTO rotate/crop when supported,
+# MainActivity computes the standard back-camera sensor/display relation, and the shader
+# inverse mapping is accounted for once in HdrGlView.
+require('SCALER_AVAILABLE_ROTATE_AND_CROP_MODES' in camera,
+        "preview rotate/crop capability audit missing")
+require('CaptureRequest.SCALER_ROTATE_AND_CROP_NONE' in camera,
+        "preview must opt out of HAL rotate-and-crop when supported")
+require('configurePreviewRotateAndCrop(builder);' in camera,
+        "preview requests must apply the rotate/crop opt-out")
+require('renderer.rotationQuarterTurns = ((360 - normalized) % 360) / 90;' in gl,
+        "display-UV inverse rotation ownership missing")
+require('int previewRotation = (sensorOrientation - displayDegrees + 360) % 360;' in main,
+        "standard back-camera preview relative rotation missing")
+require(camera[camera.index('private void issueStillBurstLocked()'):camera.index('private final CameraCaptureSession.CaptureCallback stillCaptureCallback')].count('configurePreviewRotateAndCrop') == 0,
+        "good V1.4.1 still path must not inherit preview rotate/crop controls")
+
+# 017 - HDR/SPLIT display updates must be complete-pair atomic.
+require('stagingShortTexture' in gl and 'stagingLongTexture' in gl,
+        "atomic SHORT/LONG staging textures missing")
+require('haveStagingShort' in gl and 'stagingShortMeta' in gl,
+        "atomic pair metadata state missing")
+require('return stagingShortTexture;' in gl and 'return stagingLongTexture;' in gl,
+        "incoming HDR frames must land in staging textures")
+require('Only publish a complete temporal pair' in gl,
+        "complete-pair publication contract marker missing")
+require('meta.frameNumber - stagingShortMeta.frameNumber <= 3' in gl,
+        "SHORT/LONG temporal adjacency guard missing")
+short_accept = gl[gl.index('private void acceptMeta'):gl.index('private void renderExternalToTexture')]
+require(short_accept.count('fpsWindowPairs++;') == 1,
+        "HDR pair cadence must increment only on complete-pair publication")
+require('lastShortMeta = stagingShortMeta;' in short_accept and 'lastLongMeta = meta;' in short_accept,
+        "display exposure metadata must update atomically with the published pair")
+
+# 018 - AUTO HDR and MANUAL HDR are both first-class modes; metering frames never display.
+require('void setAutoHdrExposure(boolean enabled)' in camera,
+        "AUTO/MANUAL HDR exposure owner switch missing")
+require('TAG_METER = "P_METER"' in camera and 'static final String METER = "METER"' in frame_meta,
+        "hidden AE meter frame tag missing")
+require('CONTROL_AE_ANTIBANDING_MODE_AUTO' in camera,
+        "AUTO HDR meter/NORMAL AE must request HAL automatic antibanding")
+require('issueAutoMeterProbeLocked' in camera and 'AUTO_METER_INTERVAL_MS = 500L' in camera,
+        "continuous low-duty AUTO HDR metering loop missing")
+require('if (FrameMeta.METER.equals(meta.kind))' in gl,
+        "meter frames must be recognized by the GPU timestamp matcher")
+require('AE metering probes are intentionally not displayed' in gl,
+        "meter-frame display rejection contract missing")
+require('HDR AUTO: ON' in main and 'HDR MANUAL' in main,
+        "AUTO/MANUAL HDR UI control missing")
+require('setManualControlsEnabled(!autoHdrEnabled)' in main,
+        "manual controls must be explicitly gated by AUTO/MANUAL ownership")
+
+# 019 - Flicker-safe exposure policy covers 50 Hz, 60 Hz, and unknown/PWM lighting.
+require('CaptureResult.STATISTICS_SCENE_FLICKER' in camera,
+        "Camera2 scene-flicker evidence missing")
+require('FLICKER_50_PERIOD_NS = 10_000_000L' in camera,
+        "50 Hz / 100 Hz light integration period missing")
+require('FLICKER_60_PERIOD_NS = 8_333_333L' in camera,
+        "60 Hz / 120 Hz light integration period missing")
+require('chooseFlickerCompatibleExposure' in camera,
+        "flicker-compatible shutter solver missing")
+require('nextLongExposure = commonExposure;' in camera and 'nextShortExposure = commonExposure;' in camera,
+        "artificial/unknown AUTO HDR must use matched temporal integration windows")
+require('unknown/PWM-safe' in camera,
+        "unknown/PWM conservative fallback label missing")
+require('stableBrightNoFlicker' in camera,
+        "shutter-based 3-EV bracket must be limited to stable bright/no-flicker evidence")
+require('This prevents a 1/480s SHORT frame from sampling a different LED/PWM phase.' in camera,
+        "V1.4.1 moving scan-band failure must remain an explicit regression condition")
+
+# 020 - Capability target and measured cadence are distinct quantities.
+require('captureResultFps' in camera and 'updateCaptureResultFpsLocked' in camera,
+        "actual CaptureResult cadence measurement missing")
+require('CaptureResult.SENSOR_FRAME_DURATION' in camera,
+        "actual sensor frame-duration diagnostics missing")
+require('resultFps=' in camera,
+        "status must expose measured CaptureResult FPS separately from requested target")
+require('captureResultFps < 45.0' in camera and 'targetPreviewFps = 30;' in camera,
+        "advertised 60 fps must fall back after sustained measured under-delivery")
+require('60 fps capability under-delivered' in camera,
+        "60-to-30 measured-cadence fallback diagnostic missing")
+require('camera %.1f fps   HDR pairs %.1f fps' in main,
+        "GPU input and complete HDR-pair cadence diagnostics must remain visible")
 
 # Math replay: FIT must preserve image geometry and may only add empty bars.
 def fit_scale(frame_w, frame_h, quarter_turns, viewport_w, viewport_h):
@@ -217,7 +302,20 @@ def aspect_error(width, height, native=4.0/3.0):
 require(aspect_error(1440, 1080) <= 0.015, "4:3 preview should pass native-aspect gate")
 require(aspect_error(1280, 720) > 0.015, "16:9 preview must fail 4:3 native-aspect gate")
 
+# Shader samples display->source, so physical clockwise sensor/display rotation uses
+# the inverse quarter-turn index in rotateUv.
+def shader_quarter_turns(sensor_orientation, display_degrees):
+    relative = (sensor_orientation - display_degrees + 360) % 360
+    return ((360 - relative) % 360) // 90
+
+require(shader_quarter_turns(90, 0) == 3,
+        "portrait sensor=90 display=0 must map through inverse shader quarter-turn 3")
+require(shader_quarter_turns(90, 90) == 0,
+        "natural landscape sensor=90 display=90 must require no residual rotation")
+require(shader_quarter_turns(90, 270) == 2,
+        "reverse landscape sensor=90 display=270 must require 180-degree residual rotation")
+
 # 3 EV means exactly an 8x exposure-product ratio.
 require(math.isclose(math.log2(8.0), 3.0), "8x bracket must equal 3 EV")
 
-print("V1.4.1 REGRESSION PASS: orientation, native FOV, direct GPU, 60/30 cadence, sRGB, 3EV, capture resume, HDR rolloff")
+print("V1.4.2 REGRESSION PASS: single-owner orientation, native FOV, direct GPU, atomic pairs, AUTO/MANUAL HDR, flicker-safe metering, measured cadence, sRGB, capture protection")

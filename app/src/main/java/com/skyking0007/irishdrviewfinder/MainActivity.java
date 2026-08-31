@@ -32,6 +32,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private static final String STATE_SHORT_INDEX = "shortIndex";
     private static final String STATE_LONG_INDEX = "longIndex";
     private static final String STATE_ISO_INDEX = "isoIndex";
+    private static final String STATE_AUTO_HDR = "autoHdr";
     private static final long[] EXPOSURES_NS = {
             1_000_000_000L / 2000,
             1_000_000_000L / 1000,
@@ -58,6 +59,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private SeekBar longBar;
     private SeekBar isoBar;
     private Button captureButton;
+    private Button autoButton;
     private final List<CameraController.CameraDescriptor> cameras = new ArrayList<>();
     private boolean updatingControls;
     private String selectedCameraId;
@@ -65,6 +67,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private volatile int shortIndex = 3;
     private volatile int longIndex = 6;
     private volatile int isoIndex = 2;
+    private volatile boolean autoHdrEnabled = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -74,6 +77,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         buildUi();
         controller = new CameraController(this, this);
         glView.setInputSurfaceListener(controller::setPreviewSurface);
+        controller.setAutoHdrExposure(autoHdrEnabled);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             loadCameras();
@@ -89,6 +93,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         shortIndex = clampIndex(state.getInt(STATE_SHORT_INDEX, shortIndex), EXPOSURES_NS.length);
         longIndex = clampIndex(state.getInt(STATE_LONG_INDEX, longIndex), EXPOSURES_NS.length);
         isoIndex = clampIndex(state.getInt(STATE_ISO_INDEX, isoIndex), ISO_VALUES.length);
+        autoHdrEnabled = state.getBoolean(STATE_AUTO_HDR, autoHdrEnabled);
     }
 
     @Override
@@ -99,6 +104,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         outState.putInt(STATE_SHORT_INDEX, shortIndex);
         outState.putInt(STATE_LONG_INDEX, longIndex);
         outState.putInt(STATE_ISO_INDEX, isoIndex);
+        outState.putBoolean(STATE_AUTO_HDR, autoHdrEnabled);
     }
 
     private void buildUi() {
@@ -135,8 +141,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
         modeSpinner.setAdapter(modes);
         modeSpinner.setSelection(modeIndex, false);
 
-        Button autoButton = new Button(this);
-        autoButton.setText("AUTO BRACKET");
+        autoButton = new Button(this);
+        refreshAutoButton();
 
         captureButton = new Button(this);
         captureButton.setText("CAPTURE HDR SET");
@@ -166,6 +172,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
+        setManualControlsEnabled(!autoHdrEnabled);
 
         modeSpinner.setOnItemSelectedListener(new SimpleItemSelectedListener(position -> {
             modeIndex = clampIndex(position, 3);
@@ -187,6 +194,12 @@ public final class MainActivity extends Activity implements CameraController.Lis
                 shortIndex = shortBar.getProgress();
                 longIndex = longBar.getProgress();
                 isoIndex = isoBar.getProgress();
+                if (autoHdrEnabled) {
+                    autoHdrEnabled = false;
+                    controller.setAutoHdrExposure(false);
+                    refreshAutoButton();
+                    setManualControlsEnabled(true);
+                }
                 controller.setManualSettings(
                         EXPOSURES_NS[shortIndex],
                         EXPOSURES_NS[longIndex],
@@ -201,8 +214,24 @@ public final class MainActivity extends Activity implements CameraController.Lis
         isoBar.setOnSeekBarChangeListener(settingsListener);
 
         autoButton.setOnClickListener(v -> {
-            if (controller != null) controller.autoBracketFromLastAe();
-            Toast.makeText(this, "Uses the most recent NORMAL AE frame as the bracket center", Toast.LENGTH_SHORT).show();
+            autoHdrEnabled = !autoHdrEnabled;
+            refreshAutoButton();
+            setManualControlsEnabled(!autoHdrEnabled);
+            if (controller != null) {
+                controller.setAutoHdrExposure(autoHdrEnabled);
+                if (!autoHdrEnabled) {
+                    controller.setManualSettings(
+                            EXPOSURES_NS[shortIndex],
+                            EXPOSURES_NS[longIndex],
+                            ISO_VALUES[isoIndex]);
+                }
+            }
+            Toast.makeText(
+                    this,
+                    autoHdrEnabled
+                            ? "AUTO HDR continuously meters the scene; manual sliders are locked"
+                            : "MANUAL HDR: short, long and ISO are now fixed by the sliders",
+                    Toast.LENGTH_SHORT).show();
         });
 
         captureButton.setOnClickListener(v -> {
@@ -359,11 +388,12 @@ public final class MainActivity extends Activity implements CameraController.Lis
             android.util.Range<Integer> aeFpsRange,
             boolean srgbTonemap) {
         int displayDegrees = rotationToDegrees(getWindowManager().getDefaultDisplay().getRotation());
-        int previewRotation = (sensorOrientation + displayDegrees + 360) % 360;
+        int previewRotation = (sensorOrientation - displayDegrees + 360) % 360;
         int jpegOrientation = (sensorOrientation - displayDegrees + 360) % 360;
         glView.setRelativeRotationDegrees(previewRotation);
         controller.setJpegOrientationDegrees(jpegOrientation);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
+        controller.setAutoHdrExposure(autoHdrEnabled);
         controller.setManualSettings(
                 EXPOSURES_NS[shortIndex],
                 EXPOSURES_NS[longIndex],
@@ -394,8 +424,32 @@ public final class MainActivity extends Activity implements CameraController.Lis
             isoBar.setProgress(isoIndex);
             shortLabel.setText("Short " + CameraController.exposureText(shortExposureNs));
             longLabel.setText("Long " + CameraController.exposureText(longExposureNs));
-            isoLabel.setText("ISO " + iso);
+            isoLabel.setText("ISO " + iso + "  MANUAL");
             updatingControls = false;
+            if (!autoHdrEnabled) setManualControlsEnabled(true);
+        });
+    }
+
+    @Override
+    public void onAutoHdrSettings(
+            long shortExposureNs,
+            int shortIso,
+            long longExposureNs,
+            int longIso,
+            String flickerLabel,
+            double bracketEv) {
+        runOnUiThread(() -> {
+            if (!autoHdrEnabled) return;
+            shortLabel.setText(
+                    "Short AUTO " + CameraController.exposureText(shortExposureNs) + " ISO" + shortIso);
+            longLabel.setText(
+                    "Long AUTO " + CameraController.exposureText(longExposureNs) + " ISO" + longIso);
+            isoLabel.setText(String.format(
+                    Locale.US,
+                    "AUTO HDR %.1f EV  flicker %s",
+                    bracketEv,
+                    flickerLabel));
+            setManualControlsEnabled(false);
         });
     }
 
@@ -409,6 +463,26 @@ public final class MainActivity extends Activity implements CameraController.Lis
                     Toast.LENGTH_LONG).show();
             statusText.setText(message);
         });
+    }
+
+    private void refreshAutoButton() {
+        if (autoButton == null) return;
+        autoButton.setText(autoHdrEnabled ? "HDR AUTO: ON" : "HDR MANUAL");
+    }
+
+    private void setManualControlsEnabled(boolean enabled) {
+        if (shortBar != null) shortBar.setEnabled(enabled);
+        if (longBar != null) longBar.setEnabled(enabled);
+        if (isoBar != null) isoBar.setEnabled(enabled);
+        if (!enabled) {
+            if (shortBar != null) shortBar.setAlpha(0.45f);
+            if (longBar != null) longBar.setAlpha(0.45f);
+            if (isoBar != null) isoBar.setAlpha(0.45f);
+        } else {
+            if (shortBar != null) shortBar.setAlpha(1.0f);
+            if (longBar != null) longBar.setAlpha(1.0f);
+            if (isoBar != null) isoBar.setAlpha(1.0f);
+        }
     }
 
     private static HdrGlView.Mode glModeForIndex(int index) {

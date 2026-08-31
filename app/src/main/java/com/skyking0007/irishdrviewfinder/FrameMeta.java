@@ -4,6 +4,7 @@ final class FrameMeta {
     static final String NORMAL = "NORMAL";
     static final String SHORT = "SHORT";
     static final String LONG = "LONG";
+    static final String METER = "METER";
 
     final String kind;
     final long frameNumber;

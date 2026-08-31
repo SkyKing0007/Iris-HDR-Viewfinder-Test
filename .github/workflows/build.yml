@@ -1,4 +1,4 @@
-name: Build Iris HDR Viewfinder Test V1.4.1
+name: Build Iris HDR Viewfinder Test V1.4.2
 
 on:
   workflow_dispatch:
@@ -22,24 +22,23 @@ jobs:
       - name: Checkout exact candidate history
         uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 2
 
-      - name: V1.3 authority, failed V1.4 lineage, backup, allowlist, upload-shape and runtime proof
+      - name: V1.4.1 authority, allowlist, upload-shape and runtime proof
         shell: bash
         run: |
           set -euo pipefail
-          authority='e205b6b9acdf9ff091eb46a6c521ccd72d287356'
-          failed_v14='a5412721d09d365e97021fce8bcfe3a678464951'
+          authority='72b75f14eaa5439c681207007b363aea762cf70c'
           backup='backup-v1.3-pre-direct-gpu-hdr'
+          backup_authority='e205b6b9acdf9ff091eb46a6c521ccd72d287356'
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$GITHUB_REF_NAME" = "main"
-          test "$(git rev-parse HEAD^)" = "$failed_v14"
-          test "$(git rev-parse HEAD^^)" = "$authority"
+          test "$(git rev-parse HEAD^)" = "$authority"
           backup_sha="$(git ls-remote origin "refs/heads/$backup" | awk '{print $1}')"
-          test "$backup_sha" = "$authority"
+          test "$backup_sha" = "$backup_authority"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
-          grep -Fq 'versionCode = 6' app/build.gradle.kts
-          grep -Fq 'versionName = "1.0-v1.4.1"' app/build.gradle.kts
+          grep -Fq 'versionCode = 7' app/build.gradle.kts
+          grep -Fq 'versionName = "1.0-v1.4.2"' app/build.gradle.kts
           grep -Fq 'compileSdk = 37' app/build.gradle.kts
           grep -Fq 'minSdk = 29' app/build.gradle.kts
           grep -Fq 'targetSdk = 37' app/build.gradle.kts
@@ -59,20 +58,12 @@ jobs:
             echo 'REGRESSION FAIL 015: failed V1.4 FrameMeta timestamp field reference returned' >&2
             exit 1
           fi
-          grep -Fq 'metaByTimestamp.put(meta.sensorTimestampNs, meta);' \
-            app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-          grep -Fq 'final long sensorTimestampNs;' \
-            app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
-
-          python3 scripts/verify_orientation.py
-          python3 scripts/verify_shaders.py
 
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib
-          import subprocess
+          import hashlib, subprocess
 
-          authority = 'e205b6b9acdf9ff091eb46a6c521ccd72d287356'
+          authority = '72b75f14eaa5439c681207007b363aea762cf70c'
           expected_changes = {
               '.github/workflows/build.yml': 'M',
               'BUILD_WORKFLOW_COPY.yml': 'M',
@@ -81,40 +72,24 @@ jobs:
               'README.md': 'M',
               'VSCODE_DEV_UPLOAD.txt': 'M',
               'app/build.gradle.kts': 'M',
-              'app/src/main/assets/shaders/copy_2d.frag': 'A',
-              'app/src/main/assets/shaders/hdr_display.frag': 'M',
-              'app/src/main/assets/shaders/oes_to_rgb.frag': 'A',
-              'app/src/main/assets/shaders/yuv_to_rgb.frag': 'D',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'M',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': 'M',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': 'M',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': 'M',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': 'M',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java': 'M',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/YuvFrame.java': 'D',
               'scripts/verify_orientation.py': 'M',
           }
-          raw = subprocess.check_output(
-              ['git', 'diff', '--name-status', authority, 'HEAD'], text=True).splitlines()
-          actual_changes = {}
+          raw = subprocess.check_output(['git', 'diff', '--name-status', authority, 'HEAD'], text=True).splitlines()
+          actual = {}
           for line in raw:
               parts = line.split('\t')
-              status = parts[0][0]
-              path = parts[-1]
-              actual_changes[path] = status
-          if actual_changes != expected_changes:
-              raise SystemExit(
-                  f'V1.4.1 ALLOWLIST FAIL: actual={actual_changes} expected={expected_changes}')
+              actual[parts[-1]] = parts[0][0]
+          if actual != expected_changes:
+              raise SystemExit(f'V1.4.2 ALLOWLIST FAIL: actual={actual} expected={expected_changes}')
 
           expected_tracked = [
-              '.github/workflows/build.yml',
-              '.gitignore',
-              'BUILD_WORKFLOW_COPY.yml',
-              'PACKAGE_INFO.txt',
-              'PACKAGE_MANIFEST_SHA256.txt',
-              'README.md',
-              'VSCODE_DEV_UPLOAD.txt',
-              'app/build.gradle.kts',
-              'app/src/main/AndroidManifest.xml',
+              '.github/workflows/build.yml', '.gitignore', 'BUILD_WORKFLOW_COPY.yml',
+              'PACKAGE_INFO.txt', 'PACKAGE_MANIFEST_SHA256.txt', 'README.md', 'VSCODE_DEV_UPLOAD.txt',
+              'app/build.gradle.kts', 'app/src/main/AndroidManifest.xml',
               'app/src/main/assets/shaders/copy_2d.frag',
               'app/src/main/assets/shaders/fullscreen.vert',
               'app/src/main/assets/shaders/hdr_display.frag',
@@ -126,73 +101,41 @@ jobs:
               'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java',
-              'build.gradle.kts',
-              'gradle.properties',
-              'scripts/verify_orientation.py',
-              'scripts/verify_shaders.py',
-              'settings.gradle.kts',
+              'build.gradle.kts', 'gradle.properties', 'scripts/verify_orientation.py',
+              'scripts/verify_shaders.py', 'settings.gradle.kts',
           ]
           tracked = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
           if tracked != expected_tracked:
-              missing = sorted(set(expected_tracked) - set(tracked))
-              extra = sorted(set(tracked) - set(expected_tracked))
-              raise SystemExit(
-                  f'REGRESSION FAIL 002: upload shape mismatch; missing={missing} extra={extra}')
+              raise SystemExit(f'REGRESSION FAIL 002: tracked mismatch actual={tracked}')
 
-          expected_runtime_paths = [
-              'app/src/main/AndroidManifest.xml',
-              'app/src/main/assets/shaders/copy_2d.frag',
-              'app/src/main/assets/shaders/fullscreen.vert',
-              'app/src/main/assets/shaders/hdr_display.frag',
-              'app/src/main/assets/shaders/oes_to_rgb.frag',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java',
-          ]
-          root = Path('app/src')
-          files = sorted(p for p in root.rglob('*') if p.is_file())
-          actual_runtime_paths = [p.as_posix() for p in files]
-          if actual_runtime_paths != expected_runtime_paths:
-              raise SystemExit(
-                  'V1.4.1 RUNTIME PATH FAIL: ' + repr(actual_runtime_paths))
-
-          rows = []
+          files = sorted(p for p in Path('app/src').rglob('*') if p.is_file())
+          if len(files) != 12:
+              raise SystemExit(f'V1.4.2 RUNTIME FILE COUNT FAIL: {len(files)}')
+          rows=[]
           for p in files:
-              data = p.read_bytes()
-              lines = data.count(b'\n') + (1 if data and not data.endswith(b'\n') else 0)
-              rows.append(
-                  f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{p.as_posix()}\n")
-          manifest = ''.join(rows).encode()
-          digest = hashlib.sha256(manifest).hexdigest()
-          expected = 'c86707b4b94a325f35102e422ab2a41e81397710cd88f3d26764baac9f37d978'
+              b=p.read_bytes(); lines=b.count(b'\n') + (1 if b and not b.endswith(b'\n') else 0)
+              rows.append(f"{hashlib.sha256(b).hexdigest()}\t{len(b)}\t{lines}\t{p.as_posix()}\n")
+          manifest=''.join(rows).encode()
+          digest=hashlib.sha256(manifest).hexdigest()
+          expected='b630fcfd54440baee46c4b84a8914519071732ed664ceb61379939f43be1083a'
           if digest != expected:
-              raise SystemExit(
-                  f'V1.4.1 RUNTIME MANIFEST FAIL: {digest} != {expected}')
+              raise SystemExit(f'V1.4.2 RUNTIME MANIFEST FAIL: {digest} != {expected}')
           Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
 
           protected = {
               'app/src/main/AndroidManifest.xml': 'c183cb4caf4c9c8aa40a41d3891c197d9e84db196c6ecccd822b1c424ebc73e6',
+              'app/src/main/assets/shaders/copy_2d.frag': 'b6b890e3be034a0d4980fd324fe0f469c7a2b0a126e958607bc8c4b9fbf97a55',
               'app/src/main/assets/shaders/fullscreen.vert': '7d8ee58c4500a46dd9614404a17ea4c7e104a6bf43976ecb85795799fdcd7fb4',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': '60e51ef2d1e081e62bac23625efd21eaff5832e36867b669f24c3e62e3c6bdfb',
+              'app/src/main/assets/shaders/hdr_display.frag': 'a0e8b2c811e1ae0c7fa7b71ee0beb783985b919078886f295c7afbf97220e67b',
+              'app/src/main/assets/shaders/oes_to_rgb.frag': '388d49929564efba24900794e035f88b461485f4da4f2e12caf71e3531ab6443',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': 'b0f967ece88dfd1dd6e646a33612870976e9d3c8218b18d9eb323e6a556f7539',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': '56b1ee4236b4ad6d0b3d7fd15074bad96bddce85d335e7492325d74874870c26',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java': 'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
           }
-          for rel, expected_sha in protected.items():
-              actual_sha = hashlib.sha256(Path(rel).read_bytes()).hexdigest()
-              if actual_sha != expected_sha:
-                  raise SystemExit(
-                      f'V1.3 PROTECTED RUNTIME FAIL: {rel} {actual_sha} != {expected_sha}')
-
-          if Path('app/src/main/java/com/skyking0007/irishdrviewfinder/YuvFrame.java').exists():
-              raise SystemExit('REGRESSION FAIL 009: retired CPU YUV repacker exists')
-          if Path('app/src/main/assets/shaders/yuv_to_rgb.frag').exists():
-              raise SystemExit('REGRESSION FAIL 009: retired YUV upload shader exists')
-          print(
-              f'V1.4.1 BOOTSTRAP PASS: authority={authority}; changed={len(actual_changes)}; '
-              f'tracked=25; runtime=12; manifest={digest}; protected=4/4')
+          for rel, sha in protected.items():
+              got=hashlib.sha256(Path(rel).read_bytes()).hexdigest()
+              if got != sha: raise SystemExit(f'V1.4.1 PROTECTED RUNTIME FAIL: {rel} {got} != {sha}')
+          print(f'V1.4.2 MINIMUM AUTHORITY PASS: changed={len(actual)} runtime=12 digest={digest} protected={len(protected)}/{len(protected)}')
           PY
 
       - name: Set up Java 17
@@ -212,19 +155,11 @@ jobs:
           grep -Fq 'platforms;android-37.0' "$RUNNER_TEMP/sdkmanager-list.txt"
           sdkmanager "platforms;android-37.0"
           test -f "$ANDROID_SDK_ROOT/platforms/android-37.0/android.jar"
-          echo 'API37 PACKAGE REGRESSION PASS: platforms;android-37.0 installed'
 
       - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
-
-      - name: Prove Gradle toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          gradle --version
-          java -version
 
       - name: Install pinned real GLSL compiler
         shell: bash
@@ -244,8 +179,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # These asset bytes are the exact shader source supplied at runtime; there is no import,
-          # define, generated-source, #line, or other preprocessing layer in this standalone app.
           glslangValidator -l app/src/main/assets/shaders/fullscreen.vert app/src/main/assets/shaders/oes_to_rgb.frag
           glslangValidator -l app/src/main/assets/shaders/fullscreen.vert app/src/main/assets/shaders/copy_2d.frag
           glslangValidator -l app/src/main/assets/shaders/fullscreen.vert app/src/main/assets/shaders/hdr_display.frag
@@ -254,69 +187,50 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:compileDebugJavaWithJavac
 
-      - name: Build full debug APK
+      - name: Replay V1.4.2 runtime regressions on compiler-tested candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_orientation.py
+          python3 scripts/verify_shaders.py
+
+      - name: Build full debug APK from frozen compiler-tested candidate
         shell: bash
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Post-build invariance and freeze compiled V1.4.1 authority candidate
+      - name: Post-build invariance and freeze compiled V1.4.2 authority candidate
         shell: bash
         run: |
           set -euo pipefail
           git diff --exit-code -- .
-          if grep -RFn 'readAllBytes(' app/src/main/java; then
-            echo 'POST-BUILD REGRESSION FAIL: API-33 readAllBytes returned' >&2
-            exit 1
-          fi
-          if grep -RFn 'meta.timestampNs' app/src/main/java; then
-            echo 'POST-BUILD REGRESSION FAIL 015: failed V1.4 timestamp field reference returned' >&2
-            exit 1
-          fi
-          grep -Fq 'metaByTimestamp.put(meta.sensorTimestampNs, meta);' \
-            app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
           python3 scripts/verify_orientation.py
           python3 scripts/verify_shaders.py
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib
-          import subprocess
-
-          expected_runtime = 'c86707b4b94a325f35102e422ab2a41e81397710cd88f3d26764baac9f37d978'
-          files = sorted(p for p in Path('app/src').rglob('*') if p.is_file())
-          rows = []
+          import hashlib, subprocess
+          expected_runtime='b630fcfd54440baee46c4b84a8914519071732ed664ceb61379939f43be1083a'
+          files=sorted(p for p in Path('app/src').rglob('*') if p.is_file())
+          rows=[]
           for p in files:
-              data = p.read_bytes()
-              lines = data.count(b'\n') + (1 if data and not data.endswith(b'\n') else 0)
-              rows.append(
-                  f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{p.as_posix()}\n")
-          manifest = ''.join(rows).encode()
-          digest = hashlib.sha256(manifest).hexdigest()
-          if len(files) != 12 or digest != expected_runtime:
-              raise SystemExit(
-                  f'POST-BUILD RUNTIME INVARIANCE FAIL: files={len(files)} digest={digest}')
+              b=p.read_bytes(); lines=b.count(b'\n') + (1 if b and not b.endswith(b'\n') else 0)
+              rows.append(f"{hashlib.sha256(b).hexdigest()}\t{len(b)}\t{lines}\t{p.as_posix()}\n")
+          manifest=''.join(rows).encode(); digest=hashlib.sha256(manifest).hexdigest()
+          if len(files)!=12 or digest!=expected_runtime:
+              raise SystemExit(f'POST-BUILD RUNTIME INVARIANCE FAIL files={len(files)} digest={digest}')
           Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
-
-          tracked = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
-          repo_rows = []
+          tracked=subprocess.check_output(['git','ls-files'],text=True).splitlines()
+          repo=[]
           for rel in tracked:
-              p = Path(rel)
-              data = p.read_bytes()
-              lines = data.count(b'\n') + (1 if data and not data.endswith(b'\n') else 0)
-              repo_rows.append(
-                  f"{hashlib.sha256(data).hexdigest()}\t{len(data)}\t{lines}\t{rel}\n")
-          Path('compiled-repository-manifest.tsv').write_text(''.join(repo_rows))
-          print(f'POST-BUILD RUNTIME INVARIANCE PASS: 12 files, manifest={digest}')
+              b=Path(rel).read_bytes(); lines=b.count(b'\n') + (1 if b and not b.endswith(b'\n') else 0)
+              repo.append(f"{hashlib.sha256(b).hexdigest()}\t{len(b)}\t{lines}\t{rel}\n")
+          Path('compiled-repository-manifest.tsv').write_text(''.join(repo))
           PY
 
           mapfile -t apks < <(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print | sort)
-          if [[ ${#apks[@]} -ne 1 ]]; then
-            printf 'Expected exactly one APK, found %s\n' "${#apks[@]}" >&2
-            printf '%s\n' "${apks[@]:-}" >&2
-            exit 1
-          fi
-
+          test ${#apks[@]} -eq 1
           mkdir -p output
-          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.1-debug.apk
-          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.1-source-candidate.tar "$GITHUB_SHA"
+          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.2-debug.apk
+          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.2-source-candidate.tar "$GITHUB_SHA"
           printf '%s\n' "$GITHUB_SHA" > output/SOURCE_COMMIT.txt
           cp bootstrap-runtime-manifest.tsv output/RUNTIME_SOURCE_MANIFEST.tsv
           cp compiled-repository-manifest.tsv output/REPOSITORY_SOURCE_MANIFEST.tsv
@@ -325,28 +239,33 @@ jobs:
           002 - vscode.dev upload must preserve the complete 25-file tracked candidate and all 12 app/src runtime files.
           003 - minSdk 29 runtime source must not call InputStream.readAllBytes(), which is Android API 33+.
           004 - UI must follow fullUser orientation and respect Android orientation lock in portrait and landscape.
-          005 - SurfaceTexture transform matrix must own camera producer-origin/crop correction exactly once; retired manual YUV flip must not coexist.
+          005 - SurfaceTexture transform matrix must own producer-origin/crop correction exactly once; retired manual YUV flip must not coexist.
           006 - NORMAL/HDR/SPLIT must use FIT presentation with no stretch and no center-crop-to-fill.
           007 - SHORT/LONG JPEG orientation must follow device orientation and fused JPEG must normalize EXIF-only HAL rotation.
           008 - RAW/native sensor aspect must drive both PRIVATE preview and JPEG selection; forced 16:9 preview scoring must never return.
           009 - Live preview must be direct PRIVATE SurfaceTexture/external-OES GPU input; per-frame Java YUV repacking and preview ImageReader must stay removed.
-          010 - Preview FPS must prefer real 60 only when AE range and selected PRIVATE stream support it, with a true 30 fallback and separate actual HDR-pair FPS reporting.
-          011 - Built-in sRGB must use TONEMAP_MODE_PRESET_CURVE + TONEMAP_PRESET_CURVE_SRGB when supported; CONTRAST_CURVE is not a substitute.
-          012 - Default/auto HDR bracket is 8x / 3 EV and auto long exposure is cadence-constrained where possible.
-          013 - Live and saved fusion must use piecewise sRGB decode/encode, exposure normalization, highlight-aware short admission and bounded highlight rolloff.
+          010 - Preview FPS capability target must remain 60/30-aware and actual HDR-pair cadence must be reported separately.
+          011 - Built-in sRGB must use TONEMAP_MODE_PRESET_CURVE + TONEMAP_PRESET_CURVE_SRGB when supported.
+          012 - Manual default bracket remains 8x / 3 EV; AUTO HDR targets 8x but reports actual EV after safe clamping.
+          013 - Live and saved fusion retain piecewise sRGB, exposure normalization, highlight-aware SHORT admission and bounded rolloff.
           014 - Upload/source candidate must contain no temporary Python __pycache__ directories or .pyc bytecode.
-          015 - HdrGlView GPU timestamp matcher must use FrameMeta.sensorTimestampNs; the failed V1.4 meta.timestampNs Java compiler error must never return.
+          015 - HdrGlView timestamp matcher must use FrameMeta.sensorTimestampNs; failed V1.4 meta.timestampNs must never return.
+          016 - Preview orientation must have one owner: preview HAL rotate/crop NONE where supported + standard sensor/display relation + inverse display-UV sampling.
+          017 - HDR/SPLIT must publish only complete temporally adjacent SHORT/LONG pairs; no half-updated fusion.
+          018 - AUTO HDR and MANUAL HDR must both remain available; hidden AE meter frames must never enter the displayed pair.
+          019 - AUTO HDR must consume 50/60-Hz scene-flicker evidence and use a conservative same-shutter unknown/PWM fallback instead of forcing 1/480.
+          020 - Measured CaptureResult FPS/frame duration must be reported separately from requested target and GPU input/pair FPS.
           REGRESSIONS
-          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.1-debug.apk \
-                    output/Iris-HDR-Viewfinder-Test-V1.4.1-source-candidate.tar \
+          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.2-debug.apk \
+                    output/Iris-HDR-Viewfinder-Test-V1.4.2-source-candidate.tar \
                     output/RUNTIME_SOURCE_MANIFEST.tsv \
                     output/REPOSITORY_SOURCE_MANIFEST.tsv \
                     output/REGRESSIONS.txt | tee output/SHA256SUMS.txt
 
-      - name: Upload compiled V1.4.1 authority artifact
+      - name: Upload compiled V1.4.2 authority artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1.4.1
+          name: Iris-HDR-Viewfinder-Test-V1.4.2
           path: output/
           if-no-files-found: error
           retention-days: 14

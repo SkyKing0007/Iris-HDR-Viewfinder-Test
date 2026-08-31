@@ -80,7 +80,10 @@ final class HdrGlView extends GLSurfaceView {
 
     void setRelativeRotationDegrees(int degrees) {
         int normalized = ((degrees % 360) + 360) % 360;
-        renderer.rotationQuarterTurns = (normalized / 90) % 4;
+        // hdr_display.frag maps display UV -> source UV, so use the inverse of the
+        // physical sensor-to-display rotation. The Camera2 preview request opts out
+        // of HAL rotate-and-crop; this is the only remaining view rotation owner.
+        renderer.rotationQuarterTurns = ((360 - normalized) % 360) / 90;
         requestRender();
     }
 
@@ -127,6 +130,8 @@ final class HdrGlView extends GLSurfaceView {
         private int normalTexture;
         private int shortTexture;
         private int longTexture;
+        private int stagingShortTexture;
+        private int stagingLongTexture;
         private int framebuffer;
         private SurfaceTexture surfaceTexture;
         private Surface inputSurface;
@@ -137,6 +142,8 @@ final class HdrGlView extends GLSurfaceView {
         private boolean haveNormal;
         private boolean haveShort;
         private boolean haveLong;
+        private boolean haveStagingShort;
+        private FrameMeta stagingShortMeta;
         private FrameMeta lastShortMeta;
         private FrameMeta lastLongMeta;
         private long fpsWindowStartNs;
@@ -180,6 +187,8 @@ final class HdrGlView extends GLSurfaceView {
             normalTexture = createTexture2d();
             shortTexture = createTexture2d();
             longTexture = createTexture2d();
+            stagingShortTexture = createTexture2d();
+            stagingLongTexture = createTexture2d();
             for (PendingFrame pending : pendingFrames) {
                 pending.texture = createTexture2d();
                 pending.occupied = false;
@@ -205,6 +214,10 @@ final class HdrGlView extends GLSurfaceView {
             haveNormal = false;
             haveShort = false;
             haveLong = false;
+            haveStagingShort = false;
+            stagingShortMeta = null;
+            lastShortMeta = null;
+            lastLongMeta = null;
             fpsWindowStartNs = System.nanoTime();
             fpsWindowInputFrames = 0;
             fpsWindowPairs = 0;
@@ -240,6 +253,8 @@ final class HdrGlView extends GLSurfaceView {
             allocateRgbTexture(normalTexture, width, height);
             allocateRgbTexture(shortTexture, width, height);
             allocateRgbTexture(longTexture, width, height);
+            allocateRgbTexture(stagingShortTexture, width, height);
+            allocateRgbTexture(stagingLongTexture, width, height);
             for (PendingFrame pending : pendingFrames) {
                 allocateRgbTexture(pending.texture, width, height);
                 pending.occupied = false;
@@ -247,6 +262,10 @@ final class HdrGlView extends GLSurfaceView {
             haveNormal = false;
             haveShort = false;
             haveLong = false;
+            haveStagingShort = false;
+            stagingShortMeta = null;
+            lastShortMeta = null;
+            lastLongMeta = null;
             metaByTimestamp.clear();
         }
 
@@ -258,9 +277,16 @@ final class HdrGlView extends GLSurfaceView {
                 surfaceTexture.getTransformMatrix(textureTransform);
                 FrameMeta meta = metaByTimestamp.remove(timestamp);
                 if (meta != null) {
-                    int target = targetTextureFor(meta);
-                    renderExternalToTexture(target);
-                    acceptMeta(meta);
+                    if (FrameMeta.METER.equals(meta.kind)) {
+                        // AE metering probes are intentionally not displayed and never
+                        // become one side of an HDR pair. updateTexImage() above still
+                        // releases the producer buffer promptly.
+                        acceptMeta(meta);
+                    } else {
+                        int target = targetTextureFor(meta);
+                        renderExternalToTexture(target);
+                        acceptMeta(meta);
+                    }
                 } else {
                     PendingFrame pending = acquirePendingSlot();
                     pending.timestampNs = timestamp;
@@ -291,29 +317,52 @@ final class HdrGlView extends GLSurfaceView {
                 if (!pending.occupied) continue;
                 FrameMeta meta = metaByTimestamp.remove(pending.timestampNs);
                 if (meta == null) continue;
-                copyTexture(pending.texture, targetTextureFor(meta));
+                if (!FrameMeta.METER.equals(meta.kind)) {
+                    copyTexture(pending.texture, targetTextureFor(meta));
+                }
                 pending.occupied = false;
                 acceptMeta(meta);
             }
         }
 
         private int targetTextureFor(FrameMeta meta) {
-            if (FrameMeta.SHORT.equals(meta.kind)) return shortTexture;
-            if (FrameMeta.LONG.equals(meta.kind)) return longTexture;
+            if (FrameMeta.SHORT.equals(meta.kind)) return stagingShortTexture;
+            if (FrameMeta.LONG.equals(meta.kind)) return stagingLongTexture;
             return normalTexture;
         }
 
         private void acceptMeta(FrameMeta meta) {
-            if (FrameMeta.SHORT.equals(meta.kind)) {
-                haveShort = true;
-                lastShortMeta = meta;
-            } else if (FrameMeta.LONG.equals(meta.kind)) {
-                haveLong = true;
-                lastLongMeta = meta;
-                fpsWindowPairs++;
-            } else {
-                haveNormal = true;
+            if (FrameMeta.METER.equals(meta.kind)) {
+                return;
             }
+            if (FrameMeta.SHORT.equals(meta.kind)) {
+                haveStagingShort = true;
+                stagingShortMeta = meta;
+                return;
+            }
+            if (FrameMeta.LONG.equals(meta.kind)) {
+                // Only publish a complete temporal pair. A LONG result without a
+                // preceding SHORT leaves the previous complete pair on screen.
+                if (haveStagingShort && stagingShortMeta != null
+                        && meta.frameNumber > stagingShortMeta.frameNumber
+                        && meta.frameNumber - stagingShortMeta.frameNumber <= 3) {
+                    int oldShort = shortTexture;
+                    shortTexture = stagingShortTexture;
+                    stagingShortTexture = oldShort;
+                    int oldLong = longTexture;
+                    longTexture = stagingLongTexture;
+                    stagingLongTexture = oldLong;
+                    lastShortMeta = stagingShortMeta;
+                    lastLongMeta = meta;
+                    haveShort = true;
+                    haveLong = true;
+                    haveStagingShort = false;
+                    stagingShortMeta = null;
+                    fpsWindowPairs++;
+                }
+                return;
+            }
+            haveNormal = true;
         }
 
         private void renderExternalToTexture(int targetTexture) {
