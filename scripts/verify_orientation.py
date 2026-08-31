@@ -16,7 +16,7 @@ oes_shader = (ROOT / "app/src/main/assets/shaders/oes_to_rgb.frag").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.5 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.6 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -139,8 +139,12 @@ require('captureResultFps' in camera and 'updateCaptureResultFpsLocked' in camer
         "actual CaptureResult cadence measurement missing")
 require('CaptureResult.SENSOR_FRAME_DURATION' in camera and 'resultFps=' in camera,
         "actual frame-duration/FPS diagnostics missing")
-require('captureResultFps < 45.0' in camera and 'targetPreviewFps = 30;' in camera,
-        "advertised 60 fps must fall back after sustained measured under-delivery")
+require('captureResultFps < 45.0' in camera and 'FPS_FORCE60_UNDERDELIVERY' in camera,
+        "measured 60-fps under-delivery evidence/logging missing")
+require('targetPreviewFps = allowCropped60Fps && sixtyFpsCapable ? 60 : 30;' in camera,
+        "initial cadence must be fixed 30 unless cropped-60 is explicitly enabled")
+require('keeping explicit target=60 [60,60]' in camera,
+        "explicit cropped-60 mode must not silently mutate back to 30 fps")
 require('camera %.1f fps   HDR pairs %.1f fps' in main,
         "GPU input and complete HDR-pair cadence diagnostics must remain visible")
 
@@ -246,8 +250,10 @@ require('buildMeterPreviewRequest(), previewCaptureCallback' in camera,
         "AUTO metering must use a contiguous repeating AE phase")
 require('Arrays.asList(shortRequest, longRequest)' in camera,
         "steady AUTO/MANUAL HDR must remain a two-manual-request repeating pair")
-require('AUTO_REMETER_INTERVAL_MS = 2_000L' in camera,
-        "low-duty clean AE refresh cadence missing")
+require('AUTO_REMETER_INTERVAL_MS = 5_000L' in camera,
+        "bounded clean AE refresh cadence must remain 5 seconds")
+require('cameraHandler.hasCallbacks(autoRemeterRunnable)' in camera,
+        "AUTO remeter must arm only one pending timer")
 require('FrameMeta.METER.equals(meta.kind)' in gl,
         "meter frames must remain hidden from display/pair publication")
 
@@ -308,27 +314,26 @@ require('resultFpsWindowStartNs = System.nanoTime();' not in open_section,
 require('if (resultFpsWindowStartNs == 0L) resultFpsWindowStartNs = now;' in camera,
         "first CaptureResult must start the cadence clock")
 
-# 026 - V1.4.3 device finding: true 60-fps preview may use a narrower physical-sensor readout.
-# Keep 60 only when physical-sensor FOV evidence is available and full; otherwise recreate at 30.
+# 026 / 034 - Device FOV/cadence regression: never transition crop/FPS behind the user.
+# FOV SAFE is fixed 30 from the first request. Cropped 60 is explicit and diagnostic-only
+# FOV evidence must never be fed by hidden AE meter frames.
 require('LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_SENSOR_CROP_REGION' in camera,
-        "API-35 physical-sensor crop evidence missing")
-require('FOV_UNSAFE_CONFIRM_FRAMES = 3' in camera and 'FOV_DECISION_FRAMES = 60' in camera,
-        "FOV parity confirmation window missing")
-require('updateFovEvidenceLocked(result);' in camera,
-        "every completed preview result must feed FOV parity evidence")
-require('switchToFovSafe30Locked' in camera,
-        "60-fps FOV-safe fallback owner missing")
-require('targetPreviewFps = 30;' in camera and 'closeSessionLocked();' in camera,
-        "FOV fallback must actually rebuild the preview session at 30 fps")
-require('cropRegion alone cannot prove in-sensor FOV parity' in camera,
-        "SCALER_CROP_REGION must never be treated as sufficient proof of full sensor readout")
-require('FOV_FALLBACK' in camera and 'FOV_PARITY' in camera,
-        "FOV decision must be externally diagnosable")
-require('STILL_FOV' in camera,
-        "still result FOV evidence must be logged for cross-device comparison")
+        "API-35 physical-sensor crop diagnostics missing")
+require('targetPreviewFps = allowCropped60Fps && sixtyFpsCapable ? 60 : 30;' in camera,
+        "FOV SAFE must start at 30; 60 requires explicit crop opt-in")
+fps_policy = camera[camera.index('private void applyFpsPolicyLocked'):camera.index('private String fovResultSummary')]
+require('targetPreviewFps = 30;' in fps_policy and 'aeFpsRange = chooseAeFpsRange(ranges, 30);' in fps_policy,
+        "turning cropped-60 OFF must immediately restore stable 30-fps policy")
+require('FOV_OVERRIDE' in camera and 'allowCropped60Fps' in camera,
+        "cropped-60 sensor-readout difference must remain explicit and logged")
+callback = camera[camera.index('private final CameraCaptureSession.CaptureCallback previewCaptureCallback'):camera.index('private void beginCaptureLocked()')]
+require('if (!FrameMeta.METER.equals(kind)) {' in callback
+        and 'updateCaptureResultFpsLocked();' in callback
+        and 'updateFovEvidenceLocked(result);' in callback,
+        "hidden AE meter frames must be excluded from cadence/FOV evidence")
 require('CaptureRequest.CONTROL_ZOOM_RATIO' not in camera
         and 'CaptureRequest.SCALER_CROP_REGION' not in camera,
-        "FOV correction must not fake parity by digitally cropping or zooming requests")
+        "FOV policy must not fake parity by digitally cropping or zooming requests")
 
 # 027 / 031 - MANUAL SAFE keeps flicker-compatible timing; ISO slider owns LONG only and SHORT uses min gain.
 require('recomputeManualFlickerSafetyLocked' in camera,
@@ -404,6 +409,22 @@ require('EDGE_AVAILABLE_EDGE_MODES' in camera and 'CaptureRequest.EDGE_MODE_OFF'
 require('configureProcessingControls(builder);' in camera,
         "processed preview/still requests must apply edge/noise ownership")
 
+# 034 - Recorded V1.4.5 HDR FUSED crop/FPS glitch becomes permanent regression.
+require(camera.count('scheduleAutoRemeterLocked();') == 1,
+        "AUTO remeter must be armed only from completed LONG results")
+require('FrameMeta.LONG.equals(kind)' in callback and 'scheduleAutoRemeterLocked();' in callback,
+        "remeter must wait for a completed LONG so a complete pair remains published")
+start_meter = camera[camera.index('private void startAutoMeteringLocked()'):camera.index('private void processAutoMeterResultLocked')]
+require('resetCaptureResultFpsLocked();' in start_meter,
+        "entering hidden AE meter must reset steady-preview FPS evidence")
+finish_meter = camera[camera.index('if (finishMeter) {', camera.index('private void commitAutoAnchorFromResultLocked')):camera.index('private void deriveAutoPairFromAnchorLocked')]
+require('resetCaptureResultFpsLocked();' in finish_meter,
+        "returning to SHORT/LONG pair must start a fresh steady-preview FPS window")
+require('FOV SAFE: fixed 30 fps preview avoids live sensor-crop/FPS transitions' in main,
+        "UI must state deterministic FOV-safe 30-fps semantics")
+require('60 FPS CROP ON: request fixed 60/60 preview' in main,
+        "UI must state explicit force-60 semantics")
+
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
     rotated_w = frame_h if axis_swap else frame_w
@@ -464,4 +485,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.5 REGRESSION PASS: producer-owned orientation, explicit DNG orientation, clean-anchored two-frame AUTO HDR, atomic pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.6 REGRESSION PASS: producer-owned orientation, explicit DNG orientation, clean-anchored two-frame AUTO HDR, atomic pairs, native FOV, measured cadence, sRGB, capture protection")

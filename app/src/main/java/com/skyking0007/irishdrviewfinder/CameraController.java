@@ -91,7 +91,7 @@ final class CameraController {
     private static final int AUTO_METER_MAX_FRAMES = 12;
     private static final int AUTO_METER_STABLE_FRAMES = 3;
     private static final double AUTO_METER_STABLE_EV = 0.18;
-    private static final long AUTO_REMETER_INTERVAL_MS = 2_000L;
+    private static final long AUTO_REMETER_INTERVAL_MS = 5_000L;
     private static final long AUTO_ANCHOR_FRESH_NS = 2_500_000_000L;
     private static final long NORMAL_ANCHOR_UPDATE_MIN_NS = 500_000_000L;
     private static final int DEFAULT_POST_RAW_BOOST = 100;
@@ -257,7 +257,6 @@ final class CameraController {
                 startAutoMeteringLocked();
             } else {
                 applyPreviewRepeatingLocked();
-                scheduleAutoRemeterLocked();
             }
         });
     }
@@ -276,7 +275,6 @@ final class CameraController {
                 if (enabled && !hasFreshAutoAnchorLocked()) startAutoMeteringLocked();
                 else {
                     applyPreviewRepeatingLocked();
-                    scheduleAutoRemeterLocked();
                 }
             }
         });
@@ -433,7 +431,10 @@ final class CameraController {
         boolean streamCanReach60 = previewMinFrameDurationNs <= 0
                 || previewMinFrameDurationNs <= 16_666_667L;
         sixtyFpsCapable = exactSixtyAe && streamCanReach60;
-        targetPreviewFps = sixtyFpsCapable ? 60 : 30;
+        // FOV SAFE is deterministic 30 fps. The previous optimistic 60->30
+        // transition visibly changed sensor readout/FOV on-device. Only the explicit
+        // 60 FPS CROP toggle is allowed to request the cropped 60-fps sensor mode.
+        targetPreviewFps = allowCropped60Fps && sixtyFpsCapable ? 60 : 30;
         manualFrameDurationNs = targetPreviewFps >= 60
                 ? SIXTY_FPS_DURATION_NS : THIRTY_FPS_DURATION_NS;
         if (targetPreviewFps < 60 && previewMinFrameDurationNs > 0) {
@@ -503,7 +504,6 @@ final class CameraController {
                                 startAutoMeteringLocked();
                             } else {
                                 applyPreviewRepeatingLocked();
-                                scheduleAutoRemeterLocked();
                             }
                         }
 
@@ -609,7 +609,6 @@ final class CameraController {
                                         : String.format(Locale.US, "  bracket=%.1fEV", manualEffectiveBracketEv))
                                 + "  flicker=" + flickerLabel(sceneFlicker)
                                 + "  target=" + targetPreviewFps + " sensor fps");
-                scheduleAutoRemeterLocked();
             }
         } catch (Throwable t) {
             RuntimeLogger.error("REPEATING_FAIL", t);
@@ -747,8 +746,13 @@ final class CameraController {
                     Integer iso = result.get(CaptureResult.SENSOR_SENSITIVITY);
                     if (timestamp == null || exposure == null || iso == null) return;
 
-                    updateCaptureResultFpsLocked();
-                    updateFovEvidenceLocked(result);
+                    // Hidden AE meter frames are transient control probes, not live
+                    // steady-preview cadence/FOV evidence. Counting them poisoned the
+                    // 60-fps watchdog and could cause a visible 60->30 crop transition.
+                    if (!FrameMeta.METER.equals(kind)) {
+                        updateCaptureResultFpsLocked();
+                        updateFovEvidenceLocked(result);
+                    }
                     Integer observedFlicker = result.get(CaptureResult.STATISTICS_SCENE_FLICKER);
                     if (!autoHdrExposure
                             && previewMode != PreviewMode.NORMAL
@@ -773,6 +777,12 @@ final class CameraController {
 
                     FrameMeta meta = new FrameMeta(kind, result.getFrameNumber(), timestamp, exposure, iso);
                     listener.onPreviewMeta(meta);
+                    if (FrameMeta.LONG.equals(kind)
+                            && autoHdrExposure
+                            && previewMode != PreviewMode.NORMAL
+                            && !autoMetering) {
+                        scheduleAutoRemeterLocked();
+                    }
                     previewResultCount++;
                     Long frameDuration = result.get(CaptureResult.SENSOR_FRAME_DURATION);
                     if (previewResultCount % 300 == 0) {
@@ -1117,14 +1127,15 @@ final class CameraController {
             fovFallbackApplied = false;
             fovDecisionLogged = true;
         } else {
-            targetPreviewFps = sixtyFpsCapable ? 60 : 30;
-            manualFrameDurationNs = targetPreviewFps >= 60
-                    ? SIXTY_FPS_DURATION_NS
-                    : Math.max(THIRTY_FPS_DURATION_NS, previewMinFrameDurationNs);
-            aeFpsRange = chooseAeFpsRange(ranges, targetPreviewFps);
+            // OFF means stable full-FOV 30 fps from the first request. Do not enter a
+            // cropped 60-fps mode and later fall back, because that transition is
+            // itself visible in the viewfinder.
+            targetPreviewFps = 30;
+            manualFrameDurationNs = Math.max(THIRTY_FPS_DURATION_NS, previewMinFrameDurationNs);
+            aeFpsRange = chooseAeFpsRange(ranges, 30);
             resetFovEvidenceLocked();
             if (allowCropped60Fps && !sixtyFpsCapable) {
-                listener.onStatus("Exact 60/60 fps is unavailable for this camera/PRIVATE stream; using 30 fps");
+                listener.onStatus("Exact 60/60 fps is unavailable for this camera/PRIVATE stream; using stable 30 fps");
             }
         }
         haveAeSample = false;
@@ -1185,23 +1196,35 @@ final class CameraController {
                 if (captureResultFps < 45.0) sixtyFpsUnderDeliveryWindows++;
                 else sixtyFpsUnderDeliveryWindows = 0;
                 if (sixtyFpsUnderDeliveryWindows >= 2) {
-                    targetPreviewFps = 30;
-                    manualFrameDurationNs = Math.max(THIRTY_FPS_DURATION_NS, previewMinFrameDurationNs);
-                    Range<Integer>[] ranges = characteristics == null ? null
-                            : characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
-                    aeFpsRange = chooseAeFpsRange(ranges, 30);
-                    sixtyFpsUnderDeliveryWindows = 0;
-                    haveAeSample = false;
-                    lastAutoAnchorNs = 0L;
-                    autoMetering = false;
-                    recomputeManualFlickerSafetyLocked();
-                    listener.onStatus(
-                            "60 fps capability under-delivered at "
-                                    + String.format(Locale.US, "%.1f", captureResultFps)
-                                    + " CaptureResult fps; switching live target to 30 fps");
-                    if (captureSession != null && !stillSessionActive) {
-                        if (autoHdrExposure && previewMode != PreviewMode.NORMAL) startAutoMeteringLocked();
-                        else applyPreviewRepeatingLocked();
+                    if (allowCropped60Fps) {
+                        // The user explicitly selected the cropped 60-fps sensor mode.
+                        // Report real delivery, but never mutate the requested cadence/FOV
+                        // behind their back. Meter transitions are excluded above.
+                        RuntimeLogger.event(
+                                "FPS_FORCE60_UNDERDELIVERY",
+                                "steady CaptureResult fps="
+                                        + String.format(Locale.US, "%.1f", captureResultFps)
+                                        + "; keeping explicit target=60 [60,60]");
+                        sixtyFpsUnderDeliveryWindows = 0;
+                    } else {
+                        targetPreviewFps = 30;
+                        manualFrameDurationNs = Math.max(THIRTY_FPS_DURATION_NS, previewMinFrameDurationNs);
+                        Range<Integer>[] ranges = characteristics == null ? null
+                                : characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+                        aeFpsRange = chooseAeFpsRange(ranges, 30);
+                        sixtyFpsUnderDeliveryWindows = 0;
+                        haveAeSample = false;
+                        lastAutoAnchorNs = 0L;
+                        autoMetering = false;
+                        recomputeManualFlickerSafetyLocked();
+                        listener.onStatus(
+                                "60 fps capability under-delivered at "
+                                        + String.format(Locale.US, "%.1f", captureResultFps)
+                                        + " CaptureResult fps; switching live target to 30 fps");
+                        if (captureSession != null && !stillSessionActive) {
+                            if (autoHdrExposure && previewMode != PreviewMode.NORMAL) startAutoMeteringLocked();
+                            else applyPreviewRepeatingLocked();
+                        }
                     }
                 }
             }
@@ -1214,9 +1237,9 @@ final class CameraController {
     }
 
     private void scheduleAutoRemeterLocked() {
-        cameraHandler.removeCallbacks(autoRemeterRunnable);
         if (!autoHdrExposure || previewMode == PreviewMode.NORMAL || stillSessionActive
-                || captureSession == null || autoMetering) return;
+                || captureSession == null || autoMetering
+                || cameraHandler.hasCallbacks(autoRemeterRunnable)) return;
         cameraHandler.postDelayed(autoRemeterRunnable, AUTO_REMETER_INTERVAL_MS);
     }
 
@@ -1226,6 +1249,9 @@ final class CameraController {
                 || cameraDevice == null || captureSession == null || previewSurface == null) return;
         try {
             autoMetering = true;
+            // Metering temporarily replaces the pair request. Start a fresh cadence
+            // window so that this bounded hidden phase cannot look like 60-fps failure.
+            resetCaptureResultFpsLocked();
             autoMeterFrames = 0;
             autoMeterStableFrames = 0;
             autoMeterLastProduct = -1.0;
@@ -1302,8 +1328,9 @@ final class CameraController {
 
         if (finishMeter) {
             autoMetering = false;
+            // The next FPS window must contain only steady SHORT/LONG results.
+            resetCaptureResultFpsLocked();
             applyPreviewRepeatingLocked();
-            scheduleAutoRemeterLocked();
         }
     }
 

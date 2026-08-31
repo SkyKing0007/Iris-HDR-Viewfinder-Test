@@ -303,8 +303,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
             Toast.makeText(
                     this,
                     allowCropped60Fps
-                            ? "60 FPS CROP allowed: true 60/60 preview may be tighter than full RAW/JPEG capture"
-                            : "FOV SAFE: 60 fps is kept only when full capture FOV is proven; otherwise 30 fps",
+                            ? "60 FPS CROP ON: request fixed 60/60 preview; measured delivery is shown separately"
+                            : "FOV SAFE: fixed 30 fps preview avoids live sensor-crop/FPS transitions",
                     Toast.LENGTH_LONG).show();
         });
 
@@ -492,7 +492,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
                         + " | JPEG/DNG orientation=" + jpegOrientation + "°"
                         + " | target=" + targetPreviewFps + " fps"
                         + " | AE fps=" + (aeFpsRange == null ? "auto" : aeFpsRange)
-                        + " | 60fps crop=" + (allowCropped60Fps ? "allowed" : "FOV-safe")
+                        + " | cadence=" + (allowCropped60Fps ? "60fps crop requested" : "FOV-safe fixed 30fps")
                         + " | sRGB tonemap=" + (srgbTonemap ? "contrast-curve" : "HAL default")
                         + " | sync latency=" + (syncLatency == null ? "?" : syncLatency)
                         + " | files -> Downloads/IrisHDRViewfinder"
