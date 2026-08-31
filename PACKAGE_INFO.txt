@@ -1,27 +1,25 @@
-Iris HDR Viewfinder Test V1.4.3
+Iris HDR Viewfinder Test V1.4.4
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED FOR GITHUB ACTIONS BUILD - NOT YET BUILD-PROVEN
-Runtime authority: exact successful V1.4.2 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.2
-Authority commit: 2598328da39df6811fd4a2310aa513edaf38a9c0
-Authority Actions run: 33349828814
-Authority artifact ID: 9743233350
-Authority artifact ZIP SHA-256: d62de97b3c662dc987a35ab5cbe1a90859bb73ef95dcb52fa7fa5e5d933bd369
-Authority V1.4.2 source TAR SHA-256: 4932820f049bd245c0dbc1c25d5b444314777566e6dc9dce0a0047ce0149859a
-Authority V1.4.2 runtime manifest SHA-256: b630fcfd54440baee46c4b84a8914519071732ed664ceb61379939f43be1083a
-Authority V1.4.2 repository manifest SHA-256: 0d8176582dd3b331ba32bbc363fff1835e36d4402cc2eb486e2dae5d36717bb2
-Authority V1.4.2 APK SHA-256: c52475a946699cb9ded9be50e3a4b8ec826ee41650193cbc211c4daddf0fc9c9
-Existing architecture backup: backup-v1.3-pre-direct-gpu-hdr at e205b6b9acdf9ff091eb46a6c521ccd72d287356. No new backup: V1.4.3 is a localized correction to rejected V1.4.2 behavior.
+Runtime authority: exact successful V1.4.3 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.3
+Authority commit: 78e5ff899bed4ea3beef54184b7071aa6996838b
+Authority Actions run: 33353686676
+Authority artifact ID: 9744449755
+Authority artifact ZIP SHA-256: 7bd3ccd558df58726dd6ed70ada3b06106b69544000cd4b41238d035a393b34d
+Authority V1.4.3 source TAR SHA-256: b0fa3a074e342eead52b34c83702e72074163b5b123655297b048dccf7e1ed4e
+Authority V1.4.3 runtime manifest SHA-256: e91ea0890c5b0444d0a3d33636a0c6717f62b06b7a7f7a0825e128aebb9686ad
+Authority V1.4.3 repository manifest SHA-256: 883851b2e5e3fd4d0e3974d47147fee8b2fb589d3fc041fdcd4eb27a86715265
+Authority V1.4.3 APK SHA-256: ff688a588fc434c0378d90cb4846631bd72c397cfb24110d17a81dfe3ecef60f
+Existing architecture backup: backup-v1.3-pre-direct-gpu-hdr at e205b6b9acdf9ff091eb46a6c521ccd72d287356. No new backup: V1.4.4 is a localized correction/logger addition.
 
-Device evidence driving V1.4.3:
-- V1.4.2 HDR AUTO fell to about 8.8-10.6 CaptureResult fps and about 3.5-4.4 complete HDR pairs/s.
-- The same installed V1.4.2 in HDR MANUAL proved 29.9 result fps / 29.5 camera fps / 14.8 HDR pairs/s / dropped 0.
-- NORMAL AE proved 30.3 result fps / 30.0 camera fps / dropped 0.
-- Portrait live preview remained sideways in NORMAL and HDR, isolating orientation to the shared SurfaceTexture/display chain.
-- Both captured DNGs were 4096x3072 sensor-native Bayer and contained TIFF Orientation=9 because DngCreator orientation was never explicitly set.
+Device evidence driving V1.4.4:
+- V1.4.3 AUTO HDR now delivers about 60 camera fps / about 30 complete HDR pairs/s with zero drops on the Xiaomi 15 Ultra.
+- That 60-fps preview appears materially tighter than the full-FOV RAW/JPEG still capture.
+- V1.4.3 MANUAL can still show the moving scan-band/flicker artifact that AUTO avoids under artificial light.
 
-V1.4.3 runtime scope: CameraController.java, CaptureSetSaver.java, HdrGlView.java, MainActivity.java only.
-V1.4.3 AUTO HDR: no out-of-band capture() meter. The LONG member of the existing two-request SHORT/LONG repeating burst owns Camera2 AE + AUTO antibanding; SHORT is derived from the latest LONG result. Short-request rebuilds are coalesced to at most about 2 Hz and only for meaningful exposure/strategy changes. Both preview members carry the same selected CONTROL_AE_TARGET_FPS_RANGE so the pair never alternates that session-sensitive key frame by frame.
-V1.4.3 live orientation: Camera2 preview still requests SCALER_ROTATE_AND_CROP_NONE where supported; SurfaceTexture.getTransformMatrix() remains consumed exactly once in the OES pass; the rejected second display quarter-turn is disabled; the sensor/display relation is retained only to swap FIT geometry axes when required.
-V1.4.3 DNG orientation: RAW Bayer pixels remain sensor-native; CaptureSetSaver explicitly maps 0/90/180/270 degrees to valid EXIF/TIFF orientation 1/6/3/8 and calls DngCreator.setOrientation() before writeImage(). TIFF Orientation=9 is permanently forbidden.
-Protected unchanged runtime: AndroidManifest.xml, all four GLSL assets, FrameMeta.java, JpegFusion.java, MediaStoreWriter.java.
+V1.4.4 runtime scope: CameraController.java, HdrGlView.java, MainActivity.java only.
+FOV policy: Camera2 API-35 physical-sensor crop evidence is the 60-fps authority. If 60 fps reports a physical-sensor readout crop, or if full-FOV physical readout cannot be proven, Iris recreates the preview at 30 fps. The app never crops RAW/JPEG to imitate a cropped viewfinder.
+MANUAL SAFE: requested manual bracket intent is preserved where sensor limits allow, while 50/60-Hz or unknown/PWM lighting uses flicker-compatible integration timing and gain separation instead of an unsafe 1/480 + 1/60 temporal pair.
+Production logger: critical lifecycle, Camera2 session/error, FOV, flicker, capture, GPU and uncaught-crash evidence is written at a low duty cycle to Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt.
+Protected unchanged runtime: AndroidManifest.xml, all four GLSL assets, CaptureSetSaver.java, FrameMeta.java, JpegFusion.java, MediaStoreWriter.java.
 Toolchain: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2 in Actions.

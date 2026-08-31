@@ -2,11 +2,22 @@ package com.skyking0007.irishdrviewfinder;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.content.Context;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.hardware.camera2.CameraAccessException;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.MediaStore;
+import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
 import android.view.Surface;
@@ -21,9 +32,19 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.BufferedWriter;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity implements CameraController.Listener {
     private static final int CAMERA_PERMISSION_REQUEST = 1001;
@@ -68,10 +89,33 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private volatile int longIndex = 6;
     private volatile int isoIndex = 2;
     private volatile boolean autoHdrEnabled = true;
+    private final Handler heartbeatHandler = new Handler(Looper.getMainLooper());
+    private boolean heartbeatScheduled;
+    private final Runnable heartbeatRunnable = new Runnable() {
+        @Override
+        public void run() {
+            heartbeatScheduled = false;
+            if (glView != null) {
+                RuntimeLogger.event(
+                        "UI_HEARTBEAT",
+                        String.format(
+                                Locale.US,
+                                "mode=%d auto=%s camera=%.1ffps pairs=%.1ffps dropped=%d",
+                                modeIndex,
+                                autoHdrEnabled,
+                                glView.getInputFps(),
+                                glView.getHdrPairFps(),
+                                glView.getDroppedRenderFrames()));
+            }
+            scheduleHeartbeat();
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        RuntimeLogger.install(getApplicationContext());
+        RuntimeLogger.event("ACTIVITY", "onCreate");
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         restoreUiState(savedInstanceState);
         buildUi();
@@ -230,7 +274,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
                     this,
                     autoHdrEnabled
                             ? "AUTO HDR continuously meters the scene; manual sliders are locked"
-                            : "MANUAL HDR: short, long and ISO are now fixed by the sliders",
+                            : "MANUAL SAFE: sliders set the target bracket; flicker-safe timing may use gain separation",
                     Toast.LENGTH_SHORT).show();
         });
 
@@ -329,6 +373,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
     @Override
     protected void onResume() {
         super.onResume();
+        RuntimeLogger.event("ACTIVITY", "onResume");
+        scheduleHeartbeat();
         if (glView != null) {
             glView.onResume();
             glView.republishInputSurface();
@@ -341,6 +387,9 @@ public final class MainActivity extends Activity implements CameraController.Lis
 
     @Override
     protected void onPause() {
+        RuntimeLogger.event("ACTIVITY", "onPause");
+        heartbeatHandler.removeCallbacks(heartbeatRunnable);
+        heartbeatScheduled = false;
         if (controller != null) controller.stopCamera();
         if (glView != null) glView.onPause();
         super.onPause();
@@ -348,19 +397,21 @@ public final class MainActivity extends Activity implements CameraController.Lis
 
     @Override
     protected void onDestroy() {
+        RuntimeLogger.event("ACTIVITY", "onDestroy");
         if (controller != null) controller.close();
         super.onDestroy();
     }
 
     @Override
     public void onStatus(String text) {
-        runOnUiThread(() -> statusText.setText(String.format(
+        String combined = String.format(
                 Locale.US,
                 "%s   |   camera %.1f fps   HDR pairs %.1f fps   dropped %d",
                 text,
                 glView.getInputFps(),
                 glView.getHdrPairFps(),
-                glView.getDroppedRenderFrames())));
+                glView.getDroppedRenderFrames());
+        runOnUiThread(() -> statusText.setText(combined));
     }
 
     @Override
@@ -398,7 +449,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
                 EXPOSURES_NS[shortIndex],
                 EXPOSURES_NS[longIndex],
                 ISO_VALUES[isoIndex]);
-        runOnUiThread(() -> statusText.setText(
+        String configurationText =
                 "Camera " + cameraId
                         + " | preview " + previewSize
                         + " | RAW " + rawSize
@@ -409,7 +460,10 @@ public final class MainActivity extends Activity implements CameraController.Lis
                         + " | AE fps=" + (aeFpsRange == null ? "auto" : aeFpsRange)
                         + " | sRGB tonemap=" + (srgbTonemap ? "preset" : "HAL default")
                         + " | sync latency=" + (syncLatency == null ? "?" : syncLatency)
-                        + " | files -> Downloads/IrisHDRViewfinder"));
+                        + " | files -> Downloads/IrisHDRViewfinder"
+                        + " | log -> " + RuntimeLogger.location();
+        RuntimeLogger.event("CAMERA_CONFIG", configurationText);
+        runOnUiThread(() -> statusText.setText(configurationText));
     }
 
     @Override
@@ -455,6 +509,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
 
     @Override
     public void onCaptureFinished(String captureId, boolean success, String message) {
+        RuntimeLogger.event(success ? "CAPTURE_UI_DONE" : "CAPTURE_UI_FAIL", captureId + " " + message);
         runOnUiThread(() -> {
             captureButton.setEnabled(true);
             Toast.makeText(
@@ -465,9 +520,15 @@ public final class MainActivity extends Activity implements CameraController.Lis
         });
     }
 
+    private void scheduleHeartbeat() {
+        if (heartbeatScheduled) return;
+        heartbeatScheduled = true;
+        heartbeatHandler.postDelayed(heartbeatRunnable, 10_000L);
+    }
+
     private void refreshAutoButton() {
         if (autoButton == null) return;
-        autoButton.setText(autoHdrEnabled ? "HDR AUTO: ON" : "HDR MANUAL");
+        autoButton.setText(autoHdrEnabled ? "HDR AUTO: ON" : "HDR MANUAL SAFE");
     }
 
     private void setManualControlsEnabled(boolean enabled) {
@@ -583,5 +644,134 @@ public final class MainActivity extends Activity implements CameraController.Lis
 
         @Override
         public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+    }
+}
+
+final class RuntimeLogger {
+    private static final String TAG = "IrisHDR";
+    // Event producers are deliberately rate-limited; this logger must never become a frame-rate owner.
+    private static final Object FILE_LOCK = new Object();
+    private static final ExecutorService IO = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "IrisHdrLogger");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    private static volatile boolean installed;
+    private static volatile String location = "log not initialized";
+    private static BufferedWriter writer;
+    private static Thread.UncaughtExceptionHandler previousCrashHandler;
+
+    private RuntimeLogger() {}
+
+    static void install(Context context) {
+        if (installed) return;
+        synchronized (FILE_LOCK) {
+            if (installed) return;
+            installed = true;
+            Context app = context.getApplicationContext();
+            String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date());
+            String fileName = "IrisHDR_Runtime_" + stamp + ".txt";
+            try {
+                ContentResolver resolver = app.getContentResolver();
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                values.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+                values.put(
+                        MediaStore.MediaColumns.RELATIVE_PATH,
+                        Environment.DIRECTORY_DOWNLOADS + "/IrisHDRViewfinder/Logs");
+                Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) throw new IllegalStateException("MediaStore insert returned null");
+                OutputStream output = resolver.openOutputStream(uri, "w");
+                if (output == null) throw new IllegalStateException("MediaStore output stream is null");
+                writer = new BufferedWriter(new OutputStreamWriter(output, StandardCharsets.UTF_8));
+                location = "Downloads/IrisHDRViewfinder/Logs/" + fileName;
+            } catch (Throwable t) {
+                location = "Logcat only; file logger init failed: " + t.getClass().getSimpleName();
+                Log.e(TAG, "Runtime log file initialization failed", t);
+            }
+
+            previousCrashHandler = Thread.getDefaultUncaughtExceptionHandler();
+            Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
+                writeCrashSynchronously(thread, throwable);
+                Thread.UncaughtExceptionHandler prior = previousCrashHandler;
+                if (prior != null) prior.uncaughtException(thread, throwable);
+            });
+        }
+
+        String version = "?";
+        long versionCode = -1L;
+        try {
+            PackageInfo info = appPackageInfo(context);
+            version = info.versionName == null ? "?" : info.versionName;
+            versionCode = Build.VERSION.SDK_INT >= 28 ? info.getLongVersionCode() : info.versionCode;
+        } catch (Throwable ignored) {
+        }
+        event(
+                "SESSION",
+                "start version=" + version + "/" + versionCode
+                        + " manufacturer=" + Build.MANUFACTURER
+                        + " brand=" + Build.BRAND
+                        + " model=" + Build.MODEL
+                        + " device=" + Build.DEVICE
+                        + " sdk=" + Build.VERSION.SDK_INT
+                        + " log=" + location);
+    }
+
+    private static PackageInfo appPackageInfo(Context context) throws Exception {
+        return context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+    }
+
+    static String location() {
+        return location;
+    }
+
+    static void event(String category, String message) {
+        String safeCategory = category == null ? "EVENT" : category;
+        String safeMessage = message == null ? "" : message.replace('\n', ' ').replace('\r', ' ');
+        Log.i(TAG, safeCategory + " " + safeMessage);
+        String line = formatLine(safeCategory, safeMessage, Thread.currentThread().getName());
+        IO.execute(() -> writeLine(line));
+    }
+
+    static void error(String category, Throwable throwable) {
+        StringWriter stack = new StringWriter();
+        if (throwable != null) throwable.printStackTrace(new PrintWriter(stack));
+        String message = throwable == null ? "null" : throwable.toString();
+        Log.e(TAG, category + " " + message, throwable);
+        String line = formatLine(
+                category == null ? "ERROR" : category,
+                message + " | " + stack.toString().replace('\n', '|').replace('\r', ' '),
+                Thread.currentThread().getName());
+        IO.execute(() -> writeLine(line));
+    }
+
+    private static void writeCrashSynchronously(Thread thread, Throwable throwable) {
+        StringWriter stack = new StringWriter();
+        throwable.printStackTrace(new PrintWriter(stack));
+        String text = formatLine(
+                "UNCAUGHT_CRASH",
+                throwable + " | " + stack.toString().replace('\n', '|').replace('\r', ' '),
+                thread == null ? "?" : thread.getName());
+        Log.e(TAG, "UNCAUGHT_CRASH", throwable);
+        writeLine(text);
+    }
+
+    private static String formatLine(String category, String message, String threadName) {
+        String wall = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
+        return wall + " [" + threadName + "] " + category + " " + message;
+    }
+
+    private static void writeLine(String line) {
+        synchronized (FILE_LOCK) {
+            if (writer == null) return;
+            try {
+                writer.write(line);
+                writer.newLine();
+                writer.flush();
+            } catch (Throwable t) {
+                Log.e(TAG, "Runtime log write failed", t);
+            }
+        }
     }
 }

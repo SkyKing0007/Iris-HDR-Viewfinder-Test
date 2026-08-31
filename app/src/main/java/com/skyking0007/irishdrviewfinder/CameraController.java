@@ -3,6 +3,7 @@ package com.skyking0007.irishdrviewfinder;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.ImageFormat;
+import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
@@ -88,6 +89,10 @@ final class CameraController {
     private static final double AUTO_SHUTTER_HYSTERESIS_EV = 0.20;
     private static final long AUTO_SHORT_UPDATE_MIN_INTERVAL_NS = 500_000_000L;
     private static final long AUTO_UI_NOTIFY_INTERVAL_NS = 500_000_000L;
+    private static final double FOV_MAX_REPORTED_SCALE = 1.03;
+    private static final float FOV_MAX_REPORTED_ZOOM = 1.02f;
+    private static final int FOV_UNSAFE_CONFIRM_FRAMES = 3;
+    private static final int FOV_DECISION_FRAMES = 60;
     private static final int FLICKER_UNKNOWN = -1;
 
     private final Context context;
@@ -112,6 +117,12 @@ final class CameraController {
     private long shortExposureNs = ONE_SECOND_NS / 480;
     private long longExposureNs = ONE_SECOND_NS / 60;
     private int manualIso = 400;
+    private long manualEffectiveShortExposureNs = ONE_SECOND_NS / 480;
+    private long manualEffectiveLongExposureNs = ONE_SECOND_NS / 60;
+    private int manualEffectiveShortIso = 400;
+    private int manualEffectiveLongIso = 400;
+    private boolean manualFlickerSafetyApplied;
+    private double manualEffectiveBracketEv = 3.0;
     private boolean autoHdrExposure = true;
     private long autoShortExposureNs = ONE_SECOND_NS / 120;
     private long autoLongExposureNs = ONE_SECOND_NS / 60;
@@ -139,6 +150,17 @@ final class CameraController {
     private int targetPreviewFps = 30;
     private Range<Integer> aeFpsRange;
     private boolean srgbTonemapSupported;
+    private Rect activeArray;
+    private int fovEvidenceFrames;
+    private int fovUnsafeFrames;
+    private boolean fovDecisionLogged;
+    private boolean fovFallbackApplied;
+    private Rect lastReportedCropRegion;
+    private Rect lastPhysicalSensorCropRegion;
+    private Rect lastPhysicalActiveArray;
+    private String lastPhysicalActiveArrayId;
+    private Float lastReportedZoomRatio;
+    private String lastActivePhysicalId;
 
     CameraController(Context context, Listener listener) {
         this.context = context.getApplicationContext();
@@ -182,6 +204,7 @@ final class CameraController {
     void setPreviewSurface(Surface surface) {
         cameraHandler.post(() -> {
             if (previewSurface == surface) return;
+            RuntimeLogger.event("PREVIEW_SURFACE", surface == null ? "cleared" : "received valid=" + surface.isValid());
             previewSurface = surface;
             previewSurfaceConfigured = false;
             if (captureSession != null) closeSessionLocked();
@@ -195,6 +218,7 @@ final class CameraController {
         cameraHandler.post(() -> {
             if (previewSurface == null || !previewSurface.isValid()) return;
             previewSurfaceConfigured = true;
+            RuntimeLogger.event("PREVIEW_SURFACE", "configured size=" + previewSize);
             startPreviewSessionLocked();
         });
     }
@@ -211,6 +235,7 @@ final class CameraController {
     void setPreviewMode(PreviewMode mode) {
         previewMode = mode;
         cameraHandler.post(() -> {
+            RuntimeLogger.event("PREVIEW_MODE", String.valueOf(previewMode));
             if (previewMode != PreviewMode.NORMAL && autoHdrExposure && haveAeSample) {
                 updateAutoHdrFromAeLocked(lastAeExposureNs, lastAeIso, sceneFlicker, true);
             }
@@ -224,8 +249,10 @@ final class CameraController {
             if (enabled && haveAeSample) {
                 updateAutoHdrFromAeLocked(lastAeExposureNs, lastAeIso, sceneFlicker, true);
             } else if (!enabled) {
+                recomputeManualFlickerSafetyLocked();
                 listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
             }
+            RuntimeLogger.event("HDR_MODE", enabled ? "AUTO" : manualSafetySummaryLocked());
             if (previewMode != PreviewMode.NORMAL) applyPreviewRepeatingLocked();
         });
     }
@@ -241,8 +268,10 @@ final class CameraController {
                 longExposureNs = tmp;
             }
             manualIso = clampIso(iso);
+            recomputeManualFlickerSafetyLocked();
             if (!autoHdrExposure) {
                 listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
+                RuntimeLogger.event("MANUAL_SETTINGS", manualSafetySummaryLocked());
                 applyPreviewRepeatingLocked();
             }
         });
@@ -276,6 +305,7 @@ final class CameraController {
         if (opening || cameraDevice != null || cameraId == null) return;
         try {
             characteristics = cameraManager.getCameraCharacteristics(cameraId);
+            activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
             Range<Long> expRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
             Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
             if (expRange == null || isoRange == null) {
@@ -291,13 +321,24 @@ final class CameraController {
             autoLongIso = clampIso(autoLongIso);
             resolveOutputSizesLocked();
             resetCaptureResultFpsLocked();
+            resetFovEvidenceLocked();
             haveAeSample = false;
             sceneFlicker = FLICKER_UNKNOWN;
+            recomputeManualFlickerSafetyLocked();
             lastAppliedAutoLongProduct = -1.0;
             lastAppliedAutoStableBright = false;
             lastAutoShortApplyNs = 0L;
             lastAutoUiNotifyNs = 0L;
             opening = true;
+            RuntimeLogger.event(
+                    "CAMERA_OPEN",
+                    "id=" + cameraId
+                            + " activeArray=" + rectText(activeArray)
+                            + " preview=" + previewSize
+                            + " raw=" + rawSize
+                            + " jpeg=" + jpegSize
+                            + " requestedTarget=" + targetPreviewFps
+                            + " aeFps=" + rangeText(aeFpsRange));
             listener.onStatus("Opening camera " + cameraId + "…");
             cameraManager.openCamera(
                     cameraId,
@@ -312,6 +353,7 @@ final class CameraController {
                         @Override
                         public void onDisconnected(CameraDevice camera) {
                             opening = false;
+                            RuntimeLogger.event("CAMERA_ERROR", "disconnected");
                             listener.onStatus("Camera disconnected");
                             camera.close();
                             cameraDevice = null;
@@ -320,6 +362,7 @@ final class CameraController {
                         @Override
                         public void onError(CameraDevice camera, int error) {
                             opening = false;
+                            RuntimeLogger.event("CAMERA_ERROR", "device error=" + error);
                             listener.onStatus("Camera error " + error);
                             camera.close();
                             cameraDevice = null;
@@ -328,6 +371,7 @@ final class CameraController {
                     cameraHandler);
         } catch (Throwable t) {
             opening = false;
+            RuntimeLogger.error("CAMERA_OPEN_FAIL", t);
             listener.onStatus("Open failed: " + t.getMessage());
         }
     }
@@ -382,6 +426,7 @@ final class CameraController {
                                 return;
                             }
                             captureSession = session;
+                            resetFovEvidenceLocked();
                             Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
                             Integer sync = characteristics.get(CameraCharacteristics.SYNC_MAX_LATENCY);
                             listener.onCameraConfigured(
@@ -400,15 +445,22 @@ final class CameraController {
                             } else if (!autoHdrExposure) {
                                 listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
                             }
+                            RuntimeLogger.event(
+                                    "SESSION_CONFIGURED",
+                                    "preview-only target=" + targetPreviewFps
+                                            + " aeFps=" + rangeText(aeFpsRange)
+                                            + " preview=" + previewSize);
                             applyPreviewRepeatingLocked();
                         }
 
                         @Override
                         public void onConfigureFailed(CameraCaptureSession session) {
+                            RuntimeLogger.event("SESSION_ERROR", "PRIVATE preview-only configuration failed");
                             listener.onStatus("PRIVATE preview-only session configuration failed");
                         }
                     }, cameraHandler);
         } catch (CameraAccessException e) {
+            RuntimeLogger.error("SESSION_START_FAIL", e);
             listener.onStatus("Preview session failed: " + e.getMessage());
         }
     }
@@ -476,7 +528,9 @@ final class CameraController {
                 listener.onStatus("NORMAL AE preview  target=" + rangeText(aeFpsRange) + " fps");
             } else {
                 long activeShortNs = activeShortExposureNs();
+                long activeLongNs = activeLongExposureNs();
                 int activeShortIso = activeShortIso();
+                int activeLongIso = activeLongIso();
                 CaptureRequest shortRequest = buildManualPreviewRequest(TAG_SHORT, activeShortNs, activeShortIso);
                 CaptureRequest longRequest;
                 if (autoHdrExposure) {
@@ -484,7 +538,7 @@ final class CameraController {
                     // repeating burst avoids V1.4.2's disruptive out-of-band capture().
                     longRequest = buildAutoLongPreviewRequest();
                 } else {
-                    longRequest = buildManualPreviewRequest(TAG_LONG, longExposureNs, manualIso);
+                    longRequest = buildManualPreviewRequest(TAG_LONG, activeLongNs, activeLongIso);
                 }
                 captureSession.setRepeatingBurst(
                         Arrays.asList(shortRequest, longRequest),
@@ -492,15 +546,19 @@ final class CameraController {
                         cameraHandler);
                 listener.onStatus(
                         (previewMode == PreviewMode.HDR ? "HDR" : "SPLIT")
-                                + (autoHdrExposure ? " AUTO" : " MANUAL")
+                                + (autoHdrExposure
+                                        ? " AUTO"
+                                        : manualFlickerSafetyApplied ? " MANUAL SAFE" : " MANUAL")
                                 + " paired preview  short=" + exposureText(activeShortNs) + " ISO" + activeShortIso
                                 + (autoHdrExposure
                                         ? "  long=AE-live latest=" + exposureText(autoLongExposureNs) + " ISO" + autoLongIso
-                                        : "  long=" + exposureText(longExposureNs) + " ISO" + manualIso)
+                                        : "  long=" + exposureText(activeLongNs) + " ISO" + activeLongIso
+                                                + String.format(Locale.US, "  bracket=%.1fEV", manualEffectiveBracketEv))
                                 + "  flicker=" + flickerLabel(sceneFlicker)
                                 + "  target=" + targetPreviewFps + " sensor fps");
             }
         } catch (Throwable t) {
+            RuntimeLogger.error("REPEATING_FAIL", t);
             listener.onStatus("Repeating request failed: " + t.getMessage());
         }
     }
@@ -599,12 +657,25 @@ final class CameraController {
                     if (timestamp == null || exposure == null || iso == null) return;
 
                     updateCaptureResultFpsLocked();
+                    updateFovEvidenceLocked(result);
+                    Integer observedFlicker = result.get(CaptureResult.STATISTICS_SCENE_FLICKER);
+                    if (!autoHdrExposure
+                            && previewMode != PreviewMode.NORMAL
+                            && observedFlicker != null
+                            && (observedFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ
+                                    || observedFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ)
+                            && observedFlicker != sceneFlicker) {
+                        sceneFlicker = observedFlicker;
+                        if (recomputeManualFlickerSafetyLocked()) {
+                            RuntimeLogger.event("MANUAL_FLICKER", manualSafetySummaryLocked());
+                            applyPreviewRepeatingLocked();
+                        }
+                    }
 
                     if (FrameMeta.NORMAL.equals(kind)
                             || FrameMeta.LONG.equals(kind) && autoHdrExposure) {
                         boolean firstAeSample = !haveAeSample;
-                        Integer flicker = result.get(CaptureResult.STATISTICS_SCENE_FLICKER);
-                        if (flicker != null) sceneFlicker = flicker;
+                        if (observedFlicker != null) sceneFlicker = observedFlicker;
                         lastAeExposureNs = exposure;
                         lastAeIso = iso;
                         haveAeSample = true;
@@ -621,8 +692,24 @@ final class CameraController {
                     FrameMeta meta = new FrameMeta(kind, result.getFrameNumber(), timestamp, exposure, iso);
                     listener.onPreviewMeta(meta);
                     previewResultCount++;
+                    Long frameDuration = result.get(CaptureResult.SENSOR_FRAME_DURATION);
+                    if (previewResultCount % 300 == 0) {
+                        RuntimeLogger.event(
+                                "CAMERA_HEALTH",
+                                kind + " frame=" + result.getFrameNumber()
+                                        + " actual=" + exposureText(exposure)
+                                        + " ISO=" + iso
+                                        + " frameDuration=" + exposureText(frameDuration == null ? 0L : frameDuration)
+                                        + " resultFps=" + String.format(Locale.US, "%.1f", captureResultFps)
+                                        + " flicker=" + flickerLabel(sceneFlicker)
+                                        + " target=" + targetPreviewFps
+                                        + " crop=" + rectText(lastReportedCropRegion)
+                                        + " physicalSensorCrop=" + rectText(lastPhysicalSensorCropRegion)
+                                        + " physicalActiveArray=" + rectText(lastPhysicalActiveArray)
+                                        + " zoom=" + (lastReportedZoomRatio == null ? "?" : lastReportedZoomRatio)
+                                        + " physical=" + (lastActivePhysicalId == null ? "?" : lastActivePhysicalId));
+                    }
                     if (previewResultCount % 60 == 0) {
-                        Long frameDuration = result.get(CaptureResult.SENSOR_FRAME_DURATION);
                         listener.onStatus(
                                 kind + " frame=" + result.getFrameNumber()
                                         + " actual=" + exposureText(exposure)
@@ -643,6 +730,12 @@ final class CameraController {
         }
         capturing = true;
         String captureId = "IrisHDR_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date());
+        RuntimeLogger.event(
+                "CAPTURE_BEGIN",
+                captureId
+                        + " short=" + exposureText(activeShortExposureNs()) + " ISO" + activeShortIso()
+                        + " long=" + exposureText(activeLongExposureNs()) + " ISO" + activeLongIso()
+                        + " mode=" + (autoHdrExposure ? "AUTO" : manualSafetySummaryLocked()));
         listener.onStatus("Capturing matched SHORT/LONG RAW + JPEG set…");
         captureSaver = new CaptureSetSaver(
                 context,
@@ -702,8 +795,10 @@ final class CameraController {
                     if (captureSaver == null) return;
                     Object tag = request.getTag();
                     if (TAG_CAPTURE_SHORT.equals(tag)) {
+                        RuntimeLogger.event("STILL_FOV", "SHORT " + fovResultSummary(result));
                         captureSaver.onResult(CaptureSetSaver.CAPTURE_SHORT, result);
                     } else if (TAG_CAPTURE_LONG.equals(tag)) {
+                        RuntimeLogger.event("STILL_FOV", "LONG " + fovResultSummary(result));
                         captureSaver.onResult(CaptureSetSaver.CAPTURE_LONG, result);
                     }
                 }
@@ -739,6 +834,9 @@ final class CameraController {
         closeReader(jpegReader);
         rawReader = null;
         jpegReader = null;
+        RuntimeLogger.event(
+                success ? "CAPTURE_DONE" : "CAPTURE_FAIL",
+                captureId + " " + message);
         listener.onCaptureFinished(captureId, success, message);
         applyPreviewRepeatingLocked();
     }
@@ -758,7 +856,9 @@ final class CameraController {
             cameraDevice = null;
         }
         characteristics = null;
+        activeArray = null;
         previewSurfaceConfigured = false;
+        RuntimeLogger.event("CAMERA_CLOSE", "camera device closed");
     }
 
     private void closeSessionLocked() {
@@ -778,6 +878,150 @@ final class CameraController {
             } catch (Throwable ignored) {
             }
         }
+    }
+
+    private void resetFovEvidenceLocked() {
+        fovEvidenceFrames = 0;
+        fovUnsafeFrames = 0;
+        fovDecisionLogged = false;
+        if (targetPreviewFps >= 60) fovFallbackApplied = false;
+        lastReportedCropRegion = null;
+        lastPhysicalSensorCropRegion = null;
+        lastPhysicalActiveArray = null;
+        lastPhysicalActiveArrayId = null;
+        lastReportedZoomRatio = null;
+        lastActivePhysicalId = null;
+    }
+
+    private void updateFovEvidenceLocked(TotalCaptureResult result) {
+        // SCALER_CROP_REGION is useful diagnostics, but Android explicitly warns that
+        // in-sensor crops caused by output stream combinations / AE FPS can still report
+        // the same full active-array crop. Never use it alone as FOV-parity proof.
+        lastReportedCropRegion = result.get(CaptureResult.SCALER_CROP_REGION);
+        if (Build.VERSION.SDK_INT >= 30) {
+            lastReportedZoomRatio = result.get(CaptureResult.CONTROL_ZOOM_RATIO);
+        }
+        lastActivePhysicalId = result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID);
+        // API 35 added the public result that explicitly describes the active
+        // physical sensor readout region. This is the decisive 60-fps FOV evidence.
+        lastPhysicalSensorCropRegion = Build.VERSION.SDK_INT >= 35
+                ? result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_SENSOR_CROP_REGION)
+                : null;
+        updatePhysicalActiveArrayLocked();
+
+        if (targetPreviewFps < 60 || fovFallbackApplied || fovDecisionLogged) return;
+        fovEvidenceFrames++;
+
+        double reportedScale = 1.0;
+        boolean haveSensorReadoutEvidence = false;
+        Rect referenceArray = lastPhysicalActiveArray != null ? lastPhysicalActiveArray : activeArray;
+        if (referenceArray != null && referenceArray.width() > 0 && referenceArray.height() > 0
+                && lastPhysicalSensorCropRegion != null
+                && lastPhysicalSensorCropRegion.width() > 0
+                && lastPhysicalSensorCropRegion.height() > 0) {
+            double scaleX = referenceArray.width() / (double) lastPhysicalSensorCropRegion.width();
+            double scaleY = referenceArray.height() / (double) lastPhysicalSensorCropRegion.height();
+            reportedScale = Math.max(reportedScale, Math.max(scaleX, scaleY));
+            haveSensorReadoutEvidence = true;
+        }
+
+        boolean zoomUnsafe = lastReportedZoomRatio != null
+                && lastReportedZoomRatio > FOV_MAX_REPORTED_ZOOM;
+        boolean sensorCropUnsafe = haveSensorReadoutEvidence
+                && reportedScale > FOV_MAX_REPORTED_SCALE;
+        if (zoomUnsafe || sensorCropUnsafe) fovUnsafeFrames++;
+
+        if (fovUnsafeFrames >= FOV_UNSAFE_CONFIRM_FRAMES) {
+            switchToFovSafe30Locked(
+                    "60fps sensor-readout scale=" + String.format(Locale.US, "%.3f", reportedScale)
+                            + " physicalSensorCrop=" + rectText(lastPhysicalSensorCropRegion)
+                            + " physicalActiveArray=" + rectText(referenceArray)
+                            + " crop=" + rectText(lastReportedCropRegion)
+                            + " zoom=" + (lastReportedZoomRatio == null ? "?" : lastReportedZoomRatio)
+                            + " physical=" + (lastActivePhysicalId == null ? "?" : lastActivePhysicalId));
+            return;
+        }
+
+        if (fovEvidenceFrames >= FOV_DECISION_FRAMES) {
+            fovDecisionLogged = true;
+            if (haveSensorReadoutEvidence && !zoomUnsafe) {
+                RuntimeLogger.event(
+                        "FOV_PARITY",
+                        "60fps physical-sensor readout reports full FOV; keeping 60fps"
+                                + " physicalSensorCrop=" + rectText(lastPhysicalSensorCropRegion)
+                                + " physicalActiveArray=" + rectText(referenceArray)
+                                + " crop=" + rectText(lastReportedCropRegion)
+                                + " zoom=" + (lastReportedZoomRatio == null ? "?" : lastReportedZoomRatio)
+                                + " physical=" + (lastActivePhysicalId == null ? "?" : lastActivePhysicalId));
+            } else {
+                switchToFovSafe30Locked(
+                        "60fps physical-sensor FOV parity unavailable after "
+                                + fovEvidenceFrames + " frames"
+                                + "; cropRegion alone cannot prove in-sensor FOV parity"
+                                + "; physicalSensorCrop=" + rectText(lastPhysicalSensorCropRegion)
+                                + "; crop=" + rectText(lastReportedCropRegion)
+                                + "; zoom=" + (lastReportedZoomRatio == null ? "?" : lastReportedZoomRatio)
+                                + "; physical=" + (lastActivePhysicalId == null ? "?" : lastActivePhysicalId));
+            }
+        }
+    }
+
+    private void updatePhysicalActiveArrayLocked() {
+        String id = lastActivePhysicalId;
+        if (id == null || id.isEmpty() || id.equals(cameraId)) {
+            lastPhysicalActiveArray = activeArray == null ? null : new Rect(activeArray);
+            lastPhysicalActiveArrayId = cameraId;
+            return;
+        }
+        if (id.equals(lastPhysicalActiveArrayId) && lastPhysicalActiveArray != null) return;
+        try {
+            CameraCharacteristics physical = cameraManager.getCameraCharacteristics(id);
+            Rect physicalArray = physical.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+            lastPhysicalActiveArray = physicalArray == null ? null : new Rect(physicalArray);
+            lastPhysicalActiveArrayId = id;
+        } catch (Throwable t) {
+            lastPhysicalActiveArray = null;
+            lastPhysicalActiveArrayId = id;
+            RuntimeLogger.error("FOV_PHYSICAL_METADATA_FAIL", t);
+        }
+    }
+
+    private void switchToFovSafe30Locked(String reason) {
+        if (targetPreviewFps < 60 || fovFallbackApplied) return;
+        fovFallbackApplied = true;
+        targetPreviewFps = 30;
+        manualFrameDurationNs = Math.max(THIRTY_FPS_DURATION_NS, previewMinFrameDurationNs);
+        Range<Integer>[] ranges = characteristics == null ? null
+                : characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+        aeFpsRange = chooseAeFpsRange(ranges, 30);
+        recomputeManualFlickerSafetyLocked();
+        RuntimeLogger.event("FOV_FALLBACK", reason + "; recreating preview session at 30fps");
+        listener.onStatus("60fps FOV parity unavailable/cropped; switching to full-FOV 30fps");
+        if (captureSession != null && !stillSessionActive) {
+            closeSessionLocked();
+            cameraHandler.postDelayed(this::startPreviewSessionLocked, 50);
+        }
+    }
+
+    private String fovResultSummary(TotalCaptureResult result) {
+        Rect crop = result.get(CaptureResult.SCALER_CROP_REGION);
+        Rect physicalCrop = Build.VERSION.SDK_INT >= 35
+                ? result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_SENSOR_CROP_REGION)
+                : null;
+        Float zoom = Build.VERSION.SDK_INT >= 30
+                ? result.get(CaptureResult.CONTROL_ZOOM_RATIO)
+                : null;
+        String physical = result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID);
+        return "crop=" + rectText(crop)
+                + " physicalSensorCrop=" + rectText(physicalCrop)
+                + " zoom=" + (zoom == null ? "?" : zoom)
+                + " physical=" + (physical == null ? "?" : physical);
+    }
+
+    private static String rectText(Rect rect) {
+        if (rect == null) return "?";
+        return rect.left + "," + rect.top + "-" + rect.right + "," + rect.bottom
+                + "(" + rect.width() + "x" + rect.height() + ")";
     }
 
     private void resetCaptureResultFpsLocked() {
@@ -906,20 +1150,93 @@ final class CameraController {
         return clampIso((int) Math.round(exposureProduct / Math.max(1.0, exposureNs)));
     }
 
+    private boolean recomputeManualFlickerSafetyLocked() {
+        long oldShortExposure = manualEffectiveShortExposureNs;
+        long oldLongExposure = manualEffectiveLongExposureNs;
+        int oldShortIso = manualEffectiveShortIso;
+        int oldLongIso = manualEffectiveLongIso;
+        boolean oldSafety = manualFlickerSafetyApplied;
+
+        boolean safeTiming = sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE;
+        if (!safeTiming) {
+            manualEffectiveShortExposureNs = shortExposureNs;
+            manualEffectiveLongExposureNs = longExposureNs;
+            manualEffectiveShortIso = manualIso;
+            manualEffectiveLongIso = manualIso;
+            manualFlickerSafetyApplied = false;
+        } else {
+            double requestedRatio = Math.max(
+                    1.0,
+                    Math.min(32.0, longExposureNs / (double) Math.max(1L, shortExposureNs)));
+            double targetLongProduct = Math.max(1.0, (double) longExposureNs * manualIso);
+            long commonExposure = chooseManualFlickerSafeExposureLocked(longExposureNs, sceneFlicker);
+            manualEffectiveShortExposureNs = commonExposure;
+            manualEffectiveLongExposureNs = commonExposure;
+            manualEffectiveLongIso = solveIsoForProduct(targetLongProduct, commonExposure);
+            manualEffectiveShortIso = solveIsoForProduct(
+                    targetLongProduct / requestedRatio, commonExposure);
+            manualFlickerSafetyApplied = true;
+        }
+
+        double longProduct = Math.max(
+                1.0, (double) manualEffectiveLongExposureNs * manualEffectiveLongIso);
+        double shortProduct = Math.max(
+                1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
+        manualEffectiveBracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);
+
+        return oldShortExposure != manualEffectiveShortExposureNs
+                || oldLongExposure != manualEffectiveLongExposureNs
+                || oldShortIso != manualEffectiveShortIso
+                || oldLongIso != manualEffectiveLongIso
+                || oldSafety != manualFlickerSafetyApplied;
+    }
+
+    private long chooseManualFlickerSafeExposureLocked(long requestedLongNs, int flicker) {
+        long requested = clampExposure(requestedLongNs);
+        long period = 0L;
+        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ) {
+            period = 10_000_000L;
+        } else if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) {
+            period = 8_333_333L;
+        }
+        if (period == 0L) {
+            // Unknown/PWM lighting cannot be phase-solved from Camera2. Matching the
+            // SHORT/LONG integration window still removes the rejected mixed-shutter
+            // schedule that made the two HDR members sample different temporal windows.
+            return requested;
+        }
+
+        long maxWindow = Math.max(manualFrameDurationNs, requested);
+        long maxPeriods = Math.max(1L, maxWindow / period);
+        long desiredPeriods = Math.max(1L, Math.round(requested / (double) period));
+        long periods = Math.min(maxPeriods, desiredPeriods);
+        return clampExposure(periods * period);
+    }
+
+    private String manualSafetySummaryLocked() {
+        return (manualFlickerSafetyApplied ? "MANUAL_SAFE" : "MANUAL_EXACT")
+                + " requested=" + exposureText(shortExposureNs) + "/" + exposureText(longExposureNs)
+                + " ISO" + manualIso
+                + " actual=" + exposureText(manualEffectiveShortExposureNs) + " ISO" + manualEffectiveShortIso
+                + "/" + exposureText(manualEffectiveLongExposureNs) + " ISO" + manualEffectiveLongIso
+                + String.format(Locale.US, " %.1fEV", manualEffectiveBracketEv)
+                + " flicker=" + flickerLabel(sceneFlicker);
+    }
+
     private long activeShortExposureNs() {
-        return autoHdrExposure ? autoShortExposureNs : shortExposureNs;
+        return autoHdrExposure ? autoShortExposureNs : manualEffectiveShortExposureNs;
     }
 
     private long activeLongExposureNs() {
-        return autoHdrExposure ? autoLongExposureNs : longExposureNs;
+        return autoHdrExposure ? autoLongExposureNs : manualEffectiveLongExposureNs;
     }
 
     private int activeShortIso() {
-        return autoHdrExposure ? autoShortIso : manualIso;
+        return autoHdrExposure ? autoShortIso : manualEffectiveShortIso;
     }
 
     private int activeLongIso() {
-        return autoHdrExposure ? autoLongIso : manualIso;
+        return autoHdrExposure ? autoLongIso : manualEffectiveLongIso;
     }
 
     private static String flickerLabel(int flicker) {

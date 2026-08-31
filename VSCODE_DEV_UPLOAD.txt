@@ -1,10 +1,10 @@
-Iris HDR Viewfinder Test V1.4.3 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.4 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 IMPORTANT:
-Use only the V1.4.3 FULL-UPLOAD ZIP. Upload ALL CONTENTS of the extracted folder into the repository root.
+Use only the V1.4.4 FULL-UPLOAD ZIP. Upload ALL CONTENTS of the extracted folder into the repository root.
 Do not upload the strict-proof ZIP, and do not upload only app/ or only changed files.
 
 Before committing, confirm these paths exist:
@@ -19,12 +19,11 @@ Before committing, confirm these paths exist:
 - scripts/verify_orientation.py
 - scripts/verify_shaders.py
 
-Also confirm these retired CPU live-preview files remain GONE:
-- app/src/main/assets/shaders/yuv_to_rgb.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/YuvFrame.java
-
 Commit message:
-V1.4.3 fix uninterrupted auto HDR and portrait RAW orientation
+V1.4.4 add FOV-safe 60fps, manual flicker safety and runtime logs
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.3.
-Do not install/call V1.4.3 build-proven until the workflow succeeds and its compiled artifact is verified.
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.4.
+Do not install/call V1.4.4 build-proven until the workflow succeeds and its compiled artifact is verified.
+
+Runtime logs after installation are written to:
+Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt

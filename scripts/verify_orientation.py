@@ -16,7 +16,7 @@ oes_shader = (ROOT / "app/src/main/assets/shaders/oes_to_rgb.frag").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.3 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.4 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -76,7 +76,8 @@ require('aspectError <= 0.015' in camera,
         "native-aspect tolerance gate missing")
 require('CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF' in camera,
         "digital video stabilization crop must be explicitly disabled")
-require('CONTROL_ZOOM_RATIO' not in camera and 'SCALER_CROP_REGION' not in camera,
+require('CaptureRequest.CONTROL_ZOOM_RATIO' not in camera
+        and 'CaptureRequest.SCALER_CROP_REGION' not in camera,
         "native-FOV path must not force zoom ratio or crop region")
 require('uniform vec2 fullFitScale;' in hdr_shader and 'uniform vec2 splitFitScale;' in hdr_shader,
         "FIT uniforms missing")
@@ -308,6 +309,72 @@ require('resultFpsWindowStartNs = System.nanoTime();' not in open_section,
 require('if (resultFpsWindowStartNs == 0L) resultFpsWindowStartNs = now;' in camera,
         "first CaptureResult must start the cadence clock")
 
+# 026 - V1.4.3 device finding: true 60-fps preview may use a narrower physical-sensor readout.
+# Keep 60 only when physical-sensor FOV evidence is available and full; otherwise recreate at 30.
+require('LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_SENSOR_CROP_REGION' in camera,
+        "API-35 physical-sensor crop evidence missing")
+require('FOV_UNSAFE_CONFIRM_FRAMES = 3' in camera and 'FOV_DECISION_FRAMES = 60' in camera,
+        "FOV parity confirmation window missing")
+require('updateFovEvidenceLocked(result);' in camera,
+        "every completed preview result must feed FOV parity evidence")
+require('switchToFovSafe30Locked' in camera,
+        "60-fps FOV-safe fallback owner missing")
+require('targetPreviewFps = 30;' in camera and 'closeSessionLocked();' in camera,
+        "FOV fallback must actually rebuild the preview session at 30 fps")
+require('cropRegion alone cannot prove in-sensor FOV parity' in camera,
+        "SCALER_CROP_REGION must never be treated as sufficient proof of full sensor readout")
+require('FOV_FALLBACK' in camera and 'FOV_PARITY' in camera,
+        "FOV decision must be externally diagnosable")
+require('STILL_FOV' in camera,
+        "still result FOV evidence must be logged for cross-device comparison")
+require('CaptureRequest.CONTROL_ZOOM_RATIO' not in camera
+        and 'CaptureRequest.SCALER_CROP_REGION' not in camera,
+        "FOV correction must not fake parity by digitally cropping or zooming requests")
+
+# 027 - V1.4.3 device finding: unrestricted MANUAL 1/480 + 1/60 under 60-Hz light
+# recreates the moving scan-band failure that AUTO avoids. MANUAL SAFE keeps the requested
+# bracket intent but uses flicker-compatible temporal integration and gain separation.
+require('recomputeManualFlickerSafetyLocked' in camera,
+        "MANUAL flicker-safe exposure owner missing")
+require('manualEffectiveShortExposureNs' in camera and 'manualEffectiveLongExposureNs' in camera,
+        "requested and effective MANUAL shutters must remain separate")
+require('manualEffectiveShortIso' in camera and 'manualEffectiveLongIso' in camera,
+        "MANUAL SAFE gain-separated bracket fields missing")
+require('chooseManualFlickerSafeExposureLocked' in camera,
+        "50/60-Hz manual shutter solver missing")
+require('FLICKER_50_PERIOD_NS' not in camera or '10_000_000L' in camera,
+        "50-Hz integration period missing")
+require('8_333_333L' in camera,
+        "60-Hz integration period missing")
+require('MANUAL_SAFE' in camera and 'HDR MANUAL SAFE' in main,
+        "user-visible safe MANUAL ownership missing")
+require('longRequest = buildManualPreviewRequest(TAG_LONG, activeLongNs, activeLongIso);' in camera,
+        "MANUAL LONG must consume the effective flicker-safe settings")
+require('CaptureRequest shortRequest = buildManualPreviewRequest(TAG_SHORT, activeShortNs, activeShortIso);' in camera,
+        "MANUAL SHORT must consume the effective flicker-safe settings")
+require('MANUAL_FLICKER' in camera,
+        "manual flicker decision must be logged")
+
+# 028 - Production logger for device freezes/crashes without turning logging into a frame-rate owner.
+require('final class RuntimeLogger' in main,
+        "production RuntimeLogger missing")
+require('Downloads/IrisHDRViewfinder/Logs/' in main,
+        "runtime log must be user-retrievable from Downloads")
+require('Thread.setDefaultUncaughtExceptionHandler' in main and 'UNCAUGHT_CRASH' in main,
+        "uncaught crash persistence missing")
+require('UI_HEARTBEAT' in main and '10_000L' in main,
+        "low-duty UI heartbeat missing")
+require('CAMERA_HEALTH' in camera and 'previewResultCount % 300 == 0' in camera,
+        "camera health logger must be throttled")
+require('GL_FRAME_FAIL' in gl and '5_000_000_000L' in gl,
+        "rate-limited swallowed GL runtime failure evidence missing")
+require('GL_READY' in gl,
+        "GPU vendor/renderer evidence missing")
+require('RuntimeLogger.event("STATUS"' not in main,
+        "high-frequency UI status logging must not become a performance owner")
+require('Event producers are deliberately rate-limited' in main,
+        "logger rate-limit ownership contract missing")
+
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
     rotated_w = frame_h if axis_swap else frame_w
@@ -368,4 +435,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.3 REGRESSION PASS: producer-owned orientation, explicit DNG orientation, uninterrupted two-frame AUTO HDR, atomic pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.4 REGRESSION PASS: producer-owned orientation, explicit DNG orientation, uninterrupted two-frame AUTO HDR, atomic pairs, native FOV, measured cadence, sRGB, capture protection")

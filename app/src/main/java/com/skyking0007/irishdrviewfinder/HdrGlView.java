@@ -150,6 +150,7 @@ final class HdrGlView extends GLSurfaceView {
         private FrameMeta lastShortMeta;
         private FrameMeta lastLongMeta;
         private long fpsWindowStartNs;
+        private long lastFrameErrorLogNs;
         private int fpsWindowInputFrames;
         private int fpsWindowPairs;
         private final float[] textureTransform = new float[16];
@@ -224,6 +225,11 @@ final class HdrGlView extends GLSurfaceView {
             fpsWindowStartNs = System.nanoTime();
             fpsWindowInputFrames = 0;
             fpsWindowPairs = 0;
+            RuntimeLogger.event(
+                    "GL_READY",
+                    "vendor=" + GLES30.glGetString(GLES30.GL_VENDOR)
+                            + " renderer=" + GLES30.glGetString(GLES30.GL_RENDERER)
+                            + " version=" + GLES30.glGetString(GLES30.GL_VERSION));
             publishInputSurface(inputSurface);
         }
 
@@ -299,6 +305,11 @@ final class HdrGlView extends GLSurfaceView {
                 fpsWindowInputFrames++;
             } catch (RuntimeException e) {
                 droppedFrames++;
+                long now = System.nanoTime();
+                if (lastFrameErrorLogNs == 0L || now - lastFrameErrorLogNs >= 5_000_000_000L) {
+                    lastFrameErrorLogNs = now;
+                    RuntimeLogger.error("GL_FRAME_FAIL", e);
+                }
             }
         }
 
