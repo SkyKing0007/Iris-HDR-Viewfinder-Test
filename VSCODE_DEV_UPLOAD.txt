@@ -1,30 +1,27 @@
-Iris HDR Viewfinder Test V1.3 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 IMPORTANT:
-Use the FULL-UPLOAD ZIP only. V1.1 proved that uploading a partial app/ directory through
-vscode.dev can replace the existing app tree and delete runtime files. V1.3 therefore contains
-the complete 25-file repository candidate. Do not upload only changed files or only app/.
+Use only the V1.4 FULL-UPLOAD ZIP. Upload ALL CONTENTS of the extracted folder into the repository root.
+Do not upload the strict-proof ZIP, and do not upload only app/ or only changed files.
 
-1. Extract the V1.3 FULL-UPLOAD ZIP on your computer.
-2. Open:
-   https://vscode.dev/github/SkyKing0007/Iris-HDR-Viewfinder-Test
-3. Upload ALL CONTENTS of the extracted folder into the repository root in one operation.
-4. Before committing, expand app/src/main and confirm AndroidManifest.xml, assets/shaders/, and
-   java/com/skyking0007/irishdrviewfinder/ are present.
-5. Confirm scripts/verify_orientation.py and scripts/verify_shaders.py are both present.
-6. Commit with:
-   V1.3 responsive orientation and aspect-correct preview
-7. Push/sync the commit.
-8. Open GitHub -> Actions -> "Build Iris HDR Viewfinder Test V1.3".
-9. The workflow must complete successfully before V1.3 is called build-proven.
-10. Download the artifact named Iris-HDR-Viewfinder-Test-V1.3.
+Before committing, confirm these paths exist:
+- app/src/main/assets/shaders/oes_to_rgb.frag
+- app/src/main/assets/shaders/copy_2d.frag
+- app/src/main/assets/shaders/hdr_display.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+- scripts/verify_orientation.py
+- scripts/verify_shaders.py
 
-Expected runtime intent:
-- portrait held + auto-rotate: portrait UI and upright non-stretched preview
-- landscape held + auto-rotate: landscape UI and upright non-stretched preview
-- Android orientation lock: app stays in the locked orientation
+Also confirm these retired V1.3 live-preview files are GONE:
+- app/src/main/assets/shaders/yuv_to_rgb.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/YuvFrame.java
 
-Do not upload or copy Photon/Iris project source into this repository.
+Commit message:
+V1.4 native-FOV direct-GPU HDR preview
+
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.
+Do not install/call V1.4 build-proven until the workflow succeeds and its compiled artifact is verified.

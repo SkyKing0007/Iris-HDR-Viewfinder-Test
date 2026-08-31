@@ -33,9 +33,11 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private static final String STATE_LONG_INDEX = "longIndex";
     private static final String STATE_ISO_INDEX = "isoIndex";
     private static final long[] EXPOSURES_NS = {
+            1_000_000_000L / 2000,
             1_000_000_000L / 1000,
             1_000_000_000L / 500,
-            1_000_000_000L / 250,
+            1_000_000_000L / 480,
+            1_000_000_000L / 240,
             1_000_000_000L / 120,
             1_000_000_000L / 60,
             1_000_000_000L / 30,
@@ -61,7 +63,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private String selectedCameraId;
     private volatile int modeIndex = 2;
     private volatile int shortIndex = 3;
-    private volatile int longIndex = 5;
+    private volatile int longIndex = 6;
     private volatile int isoIndex = 2;
 
     @Override
@@ -71,6 +73,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         restoreUiState(savedInstanceState);
         buildUi();
         controller = new CameraController(this, this);
+        glView.setInputSurfaceListener(controller::setPreviewSurface);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             loadCameras();
@@ -297,7 +300,10 @@ public final class MainActivity extends Activity implements CameraController.Lis
     @Override
     protected void onResume() {
         super.onResume();
-        if (glView != null) glView.onResume();
+        if (glView != null) {
+            glView.onResume();
+            glView.republishInputSurface();
+        }
         if (controller != null && selectedCameraId != null
                 && checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             controller.openCamera(selectedCameraId);
@@ -321,15 +327,24 @@ public final class MainActivity extends Activity implements CameraController.Lis
     public void onStatus(String text) {
         runOnUiThread(() -> statusText.setText(String.format(
                 Locale.US,
-                "%s   |   GPU frames %.1f fps   dropped %d",
+                "%s   |   camera %.1f fps   HDR pairs %.1f fps   dropped %d",
                 text,
-                glView.getFusionFps(),
+                glView.getInputFps(),
+                glView.getHdrPairFps(),
                 glView.getDroppedRenderFrames())));
     }
 
     @Override
-    public void onPreviewFrame(YuvFrame frame, FrameMeta meta) {
-        glView.enqueueFrame(frame, meta);
+    public void onPreviewMeta(FrameMeta meta) {
+        glView.enqueueMeta(meta);
+    }
+
+    @Override
+    public void onPreviewSurfaceSizeRequired(Size previewSize) {
+        glView.configureInputBufferSize(
+                previewSize.getWidth(),
+                previewSize.getHeight(),
+                controller::onPreviewSurfaceConfigured);
     }
 
     @Override
@@ -339,7 +354,10 @@ public final class MainActivity extends Activity implements CameraController.Lis
             Size previewSize,
             Size rawSize,
             Size jpegSize,
-            Integer syncLatency) {
+            Integer syncLatency,
+            int targetPreviewFps,
+            android.util.Range<Integer> aeFpsRange,
+            boolean srgbTonemap) {
         int displayDegrees = rotationToDegrees(getWindowManager().getDefaultDisplay().getRotation());
         int previewRotation = (sensorOrientation + displayDegrees + 360) % 360;
         int jpegOrientation = (sensorOrientation - displayDegrees + 360) % 360;
@@ -357,6 +375,9 @@ public final class MainActivity extends Activity implements CameraController.Lis
                         + " | JPEG " + jpegSize
                         + " | preview rotation=" + previewRotation + "°"
                         + " | JPEG orientation=" + jpegOrientation + "°"
+                        + " | target=" + targetPreviewFps + " fps"
+                        + " | AE fps=" + (aeFpsRange == null ? "auto" : aeFpsRange)
+                        + " | sRGB tonemap=" + (srgbTonemap ? "preset" : "HAL default")
                         + " | sync latency=" + (syncLatency == null ? "?" : syncLatency)
                         + " | files -> Downloads/IrisHDRViewfinder"));
     }

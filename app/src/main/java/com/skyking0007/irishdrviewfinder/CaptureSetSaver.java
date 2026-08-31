@@ -22,6 +22,7 @@ final class CaptureSetSaver {
     static final String CAPTURE_LONG = "LONG";
 
     interface Listener {
+        void onInputsAcquired(String captureId);
         void onFinished(String captureId, boolean success, String message);
     }
 
@@ -50,6 +51,7 @@ final class CaptureSetSaver {
     private boolean fusionSaved;
     private boolean metadataSubmitted;
     private boolean metadataSaved;
+    private boolean inputsAcquiredNotified;
     private boolean terminal;
 
     CaptureSetSaver(
@@ -140,6 +142,19 @@ final class CaptureSetSaver {
         }
         maybeSubmitFusionLocked();
         maybeSubmitMetadataLocked();
+        maybeNotifyInputsAcquiredLocked();
+    }
+
+    private void maybeNotifyInputsAcquiredLocked() {
+        if (terminal || inputsAcquiredNotified) return;
+        boolean acquired = shortData.rawSubmitted
+                && shortData.jpegSubmitted
+                && longData.rawSubmitted
+                && longData.jpegSubmitted;
+        if (acquired) {
+            inputsAcquiredNotified = true;
+            listener.onInputsAcquired(captureId);
+        }
     }
 
     private void submitRaw(String label, CaptureData data, Image raw) {
@@ -224,7 +239,7 @@ final class CaptureSetSaver {
                 JSONObject root = new JSONObject();
                 root.put("captureId", captureId);
                 root.put("cameraId", cameraId);
-                root.put("fusion", "V1 experimental JPEG-domain highlight-weighted exposure fusion");
+                root.put("fusion", "V1.4 sRGB-linearized highlight-aware JPEG-domain exposure fusion");
                 root.put("short", resultJson(shortResult));
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));
@@ -273,7 +288,7 @@ final class CaptureSetSaver {
         Integer li = longResult.get(CaptureResult.SENSOR_SENSITIVITY);
         double shortProduct = Math.max(1.0, (se == null ? 1.0 : se) * (si == null ? 1.0 : si));
         double longProduct = Math.max(1.0, (le == null ? 1.0 : le) * (li == null ? 1.0 : li));
-        return Math.max(1.0, Math.min(16.0, longProduct / shortProduct));
+        return Math.max(1.0, Math.min(32.0, longProduct / shortProduct));
     }
 
     private CaptureData dataFor(String label) {

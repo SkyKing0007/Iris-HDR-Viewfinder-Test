@@ -1,17 +1,22 @@
 package com.skyking0007.irishdrviewfinder;
 
 import android.content.Context;
+import android.graphics.SurfaceTexture;
+import android.opengl.GLES11Ext;
 import android.opengl.GLES30;
 import android.opengl.GLSurfaceView;
 import android.util.AttributeSet;
+import android.view.Surface;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
-import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.ArrayBlockingQueue;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -19,7 +24,13 @@ import javax.microedition.khronos.opengles.GL10;
 final class HdrGlView extends GLSurfaceView {
     enum Mode { NORMAL, SPLIT, HDR }
 
+    interface InputSurfaceListener {
+        void onInputSurfaceReady(Surface surface);
+    }
+
     private final HdrRenderer renderer;
+    private volatile InputSurfaceListener inputSurfaceListener;
+    private volatile Surface currentInputSurface;
 
     HdrGlView(Context context) {
         this(context, null);
@@ -28,13 +39,37 @@ final class HdrGlView extends GLSurfaceView {
     HdrGlView(Context context, AttributeSet attrs) {
         super(context, attrs);
         setEGLContextClientVersion(3);
+        setPreserveEGLContextOnPause(true);
         renderer = new HdrRenderer(context.getApplicationContext());
         setRenderer(renderer);
         setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
     }
 
-    void enqueueFrame(YuvFrame frame, FrameMeta meta) {
-        renderer.enqueue(frame, meta);
+    void setInputSurfaceListener(InputSurfaceListener listener) {
+        inputSurfaceListener = listener;
+        Surface surface = currentInputSurface;
+        if (listener != null && surface != null && surface.isValid()) {
+            post(() -> listener.onInputSurfaceReady(surface));
+        }
+    }
+
+    void republishInputSurface() {
+        InputSurfaceListener listener = inputSurfaceListener;
+        Surface surface = currentInputSurface;
+        if (listener != null && surface != null && surface.isValid()) {
+            post(() -> listener.onInputSurfaceReady(surface));
+        }
+    }
+
+    void configureInputBufferSize(int width, int height, Runnable ready) {
+        queueEvent(() -> {
+            renderer.configureInputBufferSize(width, height);
+            if (ready != null) post(ready);
+        });
+    }
+
+    void enqueueMeta(FrameMeta meta) {
+        renderer.enqueueMeta(meta);
         requestRender();
     }
 
@@ -53,41 +88,48 @@ final class HdrGlView extends GLSurfaceView {
         return renderer.droppedFrames;
     }
 
-    double getFusionFps() {
-        return renderer.fusionFps;
+    double getInputFps() {
+        return renderer.inputFps;
     }
 
-    private static final class Packet {
-        final YuvFrame frame;
-        final FrameMeta meta;
+    double getHdrPairFps() {
+        return renderer.hdrPairFps;
+    }
 
-        Packet(YuvFrame frame, FrameMeta meta) {
-            this.frame = frame;
-            this.meta = meta;
+    private void publishInputSurface(Surface surface) {
+        currentInputSurface = surface;
+        InputSurfaceListener listener = inputSurfaceListener;
+        if (listener != null) {
+            post(() -> listener.onInputSurfaceReady(surface));
         }
     }
 
-    private static final class HdrRenderer implements GLSurfaceView.Renderer {
+    private final class HdrRenderer implements GLSurfaceView.Renderer {
+        private static final int PENDING_SLOTS = 6;
+
         private final Context context;
-        private final ArrayBlockingQueue<Packet> queue = new ArrayBlockingQueue<>(6);
         private final FloatBuffer vertexBuffer;
-        private final FloatBuffer rawUvBuffer;
         private final FloatBuffer displayUvBuffer;
+        private final Map<Long, FrameMeta> metaByTimestamp = new ConcurrentHashMap<>();
+        private final AtomicInteger frameSignals = new AtomicInteger();
+        private final PendingFrame[] pendingFrames = new PendingFrame[PENDING_SLOTS];
 
         volatile Mode mode = Mode.HDR;
         volatile int rotationQuarterTurns = 0;
         volatile long droppedFrames = 0;
-        volatile double fusionFps = 0.0;
+        volatile double inputFps = 0.0;
+        volatile double hdrPairFps = 0.0;
 
-        private int yuvProgram;
+        private int oesProgram;
+        private int copyProgram;
         private int displayProgram;
-        private int yTexture;
-        private int uTexture;
-        private int vTexture;
+        private int externalTexture;
         private int normalTexture;
         private int shortTexture;
         private int longTexture;
         private int framebuffer;
+        private SurfaceTexture surfaceTexture;
+        private Surface inputSurface;
         private int frameWidth;
         private int frameHeight;
         private int surfaceWidth;
@@ -98,44 +140,75 @@ final class HdrGlView extends GLSurfaceView {
         private FrameMeta lastShortMeta;
         private FrameMeta lastLongMeta;
         private long fpsWindowStartNs;
-        private int fpsWindowFrames;
+        private int fpsWindowInputFrames;
+        private int fpsWindowPairs;
+        private final float[] textureTransform = new float[16];
 
         HdrRenderer(Context context) {
             this.context = context;
             float[] vertices = {-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f};
-            float[] rawUvs = {0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f};
             float[] displayUvs = {0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f};
             vertexBuffer = directFloatBuffer(vertices);
-            rawUvBuffer = directFloatBuffer(rawUvs);
             displayUvBuffer = directFloatBuffer(displayUvs);
+            for (int i = 0; i < pendingFrames.length; i++) {
+                pendingFrames[i] = new PendingFrame();
+            }
         }
 
-        void enqueue(YuvFrame frame, FrameMeta meta) {
-            Packet packet = new Packet(frame, meta);
-            while (!queue.offer(packet)) {
-                queue.poll();
-                droppedFrames++;
+        void enqueueMeta(FrameMeta meta) {
+            metaByTimestamp.put(meta.timestampNs, meta);
+            if (metaByTimestamp.size() > 64) {
+                Long oldest = null;
+                for (Long timestamp : metaByTimestamp.keySet()) {
+                    if (oldest == null || timestamp < oldest) oldest = timestamp;
+                }
+                if (oldest != null) metaByTimestamp.remove(oldest);
             }
         }
 
         @Override
         public void onSurfaceCreated(GL10 gl, EGLConfig config) {
             String vertexShader = loadAsset(context, "shaders/fullscreen.vert");
-            String yuvShader = loadAsset(context, "shaders/yuv_to_rgb.frag");
+            String oesShader = loadAsset(context, "shaders/oes_to_rgb.frag");
+            String copyShader = loadAsset(context, "shaders/copy_2d.frag");
             String displayShader = loadAsset(context, "shaders/hdr_display.frag");
-            yuvProgram = buildProgram(vertexShader, yuvShader);
+            oesProgram = buildProgram(vertexShader, oesShader);
+            copyProgram = buildProgram(vertexShader, copyShader);
             displayProgram = buildProgram(vertexShader, displayShader);
-            yTexture = createTexture();
-            uTexture = createTexture();
-            vTexture = createTexture();
-            normalTexture = createTexture();
-            shortTexture = createTexture();
-            longTexture = createTexture();
+
+            externalTexture = createExternalTexture();
+            normalTexture = createTexture2d();
+            shortTexture = createTexture2d();
+            longTexture = createTexture2d();
+            for (PendingFrame pending : pendingFrames) {
+                pending.texture = createTexture2d();
+                pending.occupied = false;
+            }
+
             int[] fb = new int[1];
             GLES30.glGenFramebuffers(1, fb, 0);
             framebuffer = fb[0];
             GLES30.glClearColor(0f, 0f, 0f, 1f);
+
+            if (inputSurface != null) inputSurface.release();
+            if (surfaceTexture != null) surfaceTexture.release();
+            surfaceTexture = new SurfaceTexture(externalTexture);
+            if (frameWidth > 0 && frameHeight > 0) {
+                surfaceTexture.setDefaultBufferSize(frameWidth, frameHeight);
+            }
+            surfaceTexture.setOnFrameAvailableListener(texture -> {
+                frameSignals.incrementAndGet();
+                requestRender();
+            });
+            inputSurface = new Surface(surfaceTexture);
+            metaByTimestamp.clear();
+            haveNormal = false;
+            haveShort = false;
+            haveLong = false;
             fpsWindowStartNs = System.nanoTime();
+            fpsWindowInputFrames = 0;
+            fpsWindowPairs = 0;
+            publishInputSurface(inputSurface);
         }
 
         @Override
@@ -147,49 +220,103 @@ final class HdrGlView extends GLSurfaceView {
 
         @Override
         public void onDrawFrame(GL10 gl) {
-            Packet packet;
-            while ((packet = queue.poll()) != null) {
-                processPacket(packet);
+            int signals = frameSignals.getAndSet(0);
+            if (signals > 0 && surfaceTexture != null) {
+                if (signals > 1) droppedFrames += signals - 1L;
+                processLatestCameraFrame();
             }
+            reconcilePendingFrames();
             drawDisplay();
             updateFps();
         }
 
-        private void processPacket(Packet packet) {
-            YuvFrame frame = packet.frame;
-            if (frame.width != frameWidth || frame.height != frameHeight) {
-                frameWidth = frame.width;
-                frameHeight = frame.height;
-                allocateRgbTexture(normalTexture, frameWidth, frameHeight);
-                allocateRgbTexture(shortTexture, frameWidth, frameHeight);
-                allocateRgbTexture(longTexture, frameWidth, frameHeight);
-                haveNormal = false;
-                haveShort = false;
-                haveLong = false;
+        void configureInputBufferSize(int width, int height) {
+            if (width <= 0 || height <= 0) return;
+            frameWidth = width;
+            frameHeight = height;
+            if (surfaceTexture != null) {
+                surfaceTexture.setDefaultBufferSize(width, height);
             }
-
-            uploadPlane(yTexture, frame.width, frame.height, frame.y);
-            uploadPlane(uTexture, (frame.width + 1) / 2, (frame.height + 1) / 2, frame.u);
-            uploadPlane(vTexture, (frame.width + 1) / 2, (frame.height + 1) / 2, frame.v);
-
-            int target;
-            if (FrameMeta.SHORT.equals(packet.meta.kind)) {
-                target = shortTexture;
-                haveShort = true;
-                lastShortMeta = packet.meta;
-            } else if (FrameMeta.LONG.equals(packet.meta.kind)) {
-                target = longTexture;
-                haveLong = true;
-                lastLongMeta = packet.meta;
-            } else {
-                target = normalTexture;
-                haveNormal = true;
+            allocateRgbTexture(normalTexture, width, height);
+            allocateRgbTexture(shortTexture, width, height);
+            allocateRgbTexture(longTexture, width, height);
+            for (PendingFrame pending : pendingFrames) {
+                allocateRgbTexture(pending.texture, width, height);
+                pending.occupied = false;
             }
-            renderYuvToTexture(target);
-            fpsWindowFrames++;
+            haveNormal = false;
+            haveShort = false;
+            haveLong = false;
+            metaByTimestamp.clear();
         }
 
-        private void renderYuvToTexture(int targetTexture) {
+        private void processLatestCameraFrame() {
+            if (frameWidth <= 0 || frameHeight <= 0) return;
+            try {
+                surfaceTexture.updateTexImage();
+                long timestamp = surfaceTexture.getTimestamp();
+                surfaceTexture.getTransformMatrix(textureTransform);
+                FrameMeta meta = metaByTimestamp.remove(timestamp);
+                if (meta != null) {
+                    int target = targetTextureFor(meta);
+                    renderExternalToTexture(target);
+                    acceptMeta(meta);
+                } else {
+                    PendingFrame pending = acquirePendingSlot();
+                    pending.timestampNs = timestamp;
+                    pending.occupied = true;
+                    renderExternalToTexture(pending.texture);
+                }
+                fpsWindowInputFrames++;
+            } catch (RuntimeException e) {
+                droppedFrames++;
+            }
+        }
+
+        private PendingFrame acquirePendingSlot() {
+            for (PendingFrame pending : pendingFrames) {
+                if (!pending.occupied) return pending;
+            }
+            PendingFrame oldest = pendingFrames[0];
+            for (PendingFrame pending : pendingFrames) {
+                if (pending.timestampNs < oldest.timestampNs) oldest = pending;
+            }
+            metaByTimestamp.remove(oldest.timestampNs);
+            droppedFrames++;
+            return oldest;
+        }
+
+        private void reconcilePendingFrames() {
+            for (PendingFrame pending : pendingFrames) {
+                if (!pending.occupied) continue;
+                FrameMeta meta = metaByTimestamp.remove(pending.timestampNs);
+                if (meta == null) continue;
+                copyTexture(pending.texture, targetTextureFor(meta));
+                pending.occupied = false;
+                acceptMeta(meta);
+            }
+        }
+
+        private int targetTextureFor(FrameMeta meta) {
+            if (FrameMeta.SHORT.equals(meta.kind)) return shortTexture;
+            if (FrameMeta.LONG.equals(meta.kind)) return longTexture;
+            return normalTexture;
+        }
+
+        private void acceptMeta(FrameMeta meta) {
+            if (FrameMeta.SHORT.equals(meta.kind)) {
+                haveShort = true;
+                lastShortMeta = meta;
+            } else if (FrameMeta.LONG.equals(meta.kind)) {
+                haveLong = true;
+                lastLongMeta = meta;
+                fpsWindowPairs++;
+            } else {
+                haveNormal = true;
+            }
+        }
+
+        private void renderExternalToTexture(int targetTexture) {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
             GLES30.glFramebufferTexture2D(
                     GLES30.GL_FRAMEBUFFER,
@@ -198,11 +325,33 @@ final class HdrGlView extends GLSurfaceView {
                     targetTexture,
                     0);
             GLES30.glViewport(0, 0, frameWidth, frameHeight);
-            GLES30.glUseProgram(yuvProgram);
-            bindQuad(rawUvBuffer);
-            bindSampler(yuvProgram, "yTex", yTexture, 0);
-            bindSampler(yuvProgram, "uTex", uTexture, 1);
-            bindSampler(yuvProgram, "vTex", vTexture, 2);
+            GLES30.glUseProgram(oesProgram);
+            bindQuad();
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0);
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, externalTexture);
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(oesProgram, "cameraTex"), 0);
+            GLES30.glUniformMatrix4fv(
+                    GLES30.glGetUniformLocation(oesProgram, "texTransform"),
+                    1,
+                    false,
+                    textureTransform,
+                    0);
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
+        }
+
+        private void copyTexture(int sourceTexture, int targetTexture) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+            GLES30.glFramebufferTexture2D(
+                    GLES30.GL_FRAMEBUFFER,
+                    GLES30.GL_COLOR_ATTACHMENT0,
+                    GLES30.GL_TEXTURE_2D,
+                    targetTexture,
+                    0);
+            GLES30.glViewport(0, 0, frameWidth, frameHeight);
+            GLES30.glUseProgram(copyProgram);
+            bindQuad();
+            bindSampler2d(copyProgram, "sourceTex", sourceTexture, 0);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
         }
@@ -211,39 +360,41 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
             GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight);
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT);
+            if (surfaceWidth <= 0 || surfaceHeight <= 0) return;
+
             GLES30.glUseProgram(displayProgram);
-            bindQuad(displayUvBuffer);
-            bindSampler(displayProgram, "normalTex", normalTexture, 0);
-            bindSampler(displayProgram, "shortTex", shortTexture, 1);
-            bindSampler(displayProgram, "longTex", longTexture, 2);
+            bindQuad();
+            bindSampler2d(displayProgram, "normalTex", normalTexture, 0);
+            bindSampler2d(displayProgram, "shortTex", shortTexture, 1);
+            bindSampler2d(displayProgram, "longTex", longTexture, 2);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "mode"), mode.ordinal());
             GLES30.glUniform1i(
                     GLES30.glGetUniformLocation(displayProgram, "rotationQuarterTurns"),
                     rotationQuarterTurns);
-            setCropScaleUniform(displayProgram, "fullCropScale", surfaceWidth, surfaceHeight);
-            setCropScaleUniform(displayProgram, "splitCropScale", surfaceWidth * 0.5f, surfaceHeight);
+            setFitScaleUniform(displayProgram, "fullFitScale", surfaceWidth, surfaceHeight);
+            setFitScaleUniform(displayProgram, "splitFitScale", surfaceWidth * 0.5f, surfaceHeight);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveNormal"), haveNormal ? 1 : 0);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveShort"), haveShort ? 1 : 0);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveLong"), haveLong ? 1 : 0);
             float ratio = 1.0f;
             if (lastShortMeta != null && lastLongMeta != null) {
                 double r = lastLongMeta.exposureProduct() / lastShortMeta.exposureProduct();
-                ratio = (float) Math.max(1.0, Math.min(16.0, r));
+                ratio = (float) Math.max(1.0, Math.min(32.0, r));
             }
             GLES30.glUniform1f(GLES30.glGetUniformLocation(displayProgram, "exposureRatio"), ratio);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 
-        private void bindQuad(FloatBuffer textureCoordinates) {
+        private void bindQuad() {
             vertexBuffer.position(0);
-            textureCoordinates.position(0);
+            displayUvBuffer.position(0);
             GLES30.glEnableVertexAttribArray(0);
             GLES30.glEnableVertexAttribArray(1);
             GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 0, vertexBuffer);
-            GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 0, textureCoordinates);
+            GLES30.glVertexAttribPointer(1, 2, GLES30.GL_FLOAT, false, 0, displayUvBuffer);
         }
 
-        private void setCropScaleUniform(int program, String name, float viewportWidth, float viewportHeight) {
+        private void setFitScaleUniform(int program, String name, float viewportWidth, float viewportHeight) {
             float scaleX = 1.0f;
             float scaleY = 1.0f;
             if (frameWidth > 0 && frameHeight > 0 && viewportWidth > 0.0f && viewportHeight > 0.0f) {
@@ -253,9 +404,9 @@ final class HdrGlView extends GLSurfaceView {
                 float imageAspect = rotatedWidth / rotatedHeight;
                 float viewportAspect = viewportWidth / viewportHeight;
                 if (viewportAspect > imageAspect) {
-                    scaleY = imageAspect / viewportAspect;
-                } else if (viewportAspect < imageAspect) {
                     scaleX = viewportAspect / imageAspect;
+                } else if (viewportAspect < imageAspect) {
+                    scaleY = imageAspect / viewportAspect;
                 }
             }
             GLES30.glUniform2f(
@@ -264,29 +415,14 @@ final class HdrGlView extends GLSurfaceView {
                     scaleY);
         }
 
-        private static void bindSampler(int program, String name, int texture, int unit) {
+        private static void bindSampler2d(int program, String name, int texture, int unit) {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + unit);
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(program, name), unit);
         }
 
-        private static void uploadPlane(int texture, int width, int height, ByteBuffer data) {
-            data.position(0);
-            GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1);
-            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
-            GLES30.glTexImage2D(
-                    GLES30.GL_TEXTURE_2D,
-                    0,
-                    GLES30.GL_R8,
-                    width,
-                    height,
-                    0,
-                    GLES30.GL_RED,
-                    GLES30.GL_UNSIGNED_BYTE,
-                    data);
-        }
-
         private static void allocateRgbTexture(int texture, int width, int height) {
+            if (texture == 0 || width <= 0 || height <= 0) return;
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
             GLES30.glTexImage2D(
                     GLES30.GL_TEXTURE_2D,
@@ -300,7 +436,7 @@ final class HdrGlView extends GLSurfaceView {
                     null);
         }
 
-        private static int createTexture() {
+        private static int createTexture2d() {
             int[] textures = new int[1];
             GLES30.glGenTextures(1, textures, 0);
             int texture = textures[0];
@@ -309,6 +445,18 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR);
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE);
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE);
+            return texture;
+        }
+
+        private static int createExternalTexture() {
+            int[] textures = new int[1];
+            GLES30.glGenTextures(1, textures, 0);
+            int texture = textures[0];
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, texture);
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR);
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR);
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE);
+            GLES30.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE);
             return texture;
         }
 
@@ -370,10 +518,18 @@ final class HdrGlView extends GLSurfaceView {
             long now = System.nanoTime();
             long elapsed = now - fpsWindowStartNs;
             if (elapsed >= 1_000_000_000L) {
-                fusionFps = fpsWindowFrames * 1_000_000_000.0 / elapsed;
-                fpsWindowFrames = 0;
+                inputFps = fpsWindowInputFrames * 1_000_000_000.0 / elapsed;
+                hdrPairFps = fpsWindowPairs * 1_000_000_000.0 / elapsed;
+                fpsWindowInputFrames = 0;
+                fpsWindowPairs = 0;
                 fpsWindowStartNs = now;
             }
         }
+    }
+
+    private static final class PendingFrame {
+        int texture;
+        long timestampNs;
+        boolean occupied;
     }
 }

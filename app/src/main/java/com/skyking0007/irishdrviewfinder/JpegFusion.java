@@ -36,7 +36,7 @@ final class JpegFusion {
         int[] shortPixels = new int[width * rowsPerStrip];
         int[] longPixels = new int[width * rowsPerStrip];
         int[] outPixels = new int[width * rowsPerStrip];
-        float ratio = (float) Math.max(1.0, Math.min(16.0, exposureRatio));
+        float ratio = (float) Math.max(1.0, Math.min(32.0, exposureRatio));
 
         for (int y = 0; y < height; y += rowsPerStrip) {
             int rows = Math.min(rowsPerStrip, height - y);
@@ -51,7 +51,7 @@ final class JpegFusion {
                 float lg8 = (l >>> 8) & 0xFF;
                 float lb8 = l & 0xFF;
                 float clip = Math.max(lr8, Math.max(lg8, lb8)) / 255.0f;
-                float w = smoothstep(0.62f, 0.93f, clip);
+                float w = smoothstep(0.68f, 0.94f, clip);
 
                 float r = fuseChannel((s >>> 16) & 0xFF, (l >>> 16) & 0xFF, ratio, w);
                 float g = fuseChannel((s >>> 8) & 0xFF, (l >>> 8) & 0xFF, ratio, w);
@@ -120,7 +120,8 @@ final class JpegFusion {
         float shortLinear = SRGB_TO_LINEAR[short8] * ratio;
         float longLinear = SRGB_TO_LINEAR[long8];
         float merged = longLinear * (1.0f - highlightWeight) + shortLinear * highlightWeight;
-        float tone = (1.15f * merged) / (1.0f + 0.15f * merged);
+        float scaled = 1.6f * Math.max(0.0f, merged);
+        float tone = scaled / (1.0f + scaled);
         return Math.max(0.0f, Math.min(1.0f, tone));
     }
 
@@ -138,7 +139,10 @@ final class JpegFusion {
     private static float[] buildLinearLut() {
         float[] lut = new float[256];
         for (int i = 0; i < lut.length; i++) {
-            lut[i] = (float) Math.pow(i / 255.0, 2.2);
+            double encoded = i / 255.0;
+            lut[i] = (float) (encoded <= 0.04045
+                    ? encoded / 12.92
+                    : Math.pow((encoded + 0.055) / 1.055, 2.4));
         }
         return lut;
     }
@@ -147,7 +151,10 @@ final class JpegFusion {
         int[] lut = new int[4096];
         for (int i = 0; i < lut.length; i++) {
             double linear = i / (double) (lut.length - 1);
-            lut[i] = (int) Math.round(255.0 * Math.pow(linear, 1.0 / 2.2));
+            double encoded = linear <= 0.0031308
+                    ? 12.92 * linear
+                    : 1.055 * Math.pow(linear, 1.0 / 2.4) - 0.055;
+            lut[i] = (int) Math.round(255.0 * encoded);
         }
         return lut;
     }

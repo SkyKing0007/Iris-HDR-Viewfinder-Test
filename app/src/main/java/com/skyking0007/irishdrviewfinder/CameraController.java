@@ -3,6 +3,7 @@ package com.skyking0007.irishdrviewfinder;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.ImageFormat;
+import android.graphics.SurfaceTexture;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
@@ -19,16 +20,15 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Range;
 import android.util.Size;
+import android.view.Surface;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 final class CameraController {
@@ -51,14 +51,18 @@ final class CameraController {
 
     interface Listener {
         void onStatus(String text);
-        void onPreviewFrame(YuvFrame frame, FrameMeta meta);
+        void onPreviewMeta(FrameMeta meta);
+        void onPreviewSurfaceSizeRequired(Size previewSize);
         void onCameraConfigured(
                 String cameraId,
                 int sensorOrientation,
                 Size previewSize,
                 Size rawSize,
                 Size jpegSize,
-                Integer syncLatency);
+                Integer syncLatency,
+                int targetPreviewFps,
+                Range<Integer> aeFpsRange,
+                boolean srgbTonemap);
         void onManualSettings(long shortExposureNs, long longExposureNs, int iso);
         void onCaptureFinished(String captureId, boolean success, String message);
     }
@@ -68,37 +72,45 @@ final class CameraController {
     private static final String TAG_LONG = "P_LONG";
     private static final String TAG_CAPTURE_SHORT = "C_SHORT";
     private static final String TAG_CAPTURE_LONG = "C_LONG";
+    private static final long ONE_SECOND_NS = 1_000_000_000L;
+    private static final long SIXTY_FPS_DURATION_NS = 16_666_667L;
+    private static final long THIRTY_FPS_DURATION_NS = 33_333_333L;
+    private static final double HDR_BRACKET_RATIO = 8.0;
 
     private final Context context;
     private final CameraManager cameraManager;
     private final Listener listener;
     private final HandlerThread cameraThread;
     private final Handler cameraHandler;
-    private final Map<Long, FrameMeta> previewMetaByTimestamp = new HashMap<>();
-    private final Map<Long, YuvFrame> previewFramesByTimestamp = new HashMap<>();
 
     private CameraDevice cameraDevice;
     private CameraCaptureSession captureSession;
-    private ImageReader previewReader;
     private ImageReader rawReader;
     private ImageReader jpegReader;
     private CameraCharacteristics characteristics;
     private CaptureSetSaver captureSaver;
+    private Surface previewSurface;
     private String cameraId;
     private PreviewMode previewMode = PreviewMode.HDR;
     private boolean opening;
     private boolean capturing;
-    private long shortExposureNs = 1_000_000_000L / 120;
-    private long longExposureNs = 1_000_000_000L / 30;
+    private boolean stillSessionActive;
+    private boolean previewSurfaceConfigured;
+    private long shortExposureNs = ONE_SECOND_NS / 480;
+    private long longExposureNs = ONE_SECOND_NS / 60;
     private int manualIso = 400;
     private volatile int jpegOrientationDegrees;
-    private long lastAeExposureNs = 1_000_000_000L / 60;
+    private long lastAeExposureNs = ONE_SECOND_NS / 60;
     private int lastAeIso = 400;
     private Size previewSize;
     private Size rawSize;
     private Size jpegSize;
     private long previewResultCount;
-    private long unmatchedFrames;
+    private long previewMinFrameDurationNs;
+    private long manualFrameDurationNs = THIRTY_FPS_DURATION_NS;
+    private int targetPreviewFps = 30;
+    private Range<Integer> aeFpsRange;
+    private boolean srgbTonemapSupported;
 
     CameraController(Context context, Listener listener) {
         this.context = context.getApplicationContext();
@@ -139,6 +151,26 @@ final class CameraController {
         return out;
     }
 
+    void setPreviewSurface(Surface surface) {
+        cameraHandler.post(() -> {
+            if (previewSurface == surface) return;
+            previewSurface = surface;
+            previewSurfaceConfigured = false;
+            if (captureSession != null) closeSessionLocked();
+            if (cameraDevice != null && previewSize != null && surface != null) {
+                listener.onPreviewSurfaceSizeRequired(previewSize);
+            }
+        });
+    }
+
+    void onPreviewSurfaceConfigured() {
+        cameraHandler.post(() -> {
+            if (previewSurface == null || !previewSurface.isValid()) return;
+            previewSurfaceConfigured = true;
+            startPreviewSessionLocked();
+        });
+    }
+
     void openCamera(String id) {
         cameraHandler.post(() -> {
             if (id == null || id.equals(cameraId) && cameraDevice != null) return;
@@ -172,9 +204,19 @@ final class CameraController {
     void autoBracketFromLastAe() {
         cameraHandler.post(() -> {
             if (characteristics == null) return;
+            Range<Long> range = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+            long minExposure = range == null ? 100_000L : range.getLower();
             long base = clampExposure(lastAeExposureNs);
-            shortExposureNs = clampExposure(Math.max(100_000L, base / 2));
-            longExposureNs = clampExposure(Math.max(shortExposureNs, base * 2));
+            double halfRatio = Math.sqrt(HDR_BRACKET_RATIO);
+            long desiredLong = clampExposure(Math.max(1L, Math.round(base * halfRatio)));
+            long liveCap = Math.max(minExposure, manualFrameDurationNs);
+            long nextLong = Math.min(desiredLong, liveCap);
+            long nextShort = Math.max(minExposure, nextLong / (long) HDR_BRACKET_RATIO);
+            if (nextShort == minExposure) {
+                nextLong = Math.min(liveCap, clampExposure(nextShort * (long) HDR_BRACKET_RATIO));
+            }
+            shortExposureNs = clampExposure(nextShort);
+            longExposureNs = clampExposure(Math.max(shortExposureNs, nextLong));
             manualIso = clampIso(lastAeIso);
             listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
             if (previewMode != PreviewMode.NORMAL) applyPreviewRepeatingLocked();
@@ -228,7 +270,7 @@ final class CameraController {
                         public void onOpened(CameraDevice camera) {
                             opening = false;
                             cameraDevice = camera;
-                            startPreviewSessionLocked();
+                            requestPreviewSurfaceConfigurationLocked();
                         }
 
                         @Override
@@ -257,32 +299,91 @@ final class CameraController {
     private void resolveOutputSizesLocked() {
         StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
         if (map == null) throw new IllegalStateException("Camera has no StreamConfigurationMap");
-        previewSize = choosePreviewSize(map.getOutputSizes(ImageFormat.YUV_420_888));
+
         rawSize = chooseLargest(map.getOutputSizes(ImageFormat.RAW_SENSOR));
-        jpegSize = chooseJpegSize(map.getOutputSizes(ImageFormat.JPEG));
-        if (previewSize == null || rawSize == null || jpegSize == null) {
-            throw new IllegalStateException("Required YUV/RAW/JPEG output size missing");
+        if (rawSize == null) throw new IllegalStateException("Required RAW output size missing");
+        double nativeAspect = landscapeAspect(rawSize);
+
+        Range<Integer>[] ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+        boolean aeCanReach60 = maxAeFps(ranges) >= 60;
+        previewSize = choosePrivatePreviewSize(map, nativeAspect, aeCanReach60);
+        jpegSize = chooseJpegSize(map.getOutputSizes(ImageFormat.JPEG), nativeAspect);
+        if (previewSize == null || jpegSize == null) {
+            throw new IllegalStateException("Required PRIVATE/JPEG output size missing");
         }
+
+        previewMinFrameDurationNs = outputMinFrameDuration(map, previewSize);
+        boolean streamCanReach60 = previewMinFrameDurationNs <= 0
+                || previewMinFrameDurationNs <= SIXTY_FPS_DURATION_NS;
+        targetPreviewFps = aeCanReach60 && streamCanReach60 ? 60 : 30;
+        manualFrameDurationNs = targetPreviewFps >= 60
+                ? SIXTY_FPS_DURATION_NS : THIRTY_FPS_DURATION_NS;
+        if (previewMinFrameDurationNs > 0) {
+            manualFrameDurationNs = Math.max(manualFrameDurationNs, previewMinFrameDurationNs);
+        }
+        aeFpsRange = chooseAeFpsRange(ranges, targetPreviewFps);
+        srgbTonemapSupported = supportsSrgbTonemap(characteristics);
+    }
+
+    private void requestPreviewSurfaceConfigurationLocked() {
+        if (cameraDevice == null || previewSize == null || previewSurface == null) return;
+        previewSurfaceConfigured = false;
+        listener.onPreviewSurfaceSizeRequired(previewSize);
     }
 
     private void startPreviewSessionLocked() {
-        if (cameraDevice == null) return;
+        if (cameraDevice == null || previewSurface == null || !previewSurfaceConfigured
+                || !previewSurface.isValid() || stillSessionActive) return;
         closeSessionLocked();
-        closeReader(previewReader);
+        try {
+            cameraDevice.createCaptureSession(
+                    Arrays.asList(previewSurface),
+                    new CameraCaptureSession.StateCallback() {
+                        @Override
+                        public void onConfigured(CameraCaptureSession session) {
+                            if (cameraDevice == null || stillSessionActive) {
+                                session.close();
+                                return;
+                            }
+                            captureSession = session;
+                            Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+                            Integer sync = characteristics.get(CameraCharacteristics.SYNC_MAX_LATENCY);
+                            listener.onCameraConfigured(
+                                    cameraId,
+                                    sensorOrientation == null ? 0 : sensorOrientation,
+                                    previewSize,
+                                    rawSize,
+                                    jpegSize,
+                                    sync,
+                                    targetPreviewFps,
+                                    aeFpsRange,
+                                    srgbTonemapSupported);
+                            listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
+                            applyPreviewRepeatingLocked();
+                        }
+
+                        @Override
+                        public void onConfigureFailed(CameraCaptureSession session) {
+                            listener.onStatus("PRIVATE preview-only session configuration failed");
+                        }
+                    }, cameraHandler);
+        } catch (CameraAccessException e) {
+            listener.onStatus("Preview session failed: " + e.getMessage());
+        }
+    }
+
+    private void startStillCaptureSessionLocked() {
+        if (cameraDevice == null || previewSurface == null || !previewSurface.isValid()) {
+            if (captureSaver != null) captureSaver.abort("Camera preview surface unavailable for still capture");
+            return;
+        }
+        closeSessionLocked();
         closeReader(rawReader);
         closeReader(jpegReader);
-
-        previewReader = ImageReader.newInstance(
-                previewSize.getWidth(),
-                previewSize.getHeight(),
-                ImageFormat.YUV_420_888,
-                4);
         rawReader = ImageReader.newInstance(
                 rawSize.getWidth(), rawSize.getHeight(), ImageFormat.RAW_SENSOR, 3);
         jpegReader = ImageReader.newInstance(
                 jpegSize.getWidth(), jpegSize.getHeight(), ImageFormat.JPEG, 3);
-
-        previewReader.setOnImageAvailableListener(this::onPreviewImageAvailable, cameraHandler);
         rawReader.setOnImageAvailableListener(reader -> {
             Image image = reader.acquireNextImage();
             CaptureSetSaver saver = captureSaver;
@@ -296,75 +397,51 @@ final class CameraController {
             else if (image != null) image.close();
         }, cameraHandler);
 
-        previewMetaByTimestamp.clear();
-        previewFramesByTimestamp.clear();
         try {
             cameraDevice.createCaptureSession(
-                    Arrays.asList(previewReader.getSurface(), jpegReader.getSurface(), rawReader.getSurface()),
+                    Arrays.asList(previewSurface, jpegReader.getSurface(), rawReader.getSurface()),
                     new CameraCaptureSession.StateCallback() {
                         @Override
                         public void onConfigured(CameraCaptureSession session) {
-                            if (cameraDevice == null) {
+                            if (cameraDevice == null || !stillSessionActive) {
                                 session.close();
                                 return;
                             }
                             captureSession = session;
-                            Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
-                            Integer sync = characteristics.get(CameraCharacteristics.SYNC_MAX_LATENCY);
-                            listener.onCameraConfigured(
-                                    cameraId,
-                                    sensorOrientation == null ? 0 : sensorOrientation,
-                                    previewSize,
-                                    rawSize,
-                                    jpegSize,
-                                    sync);
-                            listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
-                            applyPreviewRepeatingLocked();
+                            issueStillBurstLocked();
                         }
 
                         @Override
                         public void onConfigureFailed(CameraCaptureSession session) {
-                            listener.onStatus("YUV + JPEG + RAW session configuration failed");
+                            if (captureSaver != null) {
+                                captureSaver.abort("PRIVATE + JPEG + RAW still session configuration failed");
+                            }
                         }
-                    },
-                    cameraHandler);
+                    }, cameraHandler);
         } catch (CameraAccessException e) {
-            listener.onStatus("Preview session failed: " + e.getMessage());
-        }
-    }
-
-    private void onPreviewImageAvailable(ImageReader reader) {
-        Image image = reader.acquireLatestImage();
-        if (image == null) return;
-        try {
-            YuvFrame frame = YuvFrame.fromImage(image);
-            FrameMeta meta = previewMetaByTimestamp.remove(frame.timestampNs);
-            if (meta != null) {
-                listener.onPreviewFrame(frame, meta);
-            } else {
-                previewFramesByTimestamp.put(frame.timestampNs, frame);
-                unmatchedFrames++;
-                trimPreviewMaps();
-            }
-        } catch (Throwable t) {
-            listener.onStatus("Preview frame decode failed: " + t.getMessage());
-        } finally {
-            image.close();
+            if (captureSaver != null) captureSaver.abort("Still session failed: " + e.getMessage());
         }
     }
 
     private void applyPreviewRepeatingLocked() {
-        if (capturing || cameraDevice == null || captureSession == null || previewReader == null) return;
+        if (stillSessionActive || cameraDevice == null || captureSession == null || previewSurface == null) return;
         try {
             if (previewMode == PreviewMode.NORMAL) {
                 CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-                builder.addTarget(previewReader.getSurface());
+                builder.addTarget(previewSurface);
                 builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
                 builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
                 builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
+                builder.set(
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF);
+                if (aeFpsRange != null) {
+                    builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, aeFpsRange);
+                }
+                configureSrgbTonemap(builder);
                 builder.setTag(TAG_NORMAL);
                 captureSession.setRepeatingRequest(builder.build(), previewCaptureCallback, cameraHandler);
-                listener.onStatus("NORMAL AE preview");
+                listener.onStatus("NORMAL AE preview  target=" + rangeText(aeFpsRange) + " fps");
             } else {
                 CaptureRequest shortRequest = buildManualPreviewRequest(TAG_SHORT, shortExposureNs);
                 CaptureRequest longRequest = buildManualPreviewRequest(TAG_LONG, longExposureNs);
@@ -374,9 +451,10 @@ final class CameraController {
                         cameraHandler);
                 listener.onStatus(
                         (previewMode == PreviewMode.HDR ? "HDR" : "SPLIT")
-                                + " alternating preview  short=" + exposureText(shortExposureNs)
+                                + " direct-GPU alternating preview  short=" + exposureText(shortExposureNs)
                                 + "  long=" + exposureText(longExposureNs)
-                                + "  ISO " + manualIso);
+                                + "  ISO " + manualIso
+                                + "  target=" + targetPreviewFps + " sensor fps");
             }
         } catch (Throwable t) {
             listener.onStatus("Repeating request failed: " + t.getMessage());
@@ -386,7 +464,7 @@ final class CameraController {
     private CaptureRequest buildManualPreviewRequest(String tag, long exposureNs)
             throws CameraAccessException {
         CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-        builder.addTarget(previewReader.getSurface());
+        builder.addTarget(previewSurface);
         configureManualRequest(builder, exposureNs, manualIso);
         builder.setTag(tag);
         return builder.build();
@@ -398,13 +476,23 @@ final class CameraController {
         builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
         builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
+        builder.set(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF);
         builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposure);
         builder.set(CaptureRequest.SENSOR_SENSITIVITY, sensitivity);
         Long maxFrame = characteristics.get(CameraCharacteristics.SENSOR_INFO_MAX_FRAME_DURATION);
-        long frameDuration = Math.max(33_333_333L, exposure + 2_000_000L);
+        long frameDuration = Math.max(manualFrameDurationNs, exposure);
         if (maxFrame != null) frameDuration = Math.min(frameDuration, maxFrame);
         frameDuration = Math.max(frameDuration, exposure);
         builder.set(CaptureRequest.SENSOR_FRAME_DURATION, frameDuration);
+        configureSrgbTonemap(builder);
+    }
+
+    private void configureSrgbTonemap(CaptureRequest.Builder builder) {
+        if (!srgbTonemapSupported) return;
+        builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_PRESET_CURVE);
+        builder.set(CaptureRequest.TONEMAP_PRESET_CURVE, CaptureRequest.TONEMAP_PRESET_CURVE_SRGB);
     }
 
     private final CameraCaptureSession.CaptureCallback previewCaptureCallback =
@@ -432,27 +520,21 @@ final class CameraController {
                         lastAeIso = iso;
                     }
                     FrameMeta meta = new FrameMeta(kind, result.getFrameNumber(), timestamp, exposure, iso);
-                    YuvFrame frame = previewFramesByTimestamp.remove(timestamp);
-                    if (frame != null) {
-                        listener.onPreviewFrame(frame, meta);
-                    } else {
-                        previewMetaByTimestamp.put(timestamp, meta);
-                        trimPreviewMaps();
-                    }
+                    listener.onPreviewMeta(meta);
                     previewResultCount++;
-                    if (previewResultCount % 20 == 0) {
+                    if (previewResultCount % 60 == 0) {
                         listener.onStatus(
                                 kind + " frame=" + result.getFrameNumber()
                                         + " actual=" + exposureText(exposure)
                                         + " ISO=" + iso
-                                        + " unmatched=" + unmatchedFrames);
+                                        + " target=" + targetPreviewFps + " sensor fps");
                     }
                 }
             };
 
     private void beginCaptureLocked() {
         if (capturing || cameraDevice == null || characteristics == null
-                || captureSession == null || rawReader == null || jpegReader == null) {
+                || captureSession == null || previewSurface == null || !previewSurface.isValid()) {
             listener.onStatus(capturing ? "Capture already in progress" : "Camera not ready");
             return;
         }
@@ -464,8 +546,19 @@ final class CameraController {
                 characteristics,
                 cameraId,
                 captureId,
-                (id, success, message) -> cameraHandler.post(() -> finishCaptureLocked(id, success, message)));
-        issueStillBurstLocked();
+                new CaptureSetSaver.Listener() {
+                    @Override
+                    public void onInputsAcquired(String id) {
+                        cameraHandler.post(() -> resumePreviewAfterStillInputsLocked(id));
+                    }
+
+                    @Override
+                    public void onFinished(String id, boolean success, String message) {
+                        cameraHandler.post(() -> finishCaptureLocked(id, success, message));
+                    }
+                });
+        stillSessionActive = true;
+        startStillCaptureSessionLocked();
     }
 
     private void issueStillBurstLocked() {
@@ -522,22 +615,38 @@ final class CameraController {
                 }
             };
 
+    private void resumePreviewAfterStillInputsLocked(String captureId) {
+        if (!capturing || !stillSessionActive) return;
+        stillSessionActive = false;
+        closeSessionLocked();
+        listener.onStatus("HDR inputs acquired; preview resumed while files save: " + captureId);
+        startPreviewSessionLocked();
+    }
+
     private void finishCaptureLocked(String captureId, boolean success, String message) {
         captureSaver = null;
         capturing = false;
+        if (stillSessionActive) {
+            stillSessionActive = false;
+            closeSessionLocked();
+            startPreviewSessionLocked();
+        }
+        closeReader(rawReader);
+        closeReader(jpegReader);
+        rawReader = null;
+        jpegReader = null;
         listener.onCaptureFinished(captureId, success, message);
         applyPreviewRepeatingLocked();
     }
 
     private void closeDeviceLocked() {
         capturing = false;
+        stillSessionActive = false;
         if (captureSaver != null) captureSaver.abort("Camera closed");
         captureSaver = null;
         closeSessionLocked();
-        closeReader(previewReader);
         closeReader(rawReader);
         closeReader(jpegReader);
-        previewReader = null;
         rawReader = null;
         jpegReader = null;
         if (cameraDevice != null) {
@@ -545,8 +654,7 @@ final class CameraController {
             cameraDevice = null;
         }
         characteristics = null;
-        previewMetaByTimestamp.clear();
-        previewFramesByTimestamp.clear();
+        previewSurfaceConfigured = false;
     }
 
     private void closeSessionLocked() {
@@ -580,45 +688,73 @@ final class CameraController {
         return Math.max(range.getLower(), Math.min(range.getUpper(), value));
     }
 
-    private void trimPreviewMaps() {
-        while (previewMetaByTimestamp.size() > 12) {
-            Long oldest = previewMetaByTimestamp.keySet().stream().min(Long::compareTo).orElse(null);
-            if (oldest == null) break;
-            previewMetaByTimestamp.remove(oldest);
-        }
-        while (previewFramesByTimestamp.size() > 8) {
-            Long oldest = previewFramesByTimestamp.keySet().stream().min(Long::compareTo).orElse(null);
-            if (oldest == null) break;
-            previewFramesByTimestamp.remove(oldest);
-        }
-    }
-
-    private static Size choosePreviewSize(Size[] sizes) {
+    private static Size choosePrivatePreviewSize(
+            StreamConfigurationMap map,
+            double nativeAspect,
+            boolean aeCanReach60) {
+        Size[] sizes = map.getOutputSizes(SurfaceTexture.class);
         if (sizes == null || sizes.length == 0) return null;
-        Size target = new Size(1280, 720);
-        return Arrays.stream(sizes)
-                .filter(s -> (long) s.getWidth() * s.getHeight() <= 1920L * 1080L)
-                .min(Comparator.comparingDouble(s -> sizeScore(s, target)))
-                .orElseGet(() -> Arrays.stream(sizes)
-                        .min(Comparator.comparingLong(s -> (long) s.getWidth() * s.getHeight()))
-                        .orElse(sizes[0]));
-    }
-
-    private static Size chooseJpegSize(Size[] sizes) {
-        if (sizes == null || sizes.length == 0) return null;
-        long targetArea = 8_000_000L;
-        Size bestUnder = null;
-        long bestArea = -1;
+        List<Size> nativeCandidates = new ArrayList<>();
         for (Size size : sizes) {
             long area = (long) size.getWidth() * size.getHeight();
-            if (area <= 9_000_000L && area > bestArea) {
-                bestUnder = size;
+            double aspectError = Math.abs(landscapeAspect(size) / nativeAspect - 1.0);
+            if (area <= 1920L * 1440L && aspectError <= 0.015) {
+                nativeCandidates.add(size);
+            }
+        }
+        if (nativeCandidates.isEmpty()) {
+            nativeCandidates.addAll(Arrays.asList(sizes));
+        }
+
+        boolean anySixty = false;
+        if (aeCanReach60) {
+            for (Size size : nativeCandidates) {
+                long minDuration = outputMinFrameDuration(map, size);
+                if (minDuration <= 0 || minDuration <= SIXTY_FPS_DURATION_NS) {
+                    anySixty = true;
+                    break;
+                }
+            }
+        }
+
+        final boolean preferSixty = anySixty;
+        final double targetArea = 1440.0 * 1080.0;
+        return nativeCandidates.stream()
+                .min(Comparator.comparingDouble(size -> {
+                    double aspectError = Math.abs(landscapeAspect(size) / nativeAspect - 1.0);
+                    long minDuration = outputMinFrameDuration(map, size);
+                    boolean canSixty = aeCanReach60
+                            && (minDuration <= 0 || minDuration <= SIXTY_FPS_DURATION_NS);
+                    double fpsPenalty = preferSixty && !canSixty ? 100.0 : 0.0;
+                    double area = (double) size.getWidth() * size.getHeight();
+                    double areaPenalty = Math.abs(Math.log(Math.max(1.0, area) / targetArea));
+                    return fpsPenalty + aspectError * 1000.0 + areaPenalty;
+                }))
+                .orElse(sizes[0]);
+    }
+
+    private static Size chooseJpegSize(Size[] sizes, double nativeAspect) {
+        if (sizes == null || sizes.length == 0) return null;
+        final long maxPreferredArea = 13_500_000L;
+        Size best = null;
+        long bestArea = -1;
+        for (Size size : sizes) {
+            double aspectError = Math.abs(landscapeAspect(size) / nativeAspect - 1.0);
+            long area = (long) size.getWidth() * size.getHeight();
+            if (aspectError <= 0.015 && area <= maxPreferredArea && area > bestArea) {
+                best = size;
                 bestArea = area;
             }
         }
-        if (bestUnder != null) return bestUnder;
+        if (best != null) return best;
+        final double targetArea = 12_600_000.0;
         return Arrays.stream(sizes)
-                .min(Comparator.comparingLong(s -> Math.abs((long) s.getWidth() * s.getHeight() - targetArea)))
+                .min(Comparator.comparingDouble(size -> {
+                    double aspectError = Math.abs(landscapeAspect(size) / nativeAspect - 1.0);
+                    double area = (double) size.getWidth() * size.getHeight();
+                    return aspectError * 1000.0
+                            + Math.abs(Math.log(Math.max(1.0, area) / targetArea));
+                }))
                 .orElse(sizes[0]);
     }
 
@@ -629,12 +765,57 @@ final class CameraController {
                 .orElse(sizes[0]);
     }
 
-    private static double sizeScore(Size size, Size target) {
-        double areaRatio = Math.log(((double) size.getWidth() * size.getHeight())
-                / ((double) target.getWidth() * target.getHeight()));
-        double aspect = size.getWidth() / (double) size.getHeight();
-        double targetAspect = target.getWidth() / (double) target.getHeight();
-        return Math.abs(areaRatio) + 4.0 * Math.abs(aspect - targetAspect);
+    private static long outputMinFrameDuration(StreamConfigurationMap map, Size size) {
+        try {
+            return map.getOutputMinFrameDuration(SurfaceTexture.class, size);
+        } catch (Throwable ignored) {
+            return 0L;
+        }
+    }
+
+    private static double landscapeAspect(Size size) {
+        int wide = Math.max(size.getWidth(), size.getHeight());
+        int tall = Math.min(size.getWidth(), size.getHeight());
+        return wide / (double) Math.max(1, tall);
+    }
+
+    private static int maxAeFps(Range<Integer>[] ranges) {
+        int max = 0;
+        if (ranges == null) return max;
+        for (Range<Integer> range : ranges) {
+            max = Math.max(max, range.getUpper());
+        }
+        return max;
+    }
+
+    private static Range<Integer> chooseAeFpsRange(Range<Integer>[] ranges, int target) {
+        if (ranges == null || ranges.length == 0) return null;
+        Range<Integer> exact = null;
+        Range<Integer> containing = null;
+        for (Range<Integer> range : ranges) {
+            if (range.getLower() == target && range.getUpper() == target) {
+                exact = range;
+                break;
+            }
+            if (range.contains(target)) {
+                if (containing == null
+                        || range.getLower() > containing.getLower()
+                        || range.getLower().equals(containing.getLower())
+                        && range.getUpper() < containing.getUpper()) {
+                    containing = range;
+                }
+            }
+        }
+        if (exact != null) return exact;
+        if (containing != null) return containing;
+        return Arrays.stream(ranges)
+                .max(Comparator.comparingInt(r -> r.getUpper()))
+                .orElse(ranges[0]);
+    }
+
+    private static boolean supportsSrgbTonemap(CameraCharacteristics c) {
+        int[] modes = c.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES);
+        return contains(modes, CaptureRequest.TONEMAP_MODE_PRESET_CURVE);
     }
 
     private static boolean contains(int[] values, int needle) {
@@ -653,11 +834,19 @@ final class CameraController {
         return level.toString();
     }
 
+    private static String rangeText(Range<Integer> range) {
+        if (range == null) return "auto";
+        return range.getLower().equals(range.getUpper())
+                ? range.getUpper().toString()
+                : range.getLower() + "-" + range.getUpper();
+    }
+
     static String exposureText(long ns) {
+        if (ns <= 0) return "?";
         double seconds = ns / 1_000_000_000.0;
-        if (seconds >= 1.0) return String.format(Locale.US, "%.2fs", seconds);
-        double reciprocal = 1.0 / Math.max(1e-9, seconds);
-        if (reciprocal >= 2.0) return "1/" + Math.round(reciprocal) + "s";
-        return String.format(Locale.US, "%.1fms", ns / 1_000_000.0);
+        if (seconds >= 0.5) return String.format(Locale.US, "%.2fs", seconds);
+        double reciprocal = 1.0 / seconds;
+        if (reciprocal >= 2.0) return String.format(Locale.US, "1/%.0fs", reciprocal);
+        return String.format(Locale.US, "%.3fs", seconds);
     }
 }

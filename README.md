@@ -1,69 +1,45 @@
-# Iris HDR Viewfinder Test V1.3
+# Iris HDR Viewfinder Test V1.4
 
-Standalone Camera2 experiment for proving alternating-exposure HDR preview behavior without modifying Photon/Iris.
+Standalone Camera2 experiment for a responsive alternating-exposure HDR viewfinder plus matched RAW/JPEG capture, without modifying Photon/Iris.
 
-## V1 goals
+## V1.4 live architecture
 
-- Enumerate back cameras that expose both `RAW` and `MANUAL_SENSOR` Camera2 capabilities.
-- `NORMAL AE`: ordinary auto-exposure YUV preview.
-- `SPLIT`: alternating manual short/long preview frames shown side-by-side.
-- `HDR FUSED`: alternating manual short/long preview frames fused by an OpenGL ES 3.0 shader.
-- Timestamp-match `YUV_420_888` preview frames against `TotalCaptureResult.SENSOR_TIMESTAMP`.
-- Show actual exposure/ISO/frame metadata and dropped-render information.
-- Capture one matched short/long still pair and save:
-  - `*_SHORT.dng`
-  - `*_LONG.dng`
-  - `*_SHORT.jpg`
-  - `*_LONG.jpg`
-  - `*_FUSED_HDR.jpg`
-  - `*_metadata.json`
-- Files are written to `Downloads/IrisHDRViewfinder`.
+`Camera2 PRIVATE Surface -> SurfaceTexture/external OES -> timestamp-matched SHORT/LONG GPU textures -> HDR shader -> display`
 
+The steady-state live session contains only the PRIVATE preview Surface so RAW/JPEG output streams do not unnecessarily cap preview cadence. `CAPTURE HDR SET` temporarily configures the guaranteed PRIVATE + JPEG + RAW topology, acquires the matched SHORT/LONG inputs, then restores the preview-only session while DNG/JPEG writing and fused-JPEG generation continue.
 
-## V1.3 orientation/display behavior
+## Display and field of view
 
-- Follows Android's user orientation policy instead of forcing landscape.
-- With auto-rotate enabled, portrait and landscape each use a dedicated responsive control layout.
-- With the device orientation lock enabled, the app respects the locked orientation instead of rotating anyway.
-- Camera sensor/display rotation is applied once.
-- Camera2 YUV top-left memory origin is corrected once during YUV->RGB conversion; the final display pass does not flip it again.
-- Normal/HDR preview and each SPLIT half use aspect-preserving center crop, so the viewfinder fills its measured area without stretching.
-- Controls occupy their own measured area below the preview instead of covering the camera surface.
-- Camera selection, mode, exposure sliders and ISO are restored across Android orientation recreation.
-- SHORT/LONG JPEG requests use device-correct orientation; fused JPEG input bitmaps normalize EXIF-only HAL rotation before the unchanged fusion math.
+- Android `fullUser` orientation: portrait/landscape follow auto-rotate and respect device orientation lock.
+- The largest RAW stream defines the camera's native sensor aspect.
+- PRIVATE preview and HAL JPEG sizes are selected to match that same native aspect instead of forcing 16:9.
+- Preview uses FIT/letterbox/pillarbox presentation, never center-crop-to-fill, so geometry is not stretched and scene field of view is not intentionally discarded to fill the UI.
+- SHORT/LONG JPEG orientation remains device-correct and fused-JPEG inputs normalize EXIF-only HAL rotation.
 
-## Important scope
+## Exposure and cadence
 
-This APK is intentionally separate from Photon/Iris. It does not use Photon code, Sabre, Motion, Night, Super Res, or the Iris DNG path.
+- `NORMAL AE` requests the best supported AE FPS range, preferring 60 fps only when both camera AE capability and the selected PRIVATE stream allow it; otherwise it uses a genuine 30 fps fallback.
+- `SPLIT` and `HDR FUSED` keep AE off and own shutter, ISO and sensor frame duration directly.
+- Default HDR bracket is 1/480s vs 1/60s at the same ISO: 8x / 3 EV.
+- Auto Bracket log-centers an 8x bracket around the latest NORMAL AE result, then constrains the long exposure to the chosen live frame duration where possible.
+- UI reports actual incoming camera FPS and completed HDR-pair FPS separately.
 
-The DNG files are diagnostic sensor references only. `FUSED_HDR.jpg` is an experimental JPEG-domain fusion of the matched short and long Camera2 HAL JPEGs. The live HDR viewfinder is fused from matched YUV preview frames on OpenGL ES 3.0.
+## Color/HDR preview
+
+Where supported, Camera2 is asked for `TONEMAP_MODE_PRESET_CURVE` + `TONEMAP_PRESET_CURVE_SRGB` (not `CONTRAST_CURVE`). Live and saved fused HDR use the exact piecewise sRGB transfer function, exposure normalization, highlight-aware short-frame admission, and a bounded global highlight rolloff. No motion alignment is performed in this test app.
+
+## Capture outputs
+
+Each `CAPTURE HDR SET` produces:
+- `*_SHORT.dng`
+- `*_LONG.dng`
+- `*_SHORT.jpg`
+- `*_LONG.jpg`
+- `*_FUSED_HDR.jpg`
+- `*_metadata.json`
+
+Files are written to `Downloads/IrisHDRViewfinder`. DNGs are diagnostic sensor references only; no custom DNG image processing is performed.
 
 ## Reference lineage
 
-The behavioral reference was Android's historical Camera2 HDR Viewfinder concept: alternating short/long manual requests and combining the two preview exposures. This project is a fresh implementation; it does not use the historical RenderScript implementation.
-
-The build toolchain is pinned to the modern Android camera-samples baseline checked on 2026-08-30:
-
-- Android Gradle Plugin 9.2.1
-- Gradle 9.6.0
-- compile/target SDK 37
-- Java 17
-
-## First-use test
-
-1. Grant camera permission.
-2. Pick a RAW+Manual back camera.
-3. Leave mode on `NORMAL AE` for about one second.
-4. Press `AUTO BRACKET` to center short/long settings around the most recent AE result.
-5. Switch to `SPLIT` and verify the two sides visibly represent different exposures.
-6. Switch to `HDR FUSED` and inspect highlight/shadow behavior and latency.
-7. Press `CAPTURE HDR SET`.
-8. Open `Downloads/IrisHDRViewfinder` and verify all six files exist for the same capture ID.
-
-## V1 limitations
-
-- This is an experiment, not a production HDR pipeline.
-- Live fusion is intentionally lightweight and does not perform motion alignment.
-- Full-resolution fused JPEG is produced from the matched HAL JPEG pair, not from RAW demosaic/merge.
-- Output JPEG is SDR/sRGB-like for V1; P3/Ultra HDR are deliberately out of scope.
-- RAW/DNG is diagnostic only and receives no custom processing.
+The behavioral reference is Android's historical Camera2 HDR Viewfinder concept: alternating per-frame manual exposures and combining the latest two exposures. V1.4 is a fresh OpenGL ES 3.0 implementation and does not use the historical RenderScript code or Photon/Iris source.

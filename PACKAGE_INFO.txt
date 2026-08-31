@@ -1,16 +1,17 @@
-Iris HDR Viewfinder Test V1.3
+Iris HDR Viewfinder Test V1.4
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED FOR GITHUB ACTIONS BUILD - NOT YET BUILD-PROVEN
-Runtime authority: exact successful V1.2 Actions artifact Iris-HDR-Viewfinder-Test-V1.2
-Authority commit: 89082c0233d8bb3d77b21c3d63c6c0774f9e9753
-Authority Actions run: 33323384977
-Authority artifact ID: 9735549542
-Authority artifact ZIP SHA-256: 7a9209ad80155f3e050cbb1ef7a02b1597e4e97998140a025a1489489cd619d0
-Authority V1.2 runtime manifest SHA-256: 43e87cfee4aaa0c33fdd84a3b6b8eaa29b1ac0604d22b2f7b54561965877f515
-Backup branch: none; orientation/UI correction is localized and reversible by canonical rollback patch
-Reference behavior: Android historical Camera2 HDR Viewfinder alternating-exposure concept
-Implementation: fresh standalone Java/Camera2/OpenGL ES 3.0 code; no RenderScript; no Photon source
-Toolchain: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29
-V1.3 runtime changes: fullUser orientation policy, responsive portrait/landscape controls, Android-documented back-camera preview rotation, single YUV-origin correction, aspect-preserving center crop in NORMAL/HDR/SPLIT, UI state preservation across rotation recreation, device-correct SHORT/LONG JPEG orientation, EXIF-normalized fused JPEG inputs
-Unchanged image math from V1.2: manual exposure/frame routing, RAW/DNG saving, frame matching, YUV conversion shader, HDR fusion/tone math. CameraController changes only still-JPEG orientation metadata; JpegFusion changes only input orientation normalization before the existing fusion math.
+Runtime authority: exact successful V1.3 Actions artifact Iris-HDR-Viewfinder-Test-V1.3
+Authority commit: e205b6b9acdf9ff091eb46a6c521ccd72d287356
+Authority Actions run: 33340991001
+Authority artifact ID: 9740538556
+Authority artifact ZIP SHA-256: 5eca3fd826bfbfe1580375d4613f3b9522c3288e513da3e0a2e2ace4e972b417
+Authority V1.3 source TAR SHA-256: 3c5fec123640c932aa1274645a26593e4e49e8547b078e3f997b2f32f805510a
+Authority V1.3 runtime manifest SHA-256: d83f8661fd35374eaa24642d647204c594168fbce25c55763fd3804fbec612b4
+Backup branch: backup-v1.3-pre-direct-gpu-hdr at exact V1.3 authority commit e205b6b9acdf9ff091eb46a6c521ccd72d287356
+Architecture transition: live preview ownership moves from Java YUV ImageReader repacking to Camera2 PRIVATE SurfaceTexture / external-OES direct GPU input.
+V1.4 behavior: native RAW aspect is shared preview/JPEG aspect authority; FIT presentation preserves full FOV; preview-only steady-state session avoids RAW/JPEG stream cadence caps; temporary RAW+JPEG capture session resumes preview once capture inputs are acquired; capability-aware 60 fps preference with true 30 fps fallback; separate actual camera and HDR-pair FPS display; 3 EV / 8x default bracket; Camera2 PRESET_CURVE+sRGB where supported; exact piecewise sRGB fusion and highlight-compressive rolloff.
+Preserved: responsive fullUser portrait/landscape behavior, device orientation lock, RAW/DNG diagnostic capture, SHORT/LONG JPEG orientation, EXIF-normalized fused JPEG inputs, timestamp-matched capture results, camera selection, manual shutter/ISO controls.
+Reference behavior: Android historical Camera2 HDR Viewfinder alternating-exposure concept; implementation is fresh Java/Camera2/OpenGL ES 3.0 code, no RenderScript and no Photon source.
+Toolchain: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2 in Actions.
 Outputs per HDR capture: SHORT.dng, LONG.dng, SHORT.jpg, LONG.jpg, FUSED_HDR.jpg, metadata.json
