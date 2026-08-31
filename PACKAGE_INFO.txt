@@ -1,32 +1,35 @@
-Iris HDR Viewfinder Test V1.4.6
+Iris HDR Viewfinder Test V1.4.7
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
-Runtime authority: exact successful V1.4.5 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.5
-Authority commit: d45d3aaed89770097c443fc8564f52acab8d9590
-Authority tree: aad054a3780d51729f85ca0e7b2b9e82d86651b2
-Authority Actions run: 33402806985
-Authority job: 99522985556
-Authority artifact ID: 9761956538
-Authority artifact ZIP SHA-256: c1f87819bf5dd4bc2286dd5735dd161ceec566562f8e733181d334a570fdd9ef
-Authority V1.4.5 source TAR SHA-256: ad13d5f87235057a35ec1824d9853ddb424cf38f5450f52ddb310044684790d1
-Authority V1.4.5 runtime manifest SHA-256: f052b7e9dab0a2298fece4d890dd7a329b93f399ce2911be49b353dd65588106
-Authority V1.4.5 repository manifest SHA-256: 05cb5491862918a6e2fd03dc3a39658870e8b7fe515ed30bea0193906ba9d65e
-Authority V1.4.5 regressions SHA-256: e31f2ec60068789054ed39b218ec3f5711744a9664943a856979d6967b307422
-Authority V1.4.5 APK SHA-256: 4305f1c0bd31e5d1244a39496c604ed6d9fd052e672f72181636673c2dc5c5bc
+Runtime authority: exact successful V1.4.6 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.6
+Authority commit: ebb57a3f9da1874e990587a16e65549349ab643b
+Authority tree: 2541541f34a467c14d3b93edb2e5373610a1ccd6
+Authority Actions run: 33415267140
+Authority job: 99564285053
+Authority artifact ID: 9766787904
+Authority artifact ZIP SHA-256: a2d1a6eb21e7da82fa60fdd4cac48bb00c9fe533206e0eab2fb2141af77b14d0
+Authority V1.4.6 source TAR SHA-256: 71931f0a1b5bdbb6cf693c4ce6319408a84fd52fa12a31dcd59aacf31f760134
+Authority V1.4.6 runtime manifest SHA-256: 0ff26f689f295e9e86e8e643bd381b9443be35f1436c573d591c21af7f3bf0a7
+Authority V1.4.6 repository manifest SHA-256: 16352e39e5840c501141f06531489a09871043068132f7bd4a61df7ccd544cd7
+Authority V1.4.6 regressions SHA-256: 4971ec03b8b37c087ef4aef1e7485c91fa180ebbe18bf280e59f1a42ce6691e4
+Authority V1.4.6 APK SHA-256: 4b1b7c83dca234c57e24d38f500c9dbbe1f28bee634bf909805e9216695df526
 Existing architecture backup retained (no new backup required): backup-v1.4.4-pre-hdr-exposure-parity -> 172c628445edb6d28617de77748ceeb76203b2d1
 
-V1.4.6 runtime scope: exactly two files:
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+V1.4.7 runtime scope: exactly two files:
+- app/src/main/assets/shaders/hdr_display.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 
-V1.4.6 correction:
-- FOV SAFE / 60 FPS CROP OFF is deterministic 30 fps from the first preview request. It no longer enters a 60-fps sensor mode and then visibly changes framing when it falls back.
-- 60 FPS CROP ON is an explicit fixed-60 request. When exact [60,60] is supported, the live PRIVATE preview keeps the requested 60-fps cadence policy; measured under-delivery is logged/reported but never silently mutates the viewfinder back to 30 fps.
-- Hidden clean-AE meter frames are excluded from steady-preview FPS and FOV evidence so the temporary meter cannot trip cadence/FOV fallback logic.
-- Entering and leaving the hidden meter resets CaptureResult cadence evidence, so watchdog windows contain only the steady displayed request family.
-- AUTO re-meter cadence is reduced from every 2 seconds to every 5 seconds and is armed only after a completed LONG result, ensuring a complete SHORT/LONG pair remains published before metering replaces the repeating pair.
-- UI text now states the exact cadence semantics: fixed full-FOV 30 when OFF, explicit cropped 60 request when ON.
+V1.4.7 correction:
+- LONG remains the sole owner of shadows and ordinary midtones; SHORT contributes exactly zero until LONG approaches saturation.
+- SHORT admission is exposure-ratio adaptive: wider brackets begin handoff closer to LONG clipping, protecting low-SNR SHORT data without device-specific model tables.
+- SHORT is normalized in linear light by the actual exposure ratio already produced from shutter x ISO x post-RAW boost metadata.
+- Highlight replacement is full-RGB, not per-channel, preventing clipping seams and preserving recovered highlight hue.
+- The rejected fixed asymptotic shoulder is replaced by bracket-width-aware scene-to-display compression. It reserves output code space for values above LONG white instead of collapsing recovered 1/2/3-stop detail back into 250-255.
+- One hue-preserving RGB scale performs the final highlight compression before the existing sRGB OETF / 8-bit output.
+- A lightweight SHORT plausibility guard rejects implausibly dark normalized SHORT samples only in the clipped-highlight handoff region.
+- Live HDR and saved JPEG fusion use the same constants and equations.
+- Low-end/flagship portability: no camera/vendor IDs, no additional GPU textures, no neighborhood sampling, no extra rendering pass, no new full-frame CPU buffers or runtime allocations.
 
-Preserved byte-for-byte runtime from successful V1.4.5: AndroidManifest.xml, all four shaders, CaptureSetSaver.java, FrameMeta.java, HdrGlView.java, JpegFusion.java, MediaStoreWriter.java.
-Preserved behavior: SHORT/LONG request ownership, atomic GL pairing, live/saved fusion math, widened exposure normalization, clean AE brightness anchor, post-RAW boost parity, sRGB contrast curve, NOISE_REDUCTION_MODE_OFF, EDGE_MODE_OFF, MANUAL SAFE flicker behavior, full RAW/JPEG still session, DNG/JPEG orientation, logger and GPU/session lifecycle.
-Toolchain/build mechanics: inherited unchanged from successful V1.4.5 / V1.4.4 sequence (AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2).
+Preserved byte-for-byte runtime from successful V1.4.6: AndroidManifest.xml, copy_2d.frag, fullscreen.vert, oes_to_rgb.frag, CameraController.java, CaptureSetSaver.java, FrameMeta.java, HdrGlView.java, MainActivity.java, MediaStoreWriter.java.
+Preserved behavior: FOV-safe fixed-30 semantics, explicit fixed-60 crop policy, isolated AUTO metering, SHORT/LONG request ownership, atomic GL pairing, clean AE brightness anchor, post-RAW boost parity, explicit Camera2 sRGB contrast curve, NOISE_REDUCTION_MODE_OFF, EDGE_MODE_OFF, MANUAL SAFE flicker behavior, full RAW/JPEG still session, DNG/JPEG orientation, logger and GPU/session lifecycle.
+Toolchain/build mechanics: inherited unchanged from successful V1.4.6 / V1.4.5 / V1.4.4 sequence (AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2).

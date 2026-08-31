@@ -16,7 +16,7 @@ oes_shader = (ROOT / "app/src/main/assets/shaders/oes_to_rgb.frag").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.6 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.7 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -178,22 +178,47 @@ require('autoShortIso = minIso;' in camera,
 require('double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);' in camera,
         "AUTO HDR must report actual EV after sensor-range clamping")
 
-# 013 / 030 - Live and saved fusion preserve sRGB math, wide exposure normalization and midtone parity.
+# 013 / 030 / 036 - Live and saved fusion preserve sRGB math, wide exposure normalization,
+# LONG-owned shadows, exposure-adaptive highlight recovery, and hue-preserving output mapping.
 for text, owner in ((hdr_shader, 'live shader'), (fusion, 'JPEG fusion')):
     require('0.04045' in text and '12.92' in text and '0.0031308' in text and '2.4' in text,
             f"{owner} must use the piecewise sRGB transfer function")
-require('smoothstep(0.68, 0.94, longHighlight)' in hdr_shader,
-        "live highlight-admission weighting missing")
-require('hdrShoulderChannel' in hdr_shader and 'const float knee = 0.70;' in hdr_shader,
-        "live midtone-preserving HDR shoulder missing")
-require('smoothstep(0.68f, 0.94f, clip)' in fusion,
-        "saved JPEG highlight-admission weighting missing")
-require('hdrShoulder' in fusion and 'final float knee = 0.70f;' in fusion,
-        "saved JPEG midtone-preserving shoulder missing")
+require('adaptiveClipStart' in hdr_shader and 'bracketStops' in hdr_shader,
+        "live highlight admission must adapt to the actual exposure relationship")
+require('0.90 + 0.01 * (bracketStops - 1.0)' in hdr_shader
+        and '0.995' in hdr_shader,
+        "live SHORT admission must stay near LONG saturation")
+require('shortConfidence' in hdr_shader and 'shortScenePeak / longScenePeak' in hdr_shader,
+        "live clipped-highlight SHORT plausibility guard missing")
+require('vec3 mergedScene = mix(longScene, shortScene, highlightWeight);' in hdr_shader,
+        "live fusion must hand off full RGB rather than switch channels independently")
+require('adaptiveHdrToneMap' in hdr_shader and 'mappedPeak / scenePeak' in hdr_shader,
+        "live HDR compression must preserve RGB ratios/hue")
+require('0.90f + 0.01f * (bracketStops - 1.0f)' in fusion
+        and 'HDR_CLIP_END = 0.995f' in fusion,
+        "saved JPEG SHORT admission must match live near-clipping policy")
+require('shortConfidence' in fusion and 'shortScenePeak / longScenePeak' in fusion,
+        "saved JPEG clipped-highlight SHORT plausibility guard missing")
+require('float mr = lr + (sr - lr) * highlightWeight;' in fusion
+        and 'float mg = lg + (sg - lg) * highlightWeight;' in fusion
+        and 'float mb = lb + (sb - lb) * highlightWeight;' in fusion,
+        "saved fusion must use a full-RGB handoff")
+require('toneScale = scenePeak > 0.000001f ? mappedPeak / scenePeak : 1.0f;' in fusion,
+        "saved HDR compression must use one hue-preserving RGB scale")
+require('0.82 - 0.04 * (bracketStops - 1.0)' in hdr_shader
+        and '0.82f - 0.04f * (bracketStops - 1.0f)' in fusion,
+        "live/save display headroom must adapt to bracket width")
 require('65_536.0' in fusion and '65_536.0' in saver and '65_536.0' in gl,
         "widened exposure normalization must be consistent live/save/metadata")
+require('smoothstep(0.68, 0.94' not in hdr_shader and 'smoothstep(0.68f, 0.94f' not in fusion,
+        "rejected early SHORT admission returned")
+require('hdrShoulderChannel' not in hdr_shader and 'hdrShoulder(' not in fusion,
+        "rejected fixed asymptotic shoulder returned")
 require('1.6 * max(sceneLinear' not in hdr_shader and '1.6f * Math.max' not in fusion,
         "rejected fixed darkening tone-map exposure returned")
+require(hdr_shader.count('uniform sampler2D') == 3
+        and 'textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
+        "adaptive HDR must remain a single-pass three-texture path for low-end GPUs")
 
 # 016 / 022 - V1.4.2 on-device sideways preview: producer transform owns live orientation.
 require('SCALER_AVAILABLE_ROTATE_AND_CROP_MODES' in camera,
@@ -425,6 +450,50 @@ require('FOV SAFE: fixed 30 fps preview avoids live sensor-crop/FPS transitions'
 require('60 FPS CROP ON: request fixed 60/60 preview' in main,
         "UI must state explicit force-60 semantics")
 
+
+# 036 - Exact V1.4.6 failure class: recoverable SHORT highlight detail must not collapse
+# back into display white, while LONG remains the sole shadow owner. This is pure math
+# and device-independent: only exposure ratio and pixel values participate.
+def v147_policy(exposure_ratio):
+    ratio = max(1.0, min(65536.0, exposure_ratio))
+    stops = max(1.0, min(6.0, math.log(max(ratio, 1.0001), 2.0)))
+    clip_start = max(0.90, min(0.95, 0.90 + 0.01 * (stops - 1.0)))
+    white_anchor = max(0.68, min(0.82, 0.82 - 0.04 * (stops - 1.0)))
+    display_ceiling = max(0.84, min(0.96, white_anchor + 0.14))
+    return ratio, stops, clip_start, white_anchor, display_ceiling
+
+def smoothstep_math(edge0, edge1, value):
+    t = max(0.0, min(1.0, (value - edge0) / (edge1 - edge0)))
+    return t * t * (3.0 - 2.0 * t)
+
+def map_peak_math(scene_peak, exposure_ratio):
+    ratio, stops, _, white_anchor, display_ceiling = v147_policy(exposure_ratio)
+    knee = 0.70
+    if scene_peak <= knee:
+        return scene_peak
+    if scene_peak <= 1.0:
+        t = max(0.0, min(1.0, (scene_peak - knee) / (1.0 - knee)))
+        return knee + (white_anchor - knee) * t
+    t = max(0.0, min(1.0, math.log(scene_peak, 2.0) / max(math.log(max(ratio, 1.0001), 2.0), 0.0001)))
+    return white_anchor + (display_ceiling - white_anchor) * t
+
+ratio8, stops8, clip8, anchor8, ceiling8 = v147_policy(8.0)
+require(math.isclose(stops8, 3.0, abs_tol=1e-6), "8x bracket must drive a 3-stop adaptive policy")
+require(math.isclose(clip8, 0.92, abs_tol=1e-6), "8x bracket SHORT admission must begin at 92% LONG code")
+require(smoothstep_math(clip8, 0.995, 0.50) == 0.0,
+        "SHORT must contribute exactly zero in a healthy LONG shadow/midtone")
+require(smoothstep_math(clip8, 0.995, 1.0) == 1.0,
+        "fully clipped LONG highlight must hand off to normalized SHORT")
+require(map_peak_math(0.50, 8.0) == 0.50,
+        "HDR mapping must leave LONG-owned shadow/midtone values unchanged")
+require(map_peak_math(1.0, 8.0) < 0.80,
+        "LONG white must reserve visible code space for recovered HDR detail")
+require(map_peak_math(2.0, 8.0) < map_peak_math(4.0, 8.0) < map_peak_math(8.0, 8.0) < 0.90,
+        "recovered 1/2/3-stop highlight structure must remain separated below display white")
+_, _, clip64, anchor64, ceiling64 = v147_policy(64.0)
+require(clip64 > clip8 and anchor64 <= anchor8 and ceiling64 <= ceiling8,
+        "wider brackets must adapt by protecting SHORT noise and reserving more display headroom")
+
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
     rotated_w = frame_h if axis_swap else frame_w
@@ -485,4 +554,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.6 REGRESSION PASS: producer-owned orientation, explicit DNG orientation, clean-anchored two-frame AUTO HDR, atomic pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.7 REGRESSION PASS: adaptive highlight-only HDR, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")

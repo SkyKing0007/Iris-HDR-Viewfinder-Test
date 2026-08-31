@@ -11,6 +11,9 @@ import java.io.ByteArrayOutputStream;
 final class JpegFusion {
     private static final float[] SRGB_TO_LINEAR = buildLinearLut();
     private static final int[] LINEAR_TO_SRGB = buildEncodeLut();
+    private static final double LOG_2 = Math.log(2.0);
+    private static final float HDR_KNEE = 0.70f;
+    private static final float HDR_CLIP_END = 0.995f;
 
     private JpegFusion() {}
 
@@ -36,7 +39,13 @@ final class JpegFusion {
         int[] shortPixels = new int[width * rowsPerStrip];
         int[] longPixels = new int[width * rowsPerStrip];
         int[] outPixels = new int[width * rowsPerStrip];
+
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
+        float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 1.0f, 6.0f);
+        float clipStart = clamp(0.90f + 0.01f * (bracketStops - 1.0f), 0.90f, 0.95f);
+        float whiteAnchor = clamp(0.82f - 0.04f * (bracketStops - 1.0f), 0.68f, 0.82f);
+        float displayCeiling = clamp(whiteAnchor + 0.14f, 0.84f, 0.96f);
+        float headroomLog2 = Math.max(log2(Math.max(ratio, 1.0001f)), 0.0001f);
 
         for (int y = 0; y < height; y += rowsPerStrip) {
             int rows = Math.min(rowsPerStrip, height - y);
@@ -47,19 +56,56 @@ final class JpegFusion {
             for (int i = 0; i < count; i++) {
                 int s = shortPixels[i];
                 int l = longPixels[i];
-                float lr8 = (l >>> 16) & 0xFF;
-                float lg8 = (l >>> 8) & 0xFF;
-                float lb8 = l & 0xFF;
-                float clip = Math.max(lr8, Math.max(lg8, lb8)) / 255.0f;
-                float w = smoothstep(0.68f, 0.94f, clip);
 
-                float r = fuseChannel((s >>> 16) & 0xFF, (l >>> 16) & 0xFF, ratio, w);
-                float g = fuseChannel((s >>> 8) & 0xFF, (l >>> 8) & 0xFF, ratio, w);
-                float b = fuseChannel(s & 0xFF, l & 0xFF, ratio, w);
+                int sr8 = (s >>> 16) & 0xFF;
+                int sg8 = (s >>> 8) & 0xFF;
+                int sb8 = s & 0xFF;
+                int lr8 = (l >>> 16) & 0xFF;
+                int lg8 = (l >>> 8) & 0xFF;
+                int lb8 = l & 0xFF;
 
-                int ro = encode(r);
-                int go = encode(g);
-                int bo = encode(b);
+                float sr = SRGB_TO_LINEAR[sr8] * ratio;
+                float sg = SRGB_TO_LINEAR[sg8] * ratio;
+                float sb = SRGB_TO_LINEAR[sb8] * ratio;
+                float lr = SRGB_TO_LINEAR[lr8];
+                float lg = SRGB_TO_LINEAR[lg8];
+                float lb = SRGB_TO_LINEAR[lb8];
+
+                float longEncodedPeak = Math.max(lr8, Math.max(lg8, lb8)) / 255.0f;
+                float longScenePeak = Math.max(0.000001f, Math.max(lr, Math.max(lg, lb)));
+                float shortScenePeak = Math.max(sr, Math.max(sg, sb));
+                float shortConfidence = smoothstep(
+                        0.35f,
+                        0.65f,
+                        shortScenePeak / longScenePeak);
+                float highlightWeight = smoothstep(
+                        clipStart,
+                        HDR_CLIP_END,
+                        longEncodedPeak) * shortConfidence;
+
+                // Full-RGB handoff: LONG remains the clean shadow/midtone owner and
+                // normalized SHORT enters only near LONG saturation.
+                float mr = lr + (sr - lr) * highlightWeight;
+                float mg = lg + (sg - lg) * highlightWeight;
+                float mb = lb + (sb - lb) * highlightWeight;
+
+                float scenePeak = Math.max(mr, Math.max(mg, mb));
+                float mappedPeak = scenePeak;
+                if (scenePeak > HDR_KNEE) {
+                    if (scenePeak <= 1.0f) {
+                        float t = clamp((scenePeak - HDR_KNEE) / (1.0f - HDR_KNEE), 0.0f, 1.0f);
+                        mappedPeak = HDR_KNEE + (whiteAnchor - HDR_KNEE) * t;
+                    } else {
+                        float t = clamp(log2(scenePeak) / headroomLog2, 0.0f, 1.0f);
+                        mappedPeak = whiteAnchor + (displayCeiling - whiteAnchor) * t;
+                    }
+                }
+
+                // One scale for all channels preserves recovered highlight hue.
+                float toneScale = scenePeak > 0.000001f ? mappedPeak / scenePeak : 1.0f;
+                int ro = encode(mr * toneScale);
+                int go = encode(mg * toneScale);
+                int bo = encode(mb * toneScale);
                 outPixels[i] = 0xFF000000 | (ro << 16) | (go << 8) | bo;
             }
             output.setPixels(outPixels, 0, width, 0, y, width, rows);
@@ -116,32 +162,22 @@ final class JpegFusion {
         return upright;
     }
 
-    private static float fuseChannel(int short8, int long8, float ratio, float highlightWeight) {
-        float shortLinear = SRGB_TO_LINEAR[short8] * ratio;
-        float longLinear = SRGB_TO_LINEAR[long8];
-        float merged = longLinear * (1.0f - highlightWeight) + shortLinear * highlightWeight;
-        return hdrShoulder(merged);
-    }
-
-
-    private static float hdrShoulder(float value) {
-        float linear = Math.max(0.0f, value);
-        final float knee = 0.70f;
-        final float softness = 0.43f;
-        if (linear <= knee) return linear;
-        float normalized = (linear - knee) / (1.0f - knee);
-        float compressed = normalized / (normalized + softness);
-        return Math.max(0.0f, Math.min(1.0f, knee + (1.0f - knee) * compressed));
-    }
-
     private static int encode(float linear) {
         int index = Math.max(0, Math.min(LINEAR_TO_SRGB.length - 1,
                 Math.round(linear * (LINEAR_TO_SRGB.length - 1))));
         return LINEAR_TO_SRGB[index];
     }
 
+    private static float log2(float value) {
+        return (float) (Math.log(value) / LOG_2);
+    }
+
+    private static float clamp(float value, float low, float high) {
+        return Math.max(low, Math.min(high, value));
+    }
+
     private static float smoothstep(float edge0, float edge1, float x) {
-        float t = Math.max(0.0f, Math.min(1.0f, (x - edge0) / (edge1 - edge0)));
+        float t = clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
         return t * t * (3.0f - 2.0f * t);
     }
 

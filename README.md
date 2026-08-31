@@ -1,29 +1,27 @@
-# Iris HDR Viewfinder Test V1.4.6
+# Iris HDR Viewfinder Test V1.4.7
 
-V1.4.6 is a localized live-preview scheduling correction built directly on the successful V1.4.5 compiled candidate. HDR exposure generation, GL pairing/fusion, saved JPEG fusion, RAW/JPEG capture, tonemap and ISP-control ownership are unchanged.
+V1.4.7 is a localized HDR highlight-reconstruction/display correction built directly on the successful V1.4.6 compiled candidate. Capture scheduling, FOV/cadence policy, SHORT/LONG request ownership, AUTO metering, RAW/JPEG still capture, orientation and GPU/session lifecycle are unchanged.
 
-## Stable cadence / FOV policy
+## Adaptive HDR highlight recovery
 
-`60 FPS CROP: OFF` is now deterministic FOV-safe 30 fps from the first preview request. The app no longer starts in a potentially cropped 60-fps sensor mode and later changes to 30 fps after watchdog/FOV evidence, which produced the visible framing jump recorded on V1.4.5.
+V1.4.6 proved that the SHORT processed frame already contains recoverable bright-window detail, while the prior fixed HDR shoulder collapsed much of that recovered range back into near-white output codes. V1.4.7 corrects only the live/saved merge and display mapping.
 
-`60 FPS CROP: ON` is the explicit high-FPS choice. When exact Camera2 `[60,60]` is available, the live PRIVATE preview requests the 16,666,666-ns 60-fps cadence and keeps that policy. Actual delivered CaptureResult/GPU/pair cadence is still displayed and logged, but under-delivery does not silently change the requested FOV/cadence behind the user.
+- LONG is the clean shadow and ordinary-midtone owner. SHORT contributes zero until LONG approaches saturation.
+- SHORT is normalized in linear light using the actual exposure relationship already tracked by the pipeline.
+- Wider SHORT/LONG brackets move SHORT admission closer to LONG clipping, so dark/noisy SHORT data is not imported unnecessarily.
+- Near clipping, the handoff uses the full normalized SHORT RGB vector rather than switching R/G/B independently.
+- Highlight compression is hue-preserving and exposure-ratio aware. It reserves visible 8-bit output space for scene values above LONG white instead of forcing recovered HDR values back to 252-255.
+- Live HDR FUSED and saved FUSED JPEG use equivalent constants and equations.
 
-## AUTO HDR meter isolation
+The result is designed to retain V1.4.6's clean LONG-owned shadows while recovering significantly more bright-window structure autonomously.
 
-AUTO HDR still obtains absolute brightness from a clean contiguous AE phase and then returns to the proven manual SHORT/LONG repeating pair. V1.4.6 isolates that hidden meter from live cadence/FOV decisions:
+## Cross-device performance contract
 
-- METER results do not count as steady-preview FPS or FOV evidence.
-- FPS measurement windows reset when entering and leaving the meter.
-- Re-metering is armed only after a completed LONG result, so the previous complete HDR pair remains published.
-- Periodic clean-AE refresh is reduced from 2 seconds to 5 seconds.
+The HDR policy is based on exposure ratio and pixel values, not Xiaomi/device IDs or SoC/GPU classes. The live path remains one GLES 3.0 pass over the existing three textures with no new texture allocations, neighborhood samples, compute stages or extra frame buffers. Saved JPEG fusion retains the existing 32-row strip processing and does not add full-frame float buffers. This keeps the correction applicable from lower-end supported Camera2/GLES3 devices through flagship hardware.
 
-No one-shot `capture()` meter is introduced.
+## Preserved V1.4.6 camera pipeline
 
-## Preserved V1.4.5 image pipeline
-
-SHORT and LONG remain real alternating manual preview requests. HdrGlView still publishes only complete temporally adjacent pairs. HDR FUSED still samples both SHORT and LONG textures and uses the V1.4.5 sRGB/exposure-normalized highlight fusion. Saved SHORT/LONG/FUSED JPEG behavior and full-resolution RAW/JPEG still capture are unchanged.
-
-The explicit Camera2 sRGB contrast curve, post-RAW sensitivity parity, `NOISE_REDUCTION_MODE_OFF`, `EDGE_MODE_OFF`, LONG-only ISO slider ownership, sensor-minimum SHORT gain, expanded shutter controls, MANUAL SAFE flicker handling, orientation/DNG fixes and production logger remain unchanged.
+The explicit Camera2 sRGB contrast curve remains unchanged. `NOISE_REDUCTION_MODE_OFF` and `EDGE_MODE_OFF` remain requested where supported. FOV SAFE remains fixed 30 fps, optional cropped 60 remains explicit, AUTO HDR meter frames remain isolated from displayed cadence/FOV evidence, and the full RAW/JPEG still session remains independent from live-preview cadence.
 
 Runtime logs are written to:
 

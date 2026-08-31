@@ -64,21 +64,37 @@ vec3 linearToSrgb(vec3 value) {
         linearToSrgbChannel(value.b));
 }
 
-float hdrShoulderChannel(float value) {
-    float linearValue = max(value, 0.0);
-    const float knee = 0.70;
-    const float softness = 0.43;
-    if (linearValue <= knee) return linearValue;
-    float normalized = (linearValue - knee) / (1.0 - knee);
-    float compressed = normalized / (normalized + softness);
-    return knee + (1.0 - knee) * compressed;
+float max3(vec3 value) {
+    return max(value.r, max(value.g, value.b));
 }
 
-vec3 hdrToneMap(vec3 sceneLinear) {
-    return vec3(
-        hdrShoulderChannel(sceneLinear.r),
-        hdrShoulderChannel(sceneLinear.g),
-        hdrShoulderChannel(sceneLinear.b));
+float adaptiveClipStart(float bracketStops) {
+    // Wider brackets carry a noisier/darker SHORT frame, so admit SHORT only
+    // closer to LONG saturation. This depends on exposure relationship, not device.
+    return clamp(0.90 + 0.01 * (bracketStops - 1.0), 0.90, 0.95);
+}
+
+vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
+    // LONG owns shadows/midtones unchanged. Recovered scene values above the
+    // display range are compressed by bracket width while preserving RGB ratios.
+    const float knee = 0.70;
+    float scenePeak = max3(sceneLinear);
+    if (scenePeak <= knee || scenePeak <= 0.000001) return sceneLinear;
+
+    float whiteAnchor = clamp(0.82 - 0.04 * (bracketStops - 1.0), 0.68, 0.82);
+    float displayCeiling = clamp(whiteAnchor + 0.14, 0.84, 0.96);
+    float mappedPeak;
+
+    if (scenePeak <= 1.0) {
+        float t = clamp((scenePeak - knee) / (1.0 - knee), 0.0, 1.0);
+        mappedPeak = mix(knee, whiteAnchor, t);
+    } else {
+        float headroomLog2 = max(log2(max(ratio, 1.0001)), 0.0001);
+        float t = clamp(log2(scenePeak) / headroomLog2, 0.0, 1.0);
+        mappedPeak = mix(whiteAnchor, displayCeiling, t);
+    }
+
+    return sceneLinear * (mappedPeak / scenePeak);
 }
 
 void main() {
@@ -118,14 +134,25 @@ void main() {
         return;
     }
 
+    float ratio = clamp(exposureRatio, 1.0, 65536.0);
+    float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
     vec3 shortRgb = texture(shortTex, uv).rgb;
     vec3 longRgb = texture(longTex, uv).rgb;
-    vec3 shortScene = srgbToLinear(shortRgb) * exposureRatio;
+    vec3 shortScene = srgbToLinear(shortRgb) * ratio;
     vec3 longScene = srgbToLinear(longRgb);
-    float longHighlight = max(longRgb.r, max(longRgb.g, longRgb.b));
-    float shortWeight = smoothstep(0.68, 0.94, longHighlight);
-    vec3 mergedScene = mix(longScene, shortScene, shortWeight);
-    vec3 displayLinear = hdrToneMap(mergedScene);
+
+    float longEncodedPeak = max3(longRgb);
+    float longScenePeak = max(max3(longScene), 0.000001);
+    float shortScenePeak = max3(shortScene);
+    float shortConfidence = smoothstep(0.35, 0.65, shortScenePeak / longScenePeak);
+    float highlightWeight = smoothstep(
+        adaptiveClipStart(bracketStops),
+        0.995,
+        longEncodedPeak) * shortConfidence;
+
+    // Full-RGB handoff avoids per-channel clipping seams and preserves highlight hue.
+    vec3 mergedScene = mix(longScene, shortScene, highlightWeight);
+    vec3 displayLinear = adaptiveHdrToneMap(mergedScene, ratio, bracketStops);
     vec3 displayRgb = linearToSrgb(displayLinear);
     outColor = vec4(clamp(displayRgb, 0.0, 1.0), 1.0);
 }
