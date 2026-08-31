@@ -11,6 +11,7 @@ import java.io.ByteArrayOutputStream;
 final class JpegFusion {
     private static final float[] SRGB_TO_LINEAR = buildLinearLut();
     private static final int[] LINEAR_TO_SRGB = buildEncodeLut();
+    private static final float[] APPEARANCE_TARGET_LINEAR = buildAppearanceTargetLinearLut();
     private static final double LOG_2 = Math.log(2.0);
     private static final float HDR_KNEE = 0.70f;
     private static final float HDR_CLIP_END = 0.995f;
@@ -39,7 +40,7 @@ final class JpegFusion {
         int[] shortPixels = new int[width * rowsPerStrip];
         int[] longPixels = new int[width * rowsPerStrip];
         int[] outPixels = new int[width * rowsPerStrip];
-        float[] colorSafe = new float[3];
+        float[] highlightColor = new float[3];
 
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
         float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 1.0f, 6.0f);
@@ -111,14 +112,24 @@ final class JpegFusion {
                 float fusedR = encode(tr * appearanceScale) / 255.0f;
                 float fusedG = encode(tg * appearanceScale) / 255.0f;
                 float fusedB = encode(tb * appearanceScale) / 255.0f;
-                colorSafeFromSources(
-                        fusedR, fusedG, fusedB,
-                        sr8 / 255.0f, sg8 / 255.0f, sb8 / 255.0f,
-                        lr8 / 255.0f, lg8 / 255.0f, lb8 / 255.0f,
-                        colorSafe);
-                int ro = encodeSrgb(colorSafe[0]);
-                int go = encodeSrgb(colorSafe[1]);
-                int bo = encodeSrgb(colorSafe[2]);
+                // Color ownership follows the same HDR reliability decision. SHORT is
+                // evaluated for every pixel, but ordinary LONG-owned shadows/midtones
+                // remain on the proven fused path. Only where normalized SHORT actually
+                // participates in highlight recovery do we transition toward unscaled
+                // source chromaticity.
+                if (highlightWeight > 0.0005f) {
+                    highlightColorFromSources(
+                            fusedR, fusedG, fusedB,
+                            sr8 / 255.0f, sg8 / 255.0f, sb8 / 255.0f,
+                            lr8 / 255.0f, lg8 / 255.0f, lb8 / 255.0f,
+                            longEncodedPeak, clipStart, highlightColor);
+                    fusedR = highlightColor[0];
+                    fusedG = highlightColor[1];
+                    fusedB = highlightColor[2];
+                }
+                int ro = encodeSrgb(fusedR);
+                int go = encodeSrgb(fusedG);
+                int bo = encodeSrgb(fusedB);
                 outPixels[i] = 0xFF000000 | (ro << 16) | (go << 8) | bo;
             }
             output.setPixels(outPixels, 0, width, 0, y, width, rows);
@@ -176,18 +187,16 @@ final class JpegFusion {
     }
 
     private static float appearanceLiftScale(float r, float g, float b) {
-        // Mathematically matches the live shader. Fusion/highlight recovery is
-        // already finished; this only lifts lower/mid-tone appearance while deep
-        // shadows and recovered highlights converge toward the V1.4.7 result.
+        // Same V1.4.8 appearance curve as the live shader, with expensive exp/pow
+        // precomputed once so full-resolution JPEG fusion only interpolates a LUT.
         float linearY = 0.2126f * r + 0.7152f * g + 0.0722f * b;
         if (linearY <= 0.000001f) return 1.0f;
-        float perceptualY = linearToSrgbFloat(clamp(linearY, 0.0f, 1.0f));
-        float centered = (perceptualY - 0.20f) / 0.11f;
-        float targetY = perceptualY
-                + 0.70f * perceptualY * (1.0f - perceptualY)
-                        * (float) Math.exp(-(centered * centered));
-        targetY = clamp(targetY, 0.0f, 1.0f);
-        float targetLinearY = srgbToLinearFloat(targetY);
+        float position = clamp(linearY, 0.0f, 1.0f) * (APPEARANCE_TARGET_LINEAR.length - 1);
+        int lower = Math.max(0, Math.min(APPEARANCE_TARGET_LINEAR.length - 1, (int) position));
+        int upper = Math.min(APPEARANCE_TARGET_LINEAR.length - 1, lower + 1);
+        float fraction = position - lower;
+        float targetLinearY = APPEARANCE_TARGET_LINEAR[lower]
+                + (APPEARANCE_TARGET_LINEAR[upper] - APPEARANCE_TARGET_LINEAR[lower]) * fraction;
         float scale = targetLinearY / linearY;
         float peak = Math.max(r, Math.max(g, b));
         if (peak > 0.000001f) scale = Math.min(scale, 0.98f / peak);
@@ -198,69 +207,60 @@ final class JpegFusion {
         return 0.2126f * r + 0.7152f * g + 0.0722f * b;
     }
 
-    private static void colorSafeFromSources(
+    private static void highlightColorFromSources(
             float fusedR, float fusedG, float fusedB,
             float shortR, float shortG, float shortB,
             float longR, float longG, float longB,
+            float longEncodedPeak,
+            float clipStart,
             float[] out) {
-        // Mathematically matches the live shader. HDR luminance is already final;
-        // only chroma is reconstructed from source-supported colors. No semantic
-        // skin/white/device classification is used.
+        // HDR luminance has already been solved from both exposures. LONG retains its
+        // proven color outside the highlight handoff. As LONG approaches saturation,
+        // unscaled SHORT source RGB becomes the color authority before normalized RGB
+        // can magnify tiny ISP chroma errors into orange/pink/green specks.
         float targetY = encodedLuma(fusedR, fusedG, fusedB);
-        float shortY = encodedLuma(shortR, shortG, shortB);
-        float longY = encodedLuma(longR, longG, longB);
-
-        float fusedCr = fusedR - targetY;
-        float fusedCg = fusedG - targetY;
-        float fusedCb = fusedB - targetY;
-        float shortCr = shortR - shortY;
-        float shortCg = shortG - shortY;
-        float shortCb = shortB - shortY;
-        float longCr = longR - longY;
-        float longCg = longG - longY;
-        float longCb = longB - longY;
-
         float shortPeak = Math.max(shortR, Math.max(shortG, shortB));
-        float shortSignal = smoothstep(0.03f, 0.12f, shortPeak);
-        float shortMag = length3(shortCr, shortCg, shortCb);
-        float longMag = length3(longCr, longCg, longCb);
-        float strongColor = smoothstep(0.025f, 0.085f, shortMag);
-        float displayGain = Math.max(targetY, 0.0001f) / Math.max(shortY, 0.0001f);
-        float chromaExponent = 0.35f * (1.0f - strongColor);
-        float shortChromaScale = (float) Math.pow(
-                Math.max(displayGain, 1.0f),
-                -chromaExponent);
-
-        float supportedShortCr = shortCr * shortChromaScale;
-        float supportedShortCg = shortCg * shortChromaScale;
-        float supportedShortCb = shortCb * shortChromaScale;
-        float supportedCr = longCr + (supportedShortCr - longCr) * shortSignal;
-        float supportedCg = longCg + (supportedShortCg - longCg) * shortSignal;
-        float supportedCb = longCb + (supportedShortCb - longCb) * shortSignal;
-
-        float colorApply = smoothstep(0.18f, 0.48f, targetY);
-        float outCr = fusedCr + (supportedCr - fusedCr) * colorApply;
-        float outCg = fusedCg + (supportedCg - fusedCg) * colorApply;
-        float outCb = fusedCb + (supportedCb - fusedCb) * colorApply;
-
-        float outputMag = length3(outCr, outCg, outCb);
-        float sourceMaxMag = Math.max(shortMag, longMag);
-        if (outputMag > sourceMaxMag && outputMag > 0.000001f) {
-            float sourceScale = sourceMaxMag / outputMag;
-            outCr *= sourceScale;
-            outCg *= sourceScale;
-            outCb *= sourceScale;
+        float shortColorSignal = smoothstep(0.025f, 0.10f, shortPeak);
+        float colorStart = Math.max(0.78f, clipStart - 0.15f);
+        float colorNeed = smoothstep(colorStart, HDR_CLIP_END, longEncodedPeak)
+                * shortColorSignal;
+        if (colorNeed <= 0.0005f) {
+            out[0] = fusedR; out[1] = fusedG; out[2] = fusedB;
+            return;
         }
 
+        float sourceR = longR + (shortR - longR) * colorNeed;
+        float sourceG = longG + (shortG - longG) * colorNeed;
+        float sourceB = longB + (shortB - longB) * colorNeed;
+        float sourceY = encodedLuma(sourceR, sourceG, sourceB);
+        if (sourceY <= 0.0001f) {
+            out[0] = fusedR; out[1] = fusedG; out[2] = fusedB;
+            return;
+        }
+
+        float sourceCr = sourceR - sourceY;
+        float sourceCg = sourceG - sourceY;
+        float sourceCb = sourceB - sourceY;
+        float chromaSq = sourceCr * sourceCr + sourceCg * sourceCg + sourceCb * sourceCb;
+        // Low/moderate source chroma stays at its actual encoded amplitude rather than
+        // being multiplied by display gain. Strong genuine source color progressively
+        // receives the full gain so vivid saturation is not globally suppressed.
+        float strongColor = smoothstep(0.0144f, 0.0576f, chromaSq);
+        float displayGain = Math.max(targetY / sourceY, 1.0f);
+        float chromaGain = 1.0f + (displayGain - 1.0f) * strongColor;
+        float chromaR = sourceCr * chromaGain;
+        float chromaG = sourceCg * chromaGain;
+        float chromaB = sourceCb * chromaGain;
+
         float gamutScale = 1.0f;
-        gamutScale = gamutScaleForChannel(gamutScale, targetY, outCr);
-        gamutScale = gamutScaleForChannel(gamutScale, targetY, outCg);
-        gamutScale = gamutScaleForChannel(gamutScale, targetY, outCb);
+        gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaR);
+        gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaG);
+        gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaB);
         gamutScale = clamp(gamutScale, 0.0f, 1.0f);
 
-        out[0] = clamp(targetY + outCr * gamutScale, 0.0f, 1.0f);
-        out[1] = clamp(targetY + outCg * gamutScale, 0.0f, 1.0f);
-        out[2] = clamp(targetY + outCb * gamutScale, 0.0f, 1.0f);
+        out[0] = clamp(targetY + chromaR * gamutScale, 0.0f, 1.0f);
+        out[1] = clamp(targetY + chromaG * gamutScale, 0.0f, 1.0f);
+        out[2] = clamp(targetY + chromaB * gamutScale, 0.0f, 1.0f);
     }
 
     private static float gamutScaleForChannel(float current, float targetY, float chroma) {
@@ -279,6 +279,20 @@ final class JpegFusion {
 
     private static int encodeSrgb(float encoded) {
         return Math.round(255.0f * clamp(encoded, 0.0f, 1.0f));
+    }
+
+    private static float[] buildAppearanceTargetLinearLut() {
+        float[] lut = new float[4096];
+        for (int i = 0; i < lut.length; i++) {
+            float linearY = i / (float) (lut.length - 1);
+            float perceptualY = linearToSrgbFloat(linearY);
+            float centered = (perceptualY - 0.20f) / 0.11f;
+            float targetY = perceptualY
+                    + 0.70f * perceptualY * (1.0f - perceptualY)
+                            * (float) Math.exp(-(centered * centered));
+            lut[i] = srgbToLinearFloat(clamp(targetY, 0.0f, 1.0f));
+        }
+        return lut;
     }
 
     private static float srgbToLinearFloat(float encoded) {

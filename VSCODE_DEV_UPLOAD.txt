@@ -1,11 +1,11 @@
-Iris HDR Viewfinder Test V1.4.8 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.9 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 Base requirement:
-main must still point to successful V1.4.7 commit cb91702446d18b963b25f9ae2d8e84a0651be2ff before the V1.4.8 upload/commit.
-Required backup must remain exact:
+main must still point to successful V1.4.8 commit 4da1aa6390e62578c91f5d1b1bd8d455375ad01f before the V1.4.9 upload/commit.
+Existing architectural rollback backup must remain exact:
 backup-v1.4.7-pre-adaptive-exposure-headroom -> cb91702446d18b963b25f9ae2d8e84a0651be2ff
 
 IMPORTANT:
@@ -13,14 +13,14 @@ Upload ALL CONTENTS of the extracted FULL-UPLOAD ZIP into the repository root fr
 Do not upload the strict-proof ZIP, and do not upload only app/ or only changed files.
 
 Before committing, confirm BUILD_WORKFLOW_COPY.yml begins exactly with:
-name: Build Iris HDR Viewfinder Test V1.4.8
+name: Build Iris HDR Viewfinder Test V1.4.9
 and contains no commit-message text before that line.
 
 Commit message:
-V1.4.8 adaptive headroom, brightness and source-supported color
+V1.4.9 restore HDR color freeze capture pair and speed fusion
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.8.
-Do not call V1.4.8 build-proven until the workflow succeeds and its compiled artifact is verified.
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.9.
+Do not call V1.4.9 build-proven until the workflow succeeds and its compiled artifact is verified.
 
 Runtime logs after installation:
 Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt

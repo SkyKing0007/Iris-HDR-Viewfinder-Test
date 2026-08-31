@@ -17,7 +17,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.8 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.9 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -515,11 +515,11 @@ require(clip64 > clip8 and anchor64 <= anchor8 and ceiling64 <= ceiling8,
         "wider brackets must adapt by protecting SHORT noise and reserving more display headroom")
 
 # 038 - V1.4.8 pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.7' in workflow
-        and 'run-id: 33424140112' in workflow,
-        "workflow must download the exact successful V1.4.7 Actions authority")
-require('run-id: 33415267140' not in workflow,
-        "stale V1.4.6 Actions run-id must never be reused for V1.4.7 authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.8' in workflow
+        and 'run-id: 33435639235' in workflow,
+        "workflow must download the exact successful V1.4.8 Actions authority")
+require('run-id: 33424140112' not in workflow,
+        "stale V1.4.7 Actions run-id must never be reused for V1.4.8 authority")
 
 # 037 - V1.4.8 two-device adaptive exposure/appearance regression.
 def target_bracket_ev(aperture):
@@ -578,24 +578,30 @@ require(gain_ev(0.05) < 0.20,
 require(abs(appearance_map_encoded(0.60) - 0.60) < 1e-5,
         "recovered highlights must converge back to the V1.4.7 appearance")
 
-# 039 - Exact V1.4.7 processed-JPEG color-normalization failure class.
-# Exposure normalization is allowed to change luminance, but it may not invent
-# unsupported hue/chroma anywhere in the frame. This is content-agnostic: the
-# regression uses source RGB evidence only, not skin/white/object semantics.
-require('colorSafeFromSources(displayRgb, shortRgb, longRgb)' in hdr_shader,
-        "live HDR must apply source-supported color reconstruction after luminance fusion")
-require('colorSafeFromSources(' in fusion and 'float[] colorSafe = new float[3];' in fusion,
-        "saved fusion must use equivalent source-supported color reconstruction with reusable scratch")
-require('return new float[]' not in fusion,
-        "saved color reconstruction must not allocate a float array per output pixel")
+# 039 - Exact V1.4.8 muted-color regression and the earlier unsupported-highlight-color failure.
+# SHORT remains part of every HDR reliability calculation, but source-color repair is
+# restricted to the actual highlight handoff instead of globally limiting saturation.
+require('highlightColorFromSources' in hdr_shader and 'highlightColorFromSources' in fusion,
+        "live/save highlight-domain source-color ownership missing")
+require('colorSafeFromSources' not in hdr_shader and 'colorSafeFromSources' not in fusion,
+        "rejected V1.4.8 global color-safe saturation limiter returned")
+require('if (highlightWeight > 0.0005' in hdr_shader and 'if (highlightWeight > 0.0005f)' in fusion,
+        "source-color repair must remain gated by actual SHORT HDR participation")
+require('const float HDR_CLIP_END = 0.995;' in hdr_shader,
+        "GLSL highlight clip-end constant must be explicitly defined")
+require('float clipStart = adaptiveClipStart(bracketStops);' in hdr_shader
+        and 'clipStart,\n        HDR_CLIP_END,' in hdr_shader,
+        "GLSL highlight/color handoff must share one defined adaptive clipStart")
+require('colorStart = max(0.78, clipStart - 0.15)' in hdr_shader
+        and 'colorStart = Math.max(0.78f, clipStart - 0.15f)' in fusion,
+        "LONG color-risk transition must track the adaptive clipping boundary")
+require('sourceMaxMag' not in hdr_shader and 'sourceMaxMag' not in fusion,
+        "global source-chroma cap must not desaturate ordinary or vivid colors")
+require('strongColor = smoothstep(0.0144' in hdr_shader
+        and 'strongColor = smoothstep(0.0144f' in fusion,
+        "source-color gain must distinguish low-amplitude ISP chroma from vivid color")
 require(hdr_shader.count('texture(shortTex') == 3 and hdr_shader.count('texture(longTex') == 3,
-        "color safety must not add neighborhood texture sampling or extra GPU bandwidth")
-require('sourceMaxMag = max(shortChromaMag, longChromaMag)' in hdr_shader
-        and 'sourceMaxMag = Math.max(shortMag, longMag)' in fusion,
-        "FUSED encoded chroma must be capped by actual source-supported chroma")
-require('strongColor = smoothstep(0.025' in hdr_shader
-        and 'strongColor = smoothstep(0.025f' in fusion,
-        "strong source-supported colors must bypass low-amplitude chroma attenuation")
+        "color correction must not add texture fetches or neighborhood GPU bandwidth")
 
 def encoded_luma(rgb):
     r, g, b = rgb
@@ -608,79 +614,94 @@ def chroma_vec(rgb):
 def vec_len(v):
     return math.sqrt(sum(x * x for x in v))
 
-def color_safe_math(fused8, short8, long8):
+def gamut_scale_math(target_y, chroma):
+    scale = 1.0
+    for c in chroma:
+        if c > 1e-6:
+            scale = min(scale, (1.0 - target_y) / c)
+        elif c < -1e-6:
+            scale = min(scale, target_y / (-c))
+    return max(0.0, min(1.0, scale))
+
+def highlight_color_math(fused8, short8, long8, long_peak, clip_start):
     fused = tuple(v / 255.0 for v in fused8)
     short = tuple(v / 255.0 for v in short8)
     long = tuple(v / 255.0 for v in long8)
     target_y = encoded_luma(fused)
-    short_y = encoded_luma(short)
-    fused_c = chroma_vec(fused)
-    short_c = chroma_vec(short)
-    long_c = chroma_vec(long)
-    short_peak = max(short)
-    short_signal = smoothstep_math(0.03, 0.12, short_peak)
-    short_mag = vec_len(short_c)
-    long_mag = vec_len(long_c)
-    strong_color = smoothstep_math(0.025, 0.085, short_mag)
-    display_gain = max(target_y, 0.0001) / max(short_y, 0.0001)
-    chroma_exponent = 0.35 * (1.0 - strong_color)
-    short_scale = max(display_gain, 1.0) ** (-chroma_exponent)
-    supported_short = tuple(v * short_scale for v in short_c)
-    supported = tuple(long_c[i] + (supported_short[i] - long_c[i]) * short_signal for i in range(3))
-    color_apply = smoothstep_math(0.18, 0.48, target_y)
-    out_c = [fused_c[i] + (supported[i] - fused_c[i]) * color_apply for i in range(3)]
-    out_mag = vec_len(out_c)
-    source_max = max(short_mag, long_mag)
-    if out_mag > source_max and out_mag > 1e-6:
-        source_scale = source_max / out_mag
-        out_c = [v * source_scale for v in out_c]
-    gamut = 1.0
-    for c in out_c:
-        if c > 1e-6:
-            gamut = min(gamut, (1.0 - target_y) / c)
-        elif c < -1e-6:
-            gamut = min(gamut, target_y / (-c))
-    gamut = max(0.0, min(1.0, gamut))
-    out = tuple(max(0.0, min(1.0, target_y + c * gamut)) for c in out_c)
-    return out, short_scale, strong_color
+    short_signal = smoothstep_math(0.025, 0.10, max(short))
+    color_start = max(0.78, clip_start - 0.15)
+    color_need = smoothstep_math(color_start, 0.995, long_peak) * short_signal
+    if color_need <= 0.0005:
+        return fused
+    source = tuple(long[i] + (short[i] - long[i]) * color_need for i in range(3))
+    source_y = encoded_luma(source)
+    if source_y <= 0.0001:
+        return fused
+    chroma = list(chroma_vec(source))
+    chroma_sq = sum(c * c for c in chroma)
+    strong_color = smoothstep_math(0.0144, 0.0576, chroma_sq)
+    display_gain = max(target_y / source_y, 1.0)
+    chroma_gain = 1.0 + (display_gain - 1.0) * strong_color
+    chroma = [c * chroma_gain for c in chroma]
+    gamut = gamut_scale_math(target_y, chroma)
+    return tuple(max(0.0, min(1.0, target_y + c * gamut)) for c in chroma)
 
-# Exact representative failure pixels from the supplied V1.4.7 set. The old FUSED
-# values have substantially more encoded chroma than either source. The repaired
-# color must keep the exact fused luma while bringing chroma back inside source support.
-color_failures = [
-    ((210, 159, 132), (70, 55, 50), (244, 255, 250)),
-    ((216, 128, 108), (57, 30, 23), (255, 249, 223)),
-    ((220, 160, 159), (74, 56, 56), (255, 244, 238)),
-]
-for fused8, short8, long8 in color_failures:
-    fused = tuple(v / 255.0 for v in fused8)
-    short = tuple(v / 255.0 for v in short8)
-    long = tuple(v / 255.0 for v in long8)
-    before_mag = vec_len(chroma_vec(fused))
-    source_max = max(vec_len(chroma_vec(short)), vec_len(chroma_vec(long)))
-    require(before_mag > source_max + 0.04,
-            "representative V1.4.7 failure must retain the original unsupported-chroma condition")
-    repaired, _, _ = color_safe_math(fused8, short8, long8)
-    require(abs(encoded_luma(repaired) - encoded_luma(fused)) < 1e-6,
-            "color repair must preserve the already-approved FUSED luminance exactly")
-    require(vec_len(chroma_vec(repaired)) <= source_max + 1e-6,
-            "color repair must never exceed source-supported chroma")
+# Representative orange-speck failure: luminance is preserved while source-domain
+# highlight color replaces unsupported normalized-RGB chroma.
+fixture_fused = (216, 128, 108)
+fixture_short = (57, 30, 23)
+fixture_long = (255, 249, 223)
+fixture_out = highlight_color_math(fixture_fused, fixture_short, fixture_long, 1.0, 0.92)
+require(abs(encoded_luma(fixture_out) - encoded_luma(tuple(v / 255.0 for v in fixture_fused))) < 1e-6,
+        "highlight color repair must preserve the already-solved FUSED luminance")
+require(vec_len(chroma_vec(fixture_out)) > 0.01,
+        "highlight color repair must retain real source color rather than flattening to gray")
 
-# Saturation protection: clearly source-supported chroma is not attenuated merely
-# because the FUSED result is brighter. This guards against cross-device desaturation.
-strong_short = (100 / 255.0, 20 / 255.0, 60 / 255.0)
-strong_mag = vec_len(chroma_vec(strong_short))
-require(strong_mag > 0.085, "strong-color fixture must exceed the chroma-noise gate")
-_, strong_scale, strong_gate = color_safe_math((210, 80, 120), (100, 20, 60), (240, 90, 130))
-require(strong_gate > 0.999 and abs(strong_scale - 1.0) < 1e-6,
-        "strong source-supported saturation must remain unattenuated")
+# Ordinary LONG-owned color is an identity when the highlight handoff has not started.
+identity8 = (94, 73, 66)
+identity_out = highlight_color_math(identity8, (10, 20, 40), identity8, 0.76, 0.93)
+require(max(abs(identity_out[i] - identity8[i] / 255.0) for i in range(3)) < 1e-6,
+        "LONG-owned ordinary color must remain exactly untouched outside highlight handoff")
 
-# Deep-shadow protection: when FUSED already equals LONG, source-color safety is an
-# identity operation and cannot expose extra SHORT chroma noise.
-shadow = (24, 22, 21)
-shadow_out, _, _ = color_safe_math(shadow, (5, 5, 5), shadow)
-require(max(abs(shadow_out[i] - shadow[i] / 255.0) for i in range(3)) < 1e-6,
-        "deep-shadow LONG-owned color must remain unchanged")
+# Strong source-supported color may scale with display brightness; gamut fit is the only
+# permitted saturation reduction. This prevents a return of V1.4.8 global muting.
+vivid_out = highlight_color_math((210, 80, 120), (100, 20, 60), (240, 90, 130), 0.99, 0.92)
+require(vec_len(chroma_vec(vivid_out)) > 0.10,
+        "strong source-supported highlight color must not be flattened to gray")
+
+# 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
+begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
+still_burst = camera[camera.index('private void issueStillBurstLocked()'):camera.index('private final CameraCaptureSession.CaptureCallback stillCaptureCallback')]
+require('cameraHandler.removeCallbacks(autoRemeterRunnable);' in begin_capture
+        and 'autoMetering = false;' in begin_capture,
+        "shutter press must cancel/ignore in-flight AUTO remeter before snapshotting controls")
+for token in [
+    'captureShortExposureNs = activeShortExposureNs();',
+    'captureLongExposureNs = activeLongExposureNs();',
+    'captureShortIso = activeShortIso();',
+    'captureLongIso = activeLongIso();',
+    'capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;',
+]:
+    require(token in begin_capture, f"immutable capture snapshot missing: {token}")
+require('activeShortExposureNs()' not in still_burst and 'activeLongExposureNs()' not in still_burst
+        and 'activeShortIso()' not in still_burst and 'activeLongIso()' not in still_burst,
+        "temporary still session must never re-read mutable preview/remeter exposure state")
+require('captureShortExposureNs' in still_burst and 'captureLongExposureNs' in still_burst
+        and 'captureShortIso' in still_burst and 'captureLongIso' in still_burst
+        and 'capturePostRawBoost' in still_burst,
+        "still burst must use only the frozen shutter-time controls")
+require('CAPTURE_INPUTS' in camera and 'acquiredMs=' in camera and 'totalMs=' in camera,
+        "minimal capture timing evidence must separate sensor acquisition from post-processing")
+
+# 041 - V1.4.8 ~13.9-second completion regression: the full-resolution inner loop must
+# contain no exp/pow/sqrt or per-pixel color allocation. Appearance math is precomputed.
+inner = fusion[fusion.index('for (int i = 0; i < count; i++)'):fusion.index('output.setPixels')]
+for forbidden in ['Math.exp(', 'Math.pow(', 'Math.sqrt(', 'new float[']:
+    require(forbidden not in inner, f"expensive/per-pixel saved-fusion operation returned: {forbidden}")
+require('APPEARANCE_TARGET_LINEAR = buildAppearanceTargetLinearLut()' in fusion,
+        "saved appearance lift must use a precomputed target LUT")
+require('float[] highlightColor = new float[3];' in fusion and 'return new float[]' not in fusion,
+        "saved highlight-color repair must reuse one scratch vector rather than allocate per pixel")
 
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
@@ -742,4 +763,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.8 REGRESSION PASS: adaptive headroom/brightness, source-supported color, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.9 REGRESSION PASS: adaptive headroom/brightness, highlight-domain color, frozen capture pair, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")

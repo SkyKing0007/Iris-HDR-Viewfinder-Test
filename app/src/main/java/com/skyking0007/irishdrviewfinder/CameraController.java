@@ -123,6 +123,14 @@ final class CameraController {
     private boolean capturing;
     private boolean stillSessionActive;
     private boolean previewSurfaceConfigured;
+    // Immutable per-shutter still controls. AUTO remetering may continue after the
+    // still inputs are acquired, but it must never mutate an in-flight HDR set.
+    private long captureShortExposureNs;
+    private long captureLongExposureNs;
+    private int captureShortIso;
+    private int captureLongIso;
+    private int capturePostRawBoost = DEFAULT_POST_RAW_BOOST;
+    private long captureBeginRealtimeNs;
     private long shortExposureNs = ONE_SECOND_NS / 480;
     private long longExposureNs = ONE_SECOND_NS / 60;
     private int manualIso = 400;
@@ -824,12 +832,24 @@ final class CameraController {
             return;
         }
         capturing = true;
+        // Freeze the exact pair before closing the preview session. A pending clean-AE
+        // remeter result can arrive while the temporary RAW/JPEG session is being
+        // configured; from this point forward it is ignored for this capture.
+        cameraHandler.removeCallbacks(autoRemeterRunnable);
+        autoMetering = false;
+        captureShortExposureNs = activeShortExposureNs();
+        captureLongExposureNs = activeLongExposureNs();
+        captureShortIso = activeShortIso();
+        captureLongIso = activeLongIso();
+        capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;
+        captureBeginRealtimeNs = System.nanoTime();
         String captureId = "IrisHDR_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date());
         RuntimeLogger.event(
                 "CAPTURE_BEGIN",
                 captureId
-                        + " short=" + exposureText(activeShortExposureNs()) + " ISO" + activeShortIso()
-                        + " long=" + exposureText(activeLongExposureNs()) + " ISO" + activeLongIso()
+                        + " frozen short=" + exposureText(captureShortExposureNs) + " ISO" + captureShortIso
+                        + " long=" + exposureText(captureLongExposureNs) + " ISO" + captureLongIso
+                        + " boost=" + capturePostRawBoost + "%"
                         + " mode=" + (autoHdrExposure ? "AUTO" : manualSafetySummaryLocked()));
         listener.onStatus("Capturing matched SHORT/LONG RAW + JPEG set…");
         captureSaver = new CaptureSetSaver(
@@ -859,8 +879,8 @@ final class CameraController {
             shortBuilder.addTarget(rawReader.getSurface());
             shortBuilder.addTarget(jpegReader.getSurface());
             configureManualRequest(
-                    shortBuilder, activeShortExposureNs(), activeShortIso(),
-                    autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST, false);
+                    shortBuilder, captureShortExposureNs, captureShortIso,
+                    capturePostRawBoost, false);
             shortBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) 95);
             shortBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientationDegrees);
             shortBuilder.setTag(TAG_CAPTURE_SHORT);
@@ -869,8 +889,8 @@ final class CameraController {
             longBuilder.addTarget(rawReader.getSurface());
             longBuilder.addTarget(jpegReader.getSurface());
             configureManualRequest(
-                    longBuilder, activeLongExposureNs(), activeLongIso(),
-                    autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST, false);
+                    longBuilder, captureLongExposureNs, captureLongIso,
+                    capturePostRawBoost, false);
             longBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) 95);
             longBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientationDegrees);
             longBuilder.setTag(TAG_CAPTURE_LONG);
@@ -917,6 +937,9 @@ final class CameraController {
         if (!capturing || !stillSessionActive) return;
         stillSessionActive = false;
         closeSessionLocked();
+        long acquiredMs = captureBeginRealtimeNs > 0L
+                ? Math.max(0L, (System.nanoTime() - captureBeginRealtimeNs) / 1_000_000L) : -1L;
+        RuntimeLogger.event("CAPTURE_INPUTS", captureId + " acquiredMs=" + acquiredMs);
         listener.onStatus("HDR inputs acquired; preview resumed while files save: " + captureId);
         startPreviewSessionLocked();
     }
@@ -933,9 +956,12 @@ final class CameraController {
         closeReader(jpegReader);
         rawReader = null;
         jpegReader = null;
+        long totalMs = captureBeginRealtimeNs > 0L
+                ? Math.max(0L, (System.nanoTime() - captureBeginRealtimeNs) / 1_000_000L) : -1L;
         RuntimeLogger.event(
                 success ? "CAPTURE_DONE" : "CAPTURE_FAIL",
-                captureId + " " + message);
+                captureId + " totalMs=" + totalMs + " " + message);
+        captureBeginRealtimeNs = 0L;
         listener.onCaptureFinished(captureId, success, message);
         applyPreviewRepeatingLocked();
     }
