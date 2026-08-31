@@ -64,9 +64,21 @@ vec3 linearToSrgb(vec3 value) {
         linearToSrgbChannel(value.b));
 }
 
+float hdrShoulderChannel(float value) {
+    float linearValue = max(value, 0.0);
+    const float knee = 0.70;
+    const float softness = 0.43;
+    if (linearValue <= knee) return linearValue;
+    float normalized = (linearValue - knee) / (1.0 - knee);
+    float compressed = normalized / (normalized + softness);
+    return knee + (1.0 - knee) * compressed;
+}
+
 vec3 hdrToneMap(vec3 sceneLinear) {
-    vec3 scaled = 1.6 * max(sceneLinear, vec3(0.0));
-    return scaled / (vec3(1.0) + scaled);
+    return vec3(
+        hdrShoulderChannel(sceneLinear.r),
+        hdrShoulderChannel(sceneLinear.g),
+        hdrShoulderChannel(sceneLinear.b));
 }
 
 void main() {

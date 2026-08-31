@@ -1,31 +1,37 @@
-# Iris HDR Viewfinder Test V1.4.4
+# Iris HDR Viewfinder Test V1.4.5
 
-Standalone Camera2 HDR viewfinder/capture experiment.
+V1.4.5 fixes absolute HDR brightness ownership and expands manual/high-FPS controls without reviving the rejected V1.4.2 cadence architecture.
 
-## What V1.4.4 changes
+## HDR exposure ownership
 
-V1.4.3 proved the live AUTO architecture can sustain about 60 camera fps and about 30 complete HDR pairs/s on the Xiaomi 15 Ultra. V1.4.4 preserves that path, but keeps 60 fps only when Camera2 can prove that the active physical-sensor readout is full FOV. API-35 `LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_SENSOR_CROP_REGION` is the decisive evidence; `SCALER_CROP_REGION` alone is not treated as proof because high-FPS sensor modes may crop before the normal scaler stage. If 60-fps FOV parity is cropped or cannot be proven, Iris recreates the preview at 30 fps. RAW/JPEG stills are never cropped merely to imitate a cropped high-FPS preview.
+AUTO HDR first obtains a clean Camera2 AE anchor with AUTO antibanding. Once converged, that result owns the absolute LONG exposure. The steady HDR view then runs as a two-request manual SHORT/LONG pair at the selected cadence, avoiding alternating AE-OFF/AE-ON exposure drift. A short clean remeter phase periodically refreshes the anchor; no one-shot `capture()` meter is inserted into the live pair.
 
-MANUAL becomes **MANUAL SAFE**. The sliders still define the requested short/long bracket and ISO, but under detected 50/60-Hz or unknown/PWM lighting the effective pair uses flicker-compatible integration timing and gain separation where possible. This prevents the rejected mixed `1/480 + 1/60` temporal schedule from sampling different LED phases while preserving the requested exposure-product separation as sensor limits allow. AUTO HDR remains the existing uninterrupted two-request `SHORT manual -> LONG AE` repeating burst.
+Where Camera2 exposes `CONTROL_POST_RAW_SENSITIVITY_BOOST`, the actual AE boost is copied into the manual HDR pair so processed PRIVATE/JPEG brightness remains consistent across devices.
+
+SHORT uses the sensor's minimum available ISO. LONG owns the ISO selection / AE anchor. Under 50/60-Hz or unknown/PWM lighting, MANUAL SAFE keeps compatible integration timing and creates separation through gain where required.
+
+## Fused brightness
+
+The prior fixed `1.6*x/(1+1.6*x)` tone map is removed. LONG/normal-exposure midtones pass through unchanged in linear light; a smooth shoulder acts only above the highlight knee. Live GL fusion and saved JPEG fusion share that rule. Exposure-ratio normalization is widened beyond 32x so 1/8000/min-ISO SHORT frames remain correctly normalized.
+
+## Controls
+
+Manual shutter steps now include 1/8000, 1/4000, 1/2000, 1/1000, 1/500, 1/480, 1/240, 1/120, 1/100, 1/60, 1/50, 30 ms (~1/33.3), 1/30, 1/25, 1/20, 1/15 and 1/8. Camera2 sensor limits remain authoritative.
+
+`60 FPS CROP` is an explicit user opt-in. When ON and exact `[60,60]` is supported, the live PRIVATE preview uses a 16,666,666-ns cadence even if the device's high-FPS sensor mode is cropped. RAW/JPEG still capture remains a separate full-resolution session and is never forced to inherit that preview cadence. With the toggle OFF, the existing FOV-safe policy remains.
+
+## Processed-image controls
+
+When supported, processed requests use explicit `TONEMAP_MODE_CONTRAST_CURVE` with a sampled sRGB transfer curve. `NOISE_REDUCTION_MODE_OFF` and `EDGE_MODE_OFF` are also requested when advertised by the device. RAW Bayer bytes are unaffected by those processed-output controls.
 
 ## Runtime logger
 
-V1.4.4 adds a low-duty production logger for device-specific freezes, black preview, Camera2 session errors, FOV decisions, flicker decisions, capture failures, GPU failures and uncaught crashes. It is deliberately rate-limited and does not log every frame.
-
-Logs are written to:
+The V1.4.4 production logger is preserved. Logs are written to:
 
 `Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_YYYYMMDD_HHMMSS_mmm.txt`
 
-A tester can send that `.txt` file directly. The log records device/build identity, camera/session configuration, periodic camera/GL health, active crop/physical-camera evidence, capture lifecycle and crash stacks.
+Send the newest text file for device freezes, crashes, black preview, unusual FPS/FOV or Camera2/GPU failures.
 
-## Preserved V1.4.3 behavior
+## Preserved behavior
 
-- producer-owned live orientation and portrait-correct presentation;
-- explicit valid DNG TIFF orientation without rotating Bayer bytes;
-- uninterrupted AUTO HDR cadence;
-- atomic complete SHORT/LONG publication;
-- native-aspect FIT presentation;
-- existing sRGB/HDR shader and JPEG fusion math;
-- full-resolution RAW/JPEG capture path.
-
-All four GLSL assets, `CaptureSetSaver.java`, `FrameMeta.java`, `JpegFusion.java`, `MediaStoreWriter.java`, and the manifest remain byte-identical to successful V1.4.3.
+V1.4.5 retains producer-owned orientation, valid DNG TIFF orientation, atomic complete SHORT/LONG publication, native-aspect FIT, FOV-safe fallback, MANUAL SAFE anti-flicker behavior, full-resolution RAW/JPEG capture and the proven V1.4.4 session/logger lifecycle except where exposure ownership is intentionally replaced above.

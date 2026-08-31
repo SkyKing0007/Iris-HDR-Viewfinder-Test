@@ -54,15 +54,23 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private static final String STATE_LONG_INDEX = "longIndex";
     private static final String STATE_ISO_INDEX = "isoIndex";
     private static final String STATE_AUTO_HDR = "autoHdr";
+    private static final String STATE_ALLOW_CROPPED_60 = "allowCropped60";
     private static final long[] EXPOSURES_NS = {
+            1_000_000_000L / 8000,
+            1_000_000_000L / 4000,
             1_000_000_000L / 2000,
             1_000_000_000L / 1000,
             1_000_000_000L / 500,
             1_000_000_000L / 480,
             1_000_000_000L / 240,
             1_000_000_000L / 120,
+            1_000_000_000L / 100,
             1_000_000_000L / 60,
+            1_000_000_000L / 50,
+            30_000_000L,
             1_000_000_000L / 30,
+            1_000_000_000L / 25,
+            1_000_000_000L / 20,
             1_000_000_000L / 15,
             1_000_000_000L / 8
     };
@@ -81,14 +89,16 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private SeekBar isoBar;
     private Button captureButton;
     private Button autoButton;
+    private Button fpsButton;
     private final List<CameraController.CameraDescriptor> cameras = new ArrayList<>();
     private boolean updatingControls;
     private String selectedCameraId;
     private volatile int modeIndex = 2;
-    private volatile int shortIndex = 3;
-    private volatile int longIndex = 6;
+    private volatile int shortIndex = 5;
+    private volatile int longIndex = 9;
     private volatile int isoIndex = 2;
     private volatile boolean autoHdrEnabled = true;
+    private volatile boolean allowCropped60Fps;
     private final Handler heartbeatHandler = new Handler(Looper.getMainLooper());
     private boolean heartbeatScheduled;
     private final Runnable heartbeatRunnable = new Runnable() {
@@ -100,9 +110,10 @@ public final class MainActivity extends Activity implements CameraController.Lis
                         "UI_HEARTBEAT",
                         String.format(
                                 Locale.US,
-                                "mode=%d auto=%s camera=%.1ffps pairs=%.1ffps dropped=%d",
+                                "mode=%d auto=%s force60Crop=%s camera=%.1ffps pairs=%.1ffps dropped=%d",
                                 modeIndex,
                                 autoHdrEnabled,
+                                allowCropped60Fps,
                                 glView.getInputFps(),
                                 glView.getHdrPairFps(),
                                 glView.getDroppedRenderFrames()));
@@ -121,6 +132,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         buildUi();
         controller = new CameraController(this, this);
         glView.setInputSurfaceListener(controller::setPreviewSurface);
+        controller.setAllowCropped60Fps(allowCropped60Fps);
         controller.setAutoHdrExposure(autoHdrEnabled);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -138,6 +150,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         longIndex = clampIndex(state.getInt(STATE_LONG_INDEX, longIndex), EXPOSURES_NS.length);
         isoIndex = clampIndex(state.getInt(STATE_ISO_INDEX, isoIndex), ISO_VALUES.length);
         autoHdrEnabled = state.getBoolean(STATE_AUTO_HDR, autoHdrEnabled);
+        allowCropped60Fps = state.getBoolean(STATE_ALLOW_CROPPED_60, allowCropped60Fps);
     }
 
     @Override
@@ -149,6 +162,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         outState.putInt(STATE_LONG_INDEX, longIndex);
         outState.putInt(STATE_ISO_INDEX, isoIndex);
         outState.putBoolean(STATE_AUTO_HDR, autoHdrEnabled);
+        outState.putBoolean(STATE_ALLOW_CROPPED_60, allowCropped60Fps);
     }
 
     private void buildUi() {
@@ -188,6 +202,9 @@ public final class MainActivity extends Activity implements CameraController.Lis
         autoButton = new Button(this);
         refreshAutoButton();
 
+        fpsButton = new Button(this);
+        refreshFpsButton();
+
         captureButton = new Button(this);
         captureButton.setText("CAPTURE HDR SET");
 
@@ -201,15 +218,15 @@ public final class MainActivity extends Activity implements CameraController.Lis
         longBar.setMax(EXPOSURES_NS.length - 1);
         longBar.setProgress(longIndex);
 
-        isoLabel = textView("ISO " + ISO_VALUES[isoIndex], 12);
+        isoLabel = textView("Long ISO " + ISO_VALUES[isoIndex] + "  Short=min", 12);
         isoBar = new SeekBar(this);
         isoBar.setMax(ISO_VALUES.length - 1);
         isoBar.setProgress(isoIndex);
 
         if (portrait) {
-            buildPortraitControls(panel, autoButton);
+            buildPortraitControls(panel, autoButton, fpsButton);
         } else {
-            buildLandscapeControls(panel, autoButton);
+            buildLandscapeControls(panel, autoButton, fpsButton);
         }
 
         root.addView(panel, new LinearLayout.LayoutParams(
@@ -278,6 +295,19 @@ public final class MainActivity extends Activity implements CameraController.Lis
                     Toast.LENGTH_SHORT).show();
         });
 
+
+        fpsButton.setOnClickListener(v -> {
+            allowCropped60Fps = !allowCropped60Fps;
+            refreshFpsButton();
+            if (controller != null) controller.setAllowCropped60Fps(allowCropped60Fps);
+            Toast.makeText(
+                    this,
+                    allowCropped60Fps
+                            ? "60 FPS CROP allowed: true 60/60 preview may be tighter than full RAW/JPEG capture"
+                            : "FOV SAFE: 60 fps is kept only when full capture FOV is proven; otherwise 30 fps",
+                    Toast.LENGTH_LONG).show();
+        });
+
         captureButton.setOnClickListener(v -> {
             if (controller == null) return;
             captureButton.setEnabled(false);
@@ -285,7 +315,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         });
     }
 
-    private void buildPortraitControls(LinearLayout panel, Button autoButton) {
+    private void buildPortraitControls(LinearLayout panel, Button autoButton, Button fpsButton) {
         panel.addView(cameraSpinner, matchWrap());
 
         LinearLayout modeRow = makeHorizontalRow();
@@ -293,17 +323,21 @@ public final class MainActivity extends Activity implements CameraController.Lis
         modeRow.addView(autoButton, weighted(1f));
         panel.addView(modeRow, matchWrap());
 
-        panel.addView(captureButton, matchWrap());
+        LinearLayout fpsCaptureRow = makeHorizontalRow();
+        fpsCaptureRow.addView(fpsButton, weighted(1f));
+        fpsCaptureRow.addView(captureButton, weighted(1f));
+        panel.addView(fpsCaptureRow, matchWrap());
         panel.addView(makeSliderRow(shortLabel, shortBar), matchWrap());
         panel.addView(makeSliderRow(longLabel, longBar), matchWrap());
         panel.addView(makeSliderRow(isoLabel, isoBar), matchWrap());
     }
 
-    private void buildLandscapeControls(LinearLayout panel, Button autoButton) {
+    private void buildLandscapeControls(LinearLayout panel, Button autoButton, Button fpsButton) {
         LinearLayout row1 = makeHorizontalRow();
         row1.addView(cameraSpinner, weighted(2f));
         row1.addView(modeSpinner, weighted(1f));
         row1.addView(autoButton, weighted(1f));
+        row1.addView(fpsButton, weighted(1f));
         row1.addView(captureButton, weighted(1.2f));
         panel.addView(row1, matchWrap());
 
@@ -458,7 +492,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
                         + " | JPEG/DNG orientation=" + jpegOrientation + "°"
                         + " | target=" + targetPreviewFps + " fps"
                         + " | AE fps=" + (aeFpsRange == null ? "auto" : aeFpsRange)
-                        + " | sRGB tonemap=" + (srgbTonemap ? "preset" : "HAL default")
+                        + " | 60fps crop=" + (allowCropped60Fps ? "allowed" : "FOV-safe")
+                        + " | sRGB tonemap=" + (srgbTonemap ? "contrast-curve" : "HAL default")
                         + " | sync latency=" + (syncLatency == null ? "?" : syncLatency)
                         + " | files -> Downloads/IrisHDRViewfinder"
                         + " | log -> " + RuntimeLogger.location();
@@ -478,7 +513,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
             isoBar.setProgress(isoIndex);
             shortLabel.setText("Short " + CameraController.exposureText(shortExposureNs));
             longLabel.setText("Long " + CameraController.exposureText(longExposureNs));
-            isoLabel.setText("ISO " + iso + "  MANUAL");
+            isoLabel.setText("Long ISO " + iso + "  Short=min  MANUAL");
             updatingControls = false;
             if (!autoHdrEnabled) setManualControlsEnabled(true);
         });
@@ -529,6 +564,11 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private void refreshAutoButton() {
         if (autoButton == null) return;
         autoButton.setText(autoHdrEnabled ? "HDR AUTO: ON" : "HDR MANUAL SAFE");
+    }
+
+    private void refreshFpsButton() {
+        if (fpsButton == null) return;
+        fpsButton.setText(allowCropped60Fps ? "60 FPS CROP: ON" : "60 FPS CROP: OFF");
     }
 
     private void setManualControlsEnabled(boolean enabled) {

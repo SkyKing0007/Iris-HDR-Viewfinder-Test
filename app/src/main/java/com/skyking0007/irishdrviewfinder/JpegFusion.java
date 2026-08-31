@@ -36,7 +36,7 @@ final class JpegFusion {
         int[] shortPixels = new int[width * rowsPerStrip];
         int[] longPixels = new int[width * rowsPerStrip];
         int[] outPixels = new int[width * rowsPerStrip];
-        float ratio = (float) Math.max(1.0, Math.min(32.0, exposureRatio));
+        float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
 
         for (int y = 0; y < height; y += rowsPerStrip) {
             int rows = Math.min(rowsPerStrip, height - y);
@@ -120,9 +120,18 @@ final class JpegFusion {
         float shortLinear = SRGB_TO_LINEAR[short8] * ratio;
         float longLinear = SRGB_TO_LINEAR[long8];
         float merged = longLinear * (1.0f - highlightWeight) + shortLinear * highlightWeight;
-        float scaled = 1.6f * Math.max(0.0f, merged);
-        float tone = scaled / (1.0f + scaled);
-        return Math.max(0.0f, Math.min(1.0f, tone));
+        return hdrShoulder(merged);
+    }
+
+
+    private static float hdrShoulder(float value) {
+        float linear = Math.max(0.0f, value);
+        final float knee = 0.70f;
+        final float softness = 0.43f;
+        if (linear <= knee) return linear;
+        float normalized = (linear - knee) / (1.0f - knee);
+        float compressed = normalized / (normalized + softness);
+        return Math.max(0.0f, Math.min(1.0f, knee + (1.0f - knee) * compressed));
     }
 
     private static int encode(float linear) {

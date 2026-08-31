@@ -16,7 +16,7 @@ oes_shader = (ROOT / "app/src/main/assets/shaders/oes_to_rgb.frag").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.4 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.5 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -121,20 +121,20 @@ require('Arrays.asList(previewSurface, jpegReader.getSurface(), rawReader.getSur
         "temporary still session must retain PRIVATE + JPEG + RAW capture topology")
 
 # 010 / 020 - Capability target and measured cadence remain separate.
-require('SIXTY_FPS_DURATION_NS = 16_666_667L' in camera,
-        "60 fps frame-duration target missing")
+require('SIXTY_FPS_DURATION_NS = 16_666_666L' in camera,
+        "exact 60 fps frame-duration target missing")
 require('THIRTY_FPS_DURATION_NS = 33_333_333L' in camera,
         "30 fps fallback missing")
 require('CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES' in camera,
         "AE FPS capability query missing")
 require('getOutputMinFrameDuration(SurfaceTexture.class, size)' in camera,
         "selected PRIVATE stream min-frame-duration proof missing")
-require('targetPreviewFps = aeCanReach60 && streamCanReach60 ? 60 : 30;' in camera,
-        "60/30 capability decision missing")
+require('hasExactAeFpsRange(ranges, 60)' in camera,
+        "true 60fps must require an exact [60,60] Camera2 range")
 require('CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE' in camera,
-        "AUTO/NORMAL AE must request the selected supported FPS range")
-require('long frameDuration = Math.max(manualFrameDurationNs, exposure);' in camera,
-        "manual HDR must own frame duration independently of AE FPS")
+        "preview requests must carry the selected supported FPS range")
+require('targetPreviewFps >= 60' in camera and 'SIXTY_FPS_DURATION_NS' in camera,
+        "manual HDR must enforce the true-60 frame-duration contract")
 require('captureResultFps' in camera and 'updateCaptureResultFpsLocked' in camera,
         "actual CaptureResult cadence measurement missing")
 require('CaptureResult.SENSOR_FRAME_DURATION' in camera and 'resultFps=' in camera,
@@ -144,44 +144,52 @@ require('captureResultFps < 45.0' in camera and 'targetPreviewFps = 30;' in came
 require('camera %.1f fps   HDR pairs %.1f fps' in main,
         "GPU input and complete HDR-pair cadence diagnostics must remain visible")
 
-# 011 - Correct Camera2 sRGB preset semantics.
-require('CaptureRequest.TONEMAP_MODE_PRESET_CURVE' in camera,
-        "Camera2 PRESET_CURVE mode missing")
-require('CaptureRequest.TONEMAP_PRESET_CURVE_SRGB' in camera,
-        "Camera2 sRGB preset missing")
-require('TONEMAP_AVAILABLE_TONE_MAP_MODES' in camera,
-        "sRGB preset capability gate missing")
-require('TONEMAP_MODE_CONTRAST_CURVE' not in camera,
-        "CONTRAST_CURVE must not be mislabeled as built-in sRGB")
+# 011 / 032 - Explicit Camera2 sRGB contrast-curve semantics.
+require('CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE' in camera,
+        "Camera2 CONTRAST_CURVE mode missing")
+require('CaptureRequest.TONEMAP_CURVE' in camera,
+        "explicit Camera2 TONEMAP_CURVE missing")
+require('buildSrgbTonemapCurve' in camera and '0.0031308f' in camera and '2.4' in camera,
+        "explicit sampled sRGB transfer curve missing")
+require('TONEMAP_AVAILABLE_TONE_MAP_MODES' in camera and 'TONEMAP_MAX_CURVE_POINTS' in camera,
+        "contrast-curve capability/point-count gate missing")
+require('TONEMAP_MODE_PRESET_CURVE' not in camera and 'TONEMAP_PRESET_CURVE_SRGB' not in camera,
+        "retired PRESET_CURVE sRGB path returned")
 
-# 012 - Manual default remains 8x/3EV and AUTO derives SHORT from the live AE LONG result.
+# 012 / 029 - Bracket target remains 8x while absolute AUTO brightness comes from clean AE authority.
 require('HDR_BRACKET_RATIO = 8.0' in camera,
         "3 EV / 8x target bracket constant missing")
 require('shortExposureNs = ONE_SECOND_NS / 480' in camera,
         "manual default short exposure must remain 1/480s")
 require('longExposureNs = ONE_SECOND_NS / 60' in camera,
         "manual default long exposure must remain 1/60s")
-require('targetLongProduct / HDR_BRACKET_RATIO' in camera,
-        "AUTO HDR short target must derive from the metered long exposure product")
-require('double bracketEv = Math.log(actualLongProduct / actualShortProduct) / Math.log(2.0);' in camera,
+require('AUTO_METER_MIN_FRAMES' in camera and 'buildMeterPreviewRequest' in camera,
+        "clean AE anchor phase missing")
+require('commitAutoAnchorFromResultLocked' in camera and 'deriveAutoPairFromAnchorLocked' in camera,
+        "clean AE result must own absolute AUTO exposure")
+require('targetShortProduct' in camera and '/ HDR_BRACKET_RATIO' in camera,
+        "AUTO no-flicker SHORT target must derive from anchored LONG exposure product")
+require('autoShortIso = minIso;' in camera,
+        "AUTO SHORT must use the camera minimum sensor gain")
+require('double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);' in camera,
         "AUTO HDR must report actual EV after sensor-range clamping")
 
-# 013 - Live and saved HDR math remains byte-compatible with V1.4.2 shaders/JPEG fusion.
+# 013 / 030 - Live and saved fusion preserve sRGB math, wide exposure normalization and midtone parity.
 for text, owner in ((hdr_shader, 'live shader'), (fusion, 'JPEG fusion')):
     require('0.04045' in text and '12.92' in text and '0.0031308' in text and '2.4' in text,
             f"{owner} must use the piecewise sRGB transfer function")
 require('smoothstep(0.68, 0.94, longHighlight)' in hdr_shader,
         "live highlight-admission weighting missing")
-require('vec3 scaled = 1.6 * max(sceneLinear' in hdr_shader,
-        "live highlight-compressive tone map missing")
+require('hdrShoulderChannel' in hdr_shader and 'const float knee = 0.70;' in hdr_shader,
+        "live midtone-preserving HDR shoulder missing")
 require('smoothstep(0.68f, 0.94f, clip)' in fusion,
         "saved JPEG highlight-admission weighting missing")
-require('float scaled = 1.6f * Math.max(0.0f, merged);' in fusion,
-        "saved JPEG highlight-compressive tone map missing")
-require('Math.min(32.0, exposureRatio)' in fusion,
-        "saved JPEG must preserve wider exposure ratios")
-require('Math.min(32.0, longProduct / shortProduct)' in saver,
-        "capture metadata/fusion ratio must preserve wider exposure ratios")
+require('hdrShoulder' in fusion and 'final float knee = 0.70f;' in fusion,
+        "saved JPEG midtone-preserving shoulder missing")
+require('65_536.0' in fusion and '65_536.0' in saver and '65_536.0' in gl,
+        "widened exposure normalization must be consistent live/save/metadata")
+require('1.6 * max(sceneLinear' not in hdr_shader and '1.6f * Math.max' not in fusion,
+        "rejected fixed darkening tone-map exposure returned")
 
 # 016 / 022 - V1.4.2 on-device sideways preview: producer transform owns live orientation.
 require('SCALER_AVAILABLE_ROTATE_AND_CROP_MODES' in camera,
@@ -223,59 +231,50 @@ require(short_accept.count('fpsWindowPairs++;') == 1,
 require('lastShortMeta = stagingShortMeta;' in short_accept and 'lastLongMeta = meta;' in short_accept,
         "display exposure metadata must update atomically with the published pair")
 
-# 018 / 021 - V1.4.2 AUTO FPS regression: no third hidden capture request.
+# 018 / 021 / 029 - AUTO/MANUAL remain available; clean AE metering never uses one-shot capture().
 require('void setAutoHdrExposure(boolean enabled)' in camera,
         "AUTO/MANUAL HDR exposure owner switch missing")
 require('HDR AUTO: ON' in main and 'HDR MANUAL' in main,
         "AUTO/MANUAL HDR UI control missing")
 require('setManualControlsEnabled(!autoHdrEnabled)' in main,
         "manual controls must be explicitly gated by AUTO/MANUAL ownership")
-require('TAG_METER' not in camera and 'issueAutoMeterProbeLocked' not in camera,
-        "rejected hidden AUTO meter producer returned")
-require('AUTO_METER_INTERVAL_MS' not in camera and 'autoMeterRunnable' not in camera,
-        "rejected periodic AUTO meter scheduler returned")
+require('TAG_METER' in camera and 'buildMeterPreviewRequest' in camera,
+        "clean contiguous AE metering phase missing")
 require('captureSession.capture(' not in camera,
-        "live one-shot capture() must not interrupt the repeating preview schedule")
-require('buildAutoLongPreviewRequest' in camera,
-        "AUTO LONG request must be the in-burst AE meter")
-require('longRequest = buildAutoLongPreviewRequest();' in camera,
-        "AUTO paired burst must use live AE LONG member")
+        "V1.4.2 one-shot live capture() meter must never return")
+require('buildMeterPreviewRequest(), previewCaptureCallback' in camera,
+        "AUTO metering must use a contiguous repeating AE phase")
 require('Arrays.asList(shortRequest, longRequest)' in camera,
-        "AUTO/MANUAL HDR must remain a two-request repeating pair")
-require('AUTO_SHORT_UPDATE_MIN_INTERVAL_NS = 500_000_000L' in camera,
-        "AUTO short-request rebuilds must be coalesced to at most about 2 Hz")
-require('AUTO_UI_NOTIFY_INTERVAL_NS = 500_000_000L' in camera,
-        "AUTO UI updates must not run at every LONG frame")
-require('There is never a third capture request in the live AUTO schedule.' in camera,
-        "V1.4.2 8-10 fps hidden-meter failure must remain an explicit regression")
+        "steady AUTO/MANUAL HDR must remain a two-manual-request repeating pair")
+require('AUTO_REMETER_INTERVAL_MS = 2_000L' in camera,
+        "low-duty clean AE refresh cadence missing")
+require('FrameMeta.METER.equals(meta.kind)' in gl,
+        "meter frames must remain hidden from display/pair publication")
 
-# 025 - CONTROL_AE_TARGET_FPS_RANGE is session-sensitive on modern Camera2; both
-# members of the repeating pair must carry the same value so AUTO does not alternate
-# that key every frame while switching between manual SHORT and AE LONG.
-manual_builder = camera[camera.index('private CaptureRequest buildManualPreviewRequest'):camera.index('private CaptureRequest buildAutoLongPreviewRequest')]
-auto_builder = camera[camera.index('private CaptureRequest buildAutoLongPreviewRequest'):camera.index('private void configureManualRequest')]
+# 025 / 031 - Both manual pair members carry one FPS range; true-60 mode uses exact [60,60].
+manual_builder = camera[camera.index('private CaptureRequest buildManualPreviewRequest'):camera.index('private CaptureRequest buildMeterPreviewRequest')]
 require('CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE' in manual_builder,
-        "manual SHORT preview must carry the selected AE FPS range for pair consistency")
-require('CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE' in auto_builder,
-        "AUTO LONG preview must carry the selected AE FPS range")
-require('session-sensitive request key frame by frame' in camera,
-        "paired FPS-range consistency contract missing")
+        "SHORT/LONG manual preview requests must carry the selected AE FPS range")
+require('hasExactAeFpsRange(ranges, 60)' in camera and 'range.getLower() == target && range.getUpper() == target' in camera,
+        "60fps capability must prefer exact [60,60]")
+require('60 FPS CROP: ON' in main and '60 FPS CROP: OFF' in main,
+        "user-visible cropped-60 override toggle missing")
+require('FOV_OVERRIDE' in camera and 'allowCropped60Fps' in camera,
+        "cropped-60 override must be explicit and logged")
 
-# 019 - Flicker-aware AUTO uses the actual AE LONG integration window for artificial/unknown light.
+# 019 / 029 - Flicker-aware clean AE anchor and manual pair preserve temporal integration.
 require('CaptureResult.STATISTICS_SCENE_FLICKER' in camera,
         "Camera2 scene-flicker evidence missing")
 require('CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO' in camera,
-        "AUTO LONG must request HAL automatic antibanding")
+        "clean AE meter must request HAL automatic antibanding")
 require('STATISTICS_SCENE_FLICKER_50HZ' in camera and 'STATISTICS_SCENE_FLICKER_60HZ' in camera,
         "50/60-Hz evidence labels must remain explicit")
-require('desiredShortExposure = meteredLongExposure;' in camera,
-        "artificial/unknown AUTO HDR must match SHORT shutter to actual AE LONG shutter")
+require('autoShortExposureNs = autoLongExposureNs;' in camera,
+        "artificial/unknown AUTO HDR must match SHORT shutter to anchored LONG shutter")
 require('unknown/PWM-safe' in camera,
         "unknown/PWM conservative fallback label missing")
-require('stableBrightNoFlicker' in camera,
-        "shutter-separated bracket must remain limited to stable bright/no-flicker evidence")
-require('letting Camera2 AUTO antibanding choose the real safe shutter.' in camera,
-        "flicker-safe in-burst ownership contract missing")
+require('sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE' in camera,
+        "shutter-separated AUTO bracket must require no-flicker evidence")
 
 # 023 - On-device DNG Orientation=9 regression: DNG must always receive explicit valid TIFF orientation.
 require('import android.media.ExifInterface;' in saver,
@@ -331,27 +330,24 @@ require('CaptureRequest.CONTROL_ZOOM_RATIO' not in camera
         and 'CaptureRequest.SCALER_CROP_REGION' not in camera,
         "FOV correction must not fake parity by digitally cropping or zooming requests")
 
-# 027 - V1.4.3 device finding: unrestricted MANUAL 1/480 + 1/60 under 60-Hz light
-# recreates the moving scan-band failure that AUTO avoids. MANUAL SAFE keeps the requested
-# bracket intent but uses flicker-compatible temporal integration and gain separation.
+# 027 / 031 - MANUAL SAFE keeps flicker-compatible timing; ISO slider owns LONG only and SHORT uses min gain.
 require('recomputeManualFlickerSafetyLocked' in camera,
         "MANUAL flicker-safe exposure owner missing")
 require('manualEffectiveShortExposureNs' in camera and 'manualEffectiveLongExposureNs' in camera,
         "requested and effective MANUAL shutters must remain separate")
-require('manualEffectiveShortIso' in camera and 'manualEffectiveLongIso' in camera,
-        "MANUAL SAFE gain-separated bracket fields missing")
+require('manualEffectiveShortIso = minIso;' in camera,
+        "MANUAL SHORT must use sensor minimum gain")
+require('manualEffectiveLongIso = manualIso;' in camera
+        and 'manualEffectiveLongIso = solveIsoForProduct' in camera,
+        "manual ISO slider must own LONG gain / preserved LONG exposure product")
 require('chooseManualFlickerSafeExposureLocked' in camera,
         "50/60-Hz manual shutter solver missing")
-require('FLICKER_50_PERIOD_NS' not in camera or '10_000_000L' in camera,
-        "50-Hz integration period missing")
-require('8_333_333L' in camera,
-        "60-Hz integration period missing")
+require('10_000_000L' in camera and '8_333_333L' in camera,
+        "50/60-Hz integration periods missing")
 require('MANUAL_SAFE' in camera and 'HDR MANUAL SAFE' in main,
         "user-visible safe MANUAL ownership missing")
-require('longRequest = buildManualPreviewRequest(TAG_LONG, activeLongNs, activeLongIso);' in camera,
-        "MANUAL LONG must consume the effective flicker-safe settings")
-require('CaptureRequest shortRequest = buildManualPreviewRequest(TAG_SHORT, activeShortNs, activeShortIso);' in camera,
-        "MANUAL SHORT must consume the effective flicker-safe settings")
+require('longISO' in camera and 'Short=min' in main,
+        "LONG-only ISO ownership must be visible")
 require('MANUAL_FLICKER' in camera,
         "manual flicker decision must be logged")
 
@@ -374,6 +370,39 @@ require('RuntimeLogger.event("STATUS"' not in main,
         "high-frequency UI status logging must not become a performance owner")
 require('Event producers are deliberately rate-limited' in main,
         "logger rate-limit ownership contract missing")
+
+# 031 - Expanded manual exposure controls and explicit cropped-60 option.
+for token in ['1_000_000_000L / 8000', '1_000_000_000L / 100', '1_000_000_000L / 50',
+              '30_000_000L', '1_000_000_000L / 25', '1_000_000_000L / 20']:
+    require(token in main, f"manual exposure slider step missing: {token}")
+require('SIXTY_FPS_DURATION_NS = 16_666_666L' in camera,
+        "forced 60fps must use 16,666,666 ns SENSOR_FRAME_DURATION target")
+require('targetPreviewFps >= 60' in camera and 'manualEffectiveLongExposureNs' in camera,
+        "60fps mode must cap effective manual integration and preserve LONG product through ISO")
+require('boolean enforcePreviewCadence' in camera
+        and 'if (enforcePreviewCadence && targetPreviewFps >= 60)' in camera
+        and 'frameDuration = SIXTY_FPS_DURATION_NS;' in camera,
+        "true-60 SENSOR_FRAME_DURATION must be owned by live preview requests")
+require('Full RAW/JPEG still capture is a separate session' in camera
+        and 'frameDuration = Math.max(THIRTY_FPS_DURATION_NS, exposure);' in camera,
+        "optional cropped-60 preview cadence must never constrain full RAW/JPEG still capture")
+
+# 032 - Explicit sRGB contrast curve and post-RAW boost parity across clean AE -> manual pair.
+require('CONTROL_POST_RAW_SENSITIVITY_BOOST' in camera,
+        "post-RAW sensitivity boost must be copied from clean AE into manual HDR pair")
+require('postRawSensitivityBoost' in saver,
+        "capture metadata must persist actual post-RAW boost")
+require('TONEMAP_MODE_CONTRAST_CURVE' in camera and 'TONEMAP_CURVE' in camera,
+        "explicit sRGB contrast curve missing")
+
+# 033 - Requested ISP denoise/sharpen disable must be applied wherever supported.
+require('NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES' in camera
+        and 'CaptureRequest.NOISE_REDUCTION_MODE_OFF' in camera,
+        "NOISE_REDUCTION_MODE_OFF support gate/request missing")
+require('EDGE_AVAILABLE_EDGE_MODES' in camera and 'CaptureRequest.EDGE_MODE_OFF' in camera,
+        "EDGE_MODE_OFF support gate/request missing")
+require('configureProcessingControls(builder);' in camera,
+        "processed preview/still requests must apply edge/noise ownership")
 
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
@@ -435,4 +464,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.4 REGRESSION PASS: producer-owned orientation, explicit DNG orientation, uninterrupted two-frame AUTO HDR, atomic pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.5 REGRESSION PASS: producer-owned orientation, explicit DNG orientation, clean-anchored two-frame AUTO HDR, atomic pairs, native FOV, measured cadence, sRGB, capture protection")

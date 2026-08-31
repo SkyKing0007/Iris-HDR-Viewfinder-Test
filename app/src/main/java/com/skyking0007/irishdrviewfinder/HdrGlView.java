@@ -442,7 +442,7 @@ final class HdrGlView extends GLSurfaceView {
             float ratio = 1.0f;
             if (lastShortMeta != null && lastLongMeta != null) {
                 double r = lastLongMeta.exposureProduct() / lastShortMeta.exposureProduct();
-                ratio = (float) Math.max(1.0, Math.min(32.0, r));
+                ratio = (float) Math.max(1.0, Math.min(65_536.0, r));
             }
             GLES30.glUniform1f(GLES30.glGetUniformLocation(displayProgram, "exposureRatio"), ratio);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);

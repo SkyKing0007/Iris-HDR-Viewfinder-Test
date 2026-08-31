@@ -1,25 +1,37 @@
-Iris HDR Viewfinder Test V1.4.4
+Iris HDR Viewfinder Test V1.4.5
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
-Status: PREPARED FOR GITHUB ACTIONS BUILD - NOT YET BUILD-PROVEN
-Runtime authority: exact successful V1.4.3 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.3
-Authority commit: 78e5ff899bed4ea3beef54184b7071aa6996838b
-Authority Actions run: 33353686676
-Authority artifact ID: 9744449755
-Authority artifact ZIP SHA-256: 7bd3ccd558df58726dd6ed70ada3b06106b69544000cd4b41238d035a393b34d
-Authority V1.4.3 source TAR SHA-256: b0fa3a074e342eead52b34c83702e72074163b5b123655297b048dccf7e1ed4e
-Authority V1.4.3 runtime manifest SHA-256: e91ea0890c5b0444d0a3d33636a0c6717f62b06b7a7f7a0825e128aebb9686ad
-Authority V1.4.3 repository manifest SHA-256: 883851b2e5e3fd4d0e3974d47147fee8b2fb589d3fc041fdcd4eb27a86715265
-Authority V1.4.3 APK SHA-256: ff688a588fc434c0378d90cb4846631bd72c397cfb24110d17a81dfe3ecef60f
-Existing architecture backup: backup-v1.3-pre-direct-gpu-hdr at e205b6b9acdf9ff091eb46a6c521ccd72d287356. No new backup: V1.4.4 is a localized correction/logger addition.
+Status: PREPARED CANDIDATE - ARCHITECTURE BACKUP REF REQUIRED BEFORE UPLOAD; NOT BUILD-PROVEN
+Runtime authority: exact successful V1.4.4 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.4
+Authority commit: 172c628445edb6d28617de77748ceeb76203b2d1
+Authority tree: 4401cf05d8646b9e79b2eb5f4326f10696cdf554
+Authority Actions run: 33358065303
+Authority artifact ID: 9745791239
+Authority artifact ZIP SHA-256: f71eef4642ad8a60d37c864b160f896868908842c8dab6c844938d703406de0f
+Authority V1.4.4 source TAR SHA-256: e274ad3c70c8c69e12da9bb7dc1b97dccc47314afaec72746d638a4e504b58e3
+Authority V1.4.4 runtime manifest SHA-256: dc801a170483feb3389140a09efee7010a10b0aa8083f19508c0b9f6ef880e5b
+Authority V1.4.4 repository manifest SHA-256: 588620afc13764153d3f6841e2c5b8be8de0e1803d541d271aa2130d7d3d84a9
+Authority V1.4.4 APK SHA-256: 4e5859d78716753acc5763acc58cd90476897a7008ae70d4fd6db26439628884
+Required architecture backup before upload: backup-v1.4.4-pre-hdr-exposure-parity -> 172c628445edb6d28617de77748ceeb76203b2d1
 
-Device evidence driving V1.4.4:
-- V1.4.3 AUTO HDR now delivers about 60 camera fps / about 30 complete HDR pairs/s with zero drops on the Xiaomi 15 Ultra.
-- That 60-fps preview appears materially tighter than the full-FOV RAW/JPEG still capture.
-- V1.4.3 MANUAL can still show the moving scan-band/flicker artifact that AUTO avoids under artificial light.
+V1.4.5 runtime scope: exactly six files:
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+- app/src/main/assets/shaders/hdr_display.frag
 
-V1.4.4 runtime scope: CameraController.java, HdrGlView.java, MainActivity.java only.
-FOV policy: Camera2 API-35 physical-sensor crop evidence is the 60-fps authority. If 60 fps reports a physical-sensor readout crop, or if full-FOV physical readout cannot be proven, Iris recreates the preview at 30 fps. The app never crops RAW/JPEG to imitate a cropped viewfinder.
-MANUAL SAFE: requested manual bracket intent is preserved where sensor limits allow, while 50/60-Hz or unknown/PWM lighting uses flicker-compatible integration timing and gain separation instead of an unsafe 1/480 + 1/60 temporal pair.
-Production logger: critical lifecycle, Camera2 session/error, FOV, flicker, capture, GPU and uncaught-crash evidence is written at a low duty cycle to Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt.
-Protected unchanged runtime: AndroidManifest.xml, all four GLSL assets, CaptureSetSaver.java, FrameMeta.java, JpegFusion.java, MediaStoreWriter.java.
-Toolchain: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2 in Actions.
+V1.4.5 corrections/features:
+- AUTO HDR absolute brightness is anchored from a clean converged Camera2 AE phase, then the steady live HDR schedule is a two-manual-request SHORT/LONG pair. No one-shot capture() meter returns.
+- Camera2 post-RAW sensitivity boost from the clean AE anchor is copied into manual HDR requests when supported.
+- FUSED midtones preserve LONG/normal-exposure brightness; only highlight headroom receives a shoulder. The retired fixed 1.6x Reinhard darkening is removed from live and saved fusion.
+- Exposure normalization is widened beyond the old 32x cap for 1/8000 + min-gain SHORT support.
+- Manual SHORT always uses the sensor minimum ISO; the ISO slider owns LONG only.
+- Manual exposure options include 1/8000, 1/4000, 1/2000, 1/1000, 1/500, 1/480, 1/240, 1/120, 1/100, 1/60, 1/50, 30ms (~1/33.3), 1/30, 1/25, 1/20, 1/15 and 1/8, clamped to each camera's real exposure range.
+- Optional 60 FPS CROP toggle requests exact [60,60] when available and 16,666,666ns live frame duration. Default FOV-safe behavior remains. Full RAW/JPEG still capture never inherits cropped-60 preview cadence.
+- Camera2 processed requests use explicit TONEMAP_MODE_CONTRAST_CURVE + sampled sRGB TONEMAP_CURVE when supported.
+- NOISE_REDUCTION_MODE_OFF and EDGE_MODE_OFF are requested wherever the device advertises support.
+- V1.4.4 logger, FOV fallback, MANUAL SAFE flicker protection, orientation, DNG orientation, atomic pairing and capture/output lifecycle are preserved.
+
+Protected byte-identical runtime from successful V1.4.4: AndroidManifest.xml, copy_2d.frag, fullscreen.vert, oes_to_rgb.frag, FrameMeta.java, MediaStoreWriter.java.
+Toolchain/build mechanics: inherited unchanged from successful V1.4.4 (AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2).

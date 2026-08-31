@@ -278,11 +278,13 @@ final class CaptureSetSaver {
         Long exposure = result.get(CaptureResult.SENSOR_EXPOSURE_TIME);
         Integer iso = result.get(CaptureResult.SENSOR_SENSITIVITY);
         Long frameDuration = result.get(CaptureResult.SENSOR_FRAME_DURATION);
+        Integer postRawBoost = result.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST);
         json.put("frameNumber", result.getFrameNumber());
         json.put("sensorTimestampNs", timestamp == null ? JSONObject.NULL : timestamp);
         json.put("exposureTimeNs", exposure == null ? JSONObject.NULL : exposure);
         json.put("iso", iso == null ? JSONObject.NULL : iso);
         json.put("frameDurationNs", frameDuration == null ? JSONObject.NULL : frameDuration);
+        json.put("postRawSensitivityBoost", postRawBoost == null ? JSONObject.NULL : postRawBoost);
         return json;
     }
 
@@ -291,9 +293,13 @@ final class CaptureSetSaver {
         Integer si = shortResult.get(CaptureResult.SENSOR_SENSITIVITY);
         Long le = longResult.get(CaptureResult.SENSOR_EXPOSURE_TIME);
         Integer li = longResult.get(CaptureResult.SENSOR_SENSITIVITY);
-        double shortProduct = Math.max(1.0, (se == null ? 1.0 : se) * (si == null ? 1.0 : si));
-        double longProduct = Math.max(1.0, (le == null ? 1.0 : le) * (li == null ? 1.0 : li));
-        return Math.max(1.0, Math.min(32.0, longProduct / shortProduct));
+        Integer sb = shortResult.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST);
+        Integer lb = longResult.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST);
+        double shortProduct = Math.max(1.0,
+                (se == null ? 1.0 : se) * (si == null ? 1.0 : si) * (sb == null ? 100.0 : sb) / 100.0);
+        double longProduct = Math.max(1.0,
+                (le == null ? 1.0 : le) * (li == null ? 1.0 : li) * (lb == null ? 100.0 : lb) / 100.0);
+        return Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));
     }
 
     private static int dngOrientationForDegrees(int degrees) {

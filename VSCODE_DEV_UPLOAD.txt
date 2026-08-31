@@ -1,10 +1,15 @@
-Iris HDR Viewfinder Test V1.4.4 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.5 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
+PREREQUISITE BEFORE UPLOAD:
+The architecture backup branch must exist and point exactly to successful V1.4.4 commit:
+backup-v1.4.4-pre-hdr-exposure-parity -> 172c628445edb6d28617de77748ceeb76203b2d1
+The workflow fails closed if this backup is missing or points elsewhere.
+
 IMPORTANT:
-Use only the V1.4.4 FULL-UPLOAD ZIP. Upload ALL CONTENTS of the extracted folder into the repository root.
+Use only the V1.4.5 FULL-UPLOAD ZIP after the backup prerequisite is verified. Upload ALL CONTENTS of the extracted folder into the repository root.
 Do not upload the strict-proof ZIP, and do not upload only app/ or only changed files.
 
 Before committing, confirm these paths exist:
@@ -15,15 +20,16 @@ Before committing, confirm these paths exist:
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - scripts/verify_orientation.py
 - scripts/verify_shaders.py
 
 Commit message:
-V1.4.4 add FOV-safe 60fps, manual flicker safety and runtime logs
+V1.4.5 fix HDR exposure parity and expand manual/60fps controls
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.4.
-Do not install/call V1.4.4 build-proven until the workflow succeeds and its compiled artifact is verified.
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.5.
+Do not install/call V1.4.5 build-proven until the workflow succeeds and its compiled artifact is verified.
 
-Runtime logs after installation are written to:
+Runtime logs after installation:
 Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt
