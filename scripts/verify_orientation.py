@@ -17,7 +17,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.12 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -161,9 +161,9 @@ require('TONEMAP_AVAILABLE_TONE_MAP_MODES' in camera and 'TONEMAP_MAX_CURVE_POIN
 require('TONEMAP_MODE_PRESET_CURVE' not in camera and 'TONEMAP_PRESET_CURVE_SRGB' not in camera,
         "retired PRESET_CURVE sRGB path returned")
 
-# 012 / 029 / 037 / 043 - Absolute AUTO brightness remains clean-AE owned.
-# V1.4.11 intentionally restores the proven V1.4.7 8x (~3 EV) AUTO bracket;
-# aperture-derived widening from V1.4.8+ must not survive this controlled experiment.
+# 012 / 029 / 037 / 043 / 044 - Clean AE remains the unbiased AUTO baseline.
+# V1.4.12 keeps the proven V1.4.7 8x (~3 EV) baseline SHORT target and allows
+# only explicit user Brightness EV to bias LONG after the clean anchor is solved.
 require('HDR_BRACKET_RATIO = 8.0' in camera,
         "fixed V1.4.7 8x AUTO bracket missing")
 require('AUTO_MAX_BRACKET_EV' not in camera and 'autoTargetBracketEvLocked' not in camera
@@ -182,7 +182,7 @@ require('targetShortProduct' in camera and '/ HDR_BRACKET_RATIO' in camera,
 require('autoShortIso = minIso;' in camera,
         "AUTO SHORT must use the camera minimum sensor gain")
 require('double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);' in camera,
-        "AUTO HDR must report actual EV after sensor/flicker clamping")
+        "AUTO HDR must report actual EV after sensor/flicker/brightness clamping")
 
 # 013 / 030 / 036 / 043 - Live and saved fusion preserve V1.4.7 sRGB math,
 # exact exposure normalization, LONG-owned shadows, and the same HDR display policy.
@@ -196,21 +196,22 @@ require('0.90 + 0.01 * (bracketStops - 1.0)' in hdr_shader and '0.995' in hdr_sh
 require('shortConfidence' in hdr_shader and 'shortScenePeak / longScenePeak' in hdr_shader,
         "live clipped-highlight SHORT plausibility guard missing")
 require('vec3 mergedScene = mix(longScene, shortScene, highlightWeight);' in hdr_shader,
-        "live fusion must finish before display brightness")
-require('float brightnessGain = exp2(clamp(displayBrightnessEv, -1.0, 1.0));' in hdr_shader
-        and 'adaptiveHdrToneMap(mergedScene * brightnessGain' in hdr_shader,
-        "live Brightness EV must apply after fusion and before HDR display fitting")
-require('displayBrightnessEv' in gl and 'glUniform1f' in gl,
-        "live Brightness EV uniform plumbing missing")
+        "live fusion must preserve the V1.4.7 LONG/SHORT handoff")
+require('displayBrightnessEv' not in hdr_shader and 'brightnessGain' not in hdr_shader,
+        "V1.4.11 post-fusion live Brightness gain must be removed")
+require('displayBrightnessEv' not in gl,
+        "GL renderer must not own Brightness EV after V1.4.12 capture migration")
+require('adaptiveHdrToneMap(mergedScene, ratio, bracketStops)' in hdr_shader,
+        "live HDR tone map must consume only the physical fused pair")
 require('0.90f + 0.01f * (bracketStops - 1.0f)' in fusion and 'HDR_CLIP_END = 0.995f' in fusion,
         "saved JPEG SHORT admission must match live near-clipping policy")
 require('float mr = lr + (sr - lr) * highlightWeight;' in fusion
         and 'float mg = lg + (sg - lg) * highlightWeight;' in fusion
         and 'float mb = lb + (sb - lb) * highlightWeight;' in fusion,
-        "saved fusion must finish full-RGB handoff before brightness")
-require('brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
-        and 'boostedPeak = scenePeak * brightnessGain;' in fusion,
-        "saved Brightness EV must be one per-image linear exposure gain after fusion")
+        "saved fusion must preserve full-RGB HDR handoff")
+require('displayBrightnessEv' not in fusion and 'brightnessGain' not in fusion
+        and 'boostedPeak' not in fusion,
+        "saved fusion must contain no V1.4.11 post-fusion Brightness gain")
 require('const float knee = 0.70;' in hdr_shader and 'HDR_KNEE = 0.70f' in fusion,
         "live/save V1.4.7 HDR knee must be restored")
 require('0.82 - 0.04 * (bracketStops - 1.0)' in hdr_shader
@@ -305,10 +306,16 @@ require('STATISTICS_SCENE_FLICKER_50HZ' in camera and 'STATISTICS_SCENE_FLICKER_
         "50/60-Hz evidence labels must remain explicit")
 require('chooseAutoFlickerAlignedShortLocked' not in camera and 'autoTargetBracketEvLocked' not in camera,
         "V1.4.8+ wide-aperture flicker-short solver must not survive fixed-3EV restore")
-require('autoShortExposureNs = autoLongExposureNs;' in camera,
-        "50/60-Hz and unknown/PWM must preserve V1.4.7 same-integration behavior")
-require('Proven V1.4.7 flicker-safe behavior' in camera,
-        "fixed-3EV flicker-safe ownership contract missing")
+require('autoShortExposureNs = baseLongExposure;' in camera,
+        "50/60-Hz and unknown/PWM SHORT must preserve the unbiased V1.4.7 clean-AE integration")
+require('chooseBrightnessLongExposureLocked' in camera,
+        "shutter-priority Brightness LONG solver missing")
+require('periodNs = 10_000_000L;' in camera and 'periodNs = 8_333_333L;' in camera,
+        "50/60-Hz Brightness solver must use explicit anti-banding periods")
+require('return base;' in camera[camera.index('private long chooseBrightnessLongExposureLocked'):camera.index('private void publishAutoHdrSettingsLocked')],
+        "unknown/PWM Brightness must retain baseline shutter rather than invent timing")
+require('upperIso >= minIso' in camera,
+        "anti-banding shutter step must not force ISO below sensor minimum")
 require('sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE' in camera,
         "no-flicker direct 8x desired-SHORT branch missing")
 
@@ -456,7 +463,7 @@ require('60 FPS CROP ON: request fixed 60/60 preview' in main,
         "UI must state explicit force-60 semantics")
 
 
-# 036 / 043 - Exact V1.4.7 highlight mapping and V1.4.11 brightness math.
+# 036 / 043 / 044 - Exact V1.4.7 highlight mapping with no post-fusion brightness.
 def v147_policy(exposure_ratio):
     ratio = max(1.0, min(65536.0, exposure_ratio))
     stops = max(1.0, min(6.0, math.log(max(ratio, 1.0001), 2.0)))
@@ -469,40 +476,46 @@ def smoothstep_math(edge0, edge1, value):
     t = max(0.0, min(1.0, (value - edge0) / (edge1 - edge0)))
     return t * t * (3.0 - 2.0 * t)
 
-def map_peak_math(scene_peak, exposure_ratio, brightness_ev=0.0):
+def map_peak_math(scene_peak, exposure_ratio):
     ratio, stops, _, white_anchor, display_ceiling = v147_policy(exposure_ratio)
-    boosted = scene_peak * (2.0 ** max(-1.0, min(1.0, brightness_ev)))
     knee = 0.70
-    if boosted <= knee:
-        return boosted
-    if boosted <= 1.0:
-        t = max(0.0, min(1.0, (boosted - knee) / (1.0 - knee)))
+    if scene_peak <= knee:
+        return scene_peak
+    if scene_peak <= 1.0:
+        t = max(0.0, min(1.0, (scene_peak - knee) / (1.0 - knee)))
         return knee + (white_anchor - knee) * t
-    t = max(0.0, min(1.0, math.log(boosted, 2.0) / max(math.log(max(ratio, 1.0001), 2.0), 0.0001)))
+    t = max(0.0, min(1.0, math.log(scene_peak, 2.0) / max(math.log(max(ratio, 1.0001), 2.0), 0.0001)))
     return white_anchor + (display_ceiling - white_anchor) * t
 
 ratio8, stops8, clip8, anchor8, ceiling8 = v147_policy(8.0)
-require(math.isclose(stops8, 3.0, abs_tol=1e-6), "8x bracket must equal 3 EV")
+require(math.isclose(stops8, 3.0, abs_tol=1e-6), "8x baseline bracket must equal 3 EV")
 require(math.isclose(clip8, 0.92, abs_tol=1e-6), "8x SHORT admission must begin at 92% LONG code")
 require(math.isclose(anchor8, 0.74, abs_tol=1e-6) and math.isclose(ceiling8, 0.88, abs_tol=1e-6),
         "V1.4.7 3-EV highlight anchors changed")
 require(smoothstep_math(clip8, 0.995, 0.50) == 0.0,
         "SHORT must contribute zero in healthy LONG shadows/midtones")
-require(map_peak_math(0.40, 8.0, 0.0) == 0.40,
-        "0.0 EV must be the exact no-brightness-change V1.4.7 baseline")
-require(map_peak_math(0.40, 8.0, 0.5) > map_peak_math(0.40, 8.0, 0.0),
-        "+0.5 EV must brighten a lower midtone")
-require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
-        "brightness gain must be highlight-fitted rather than post-SDR clipped")
-require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
-        "recovered highlight ordering must survive positive Brightness EV")
+require(map_peak_math(0.40, 8.0) == 0.40,
+        "V1.4.7 lower-mid tone mapping changed")
+require(map_peak_math(1.0, 8.0) < map_peak_math(2.0, 8.0) <= ceiling8,
+        "recovered highlight ordering must remain monotonic")
+
+# Exact shutter-priority numerical replay of the reported 60-Hz test scene.
+base_exp = 1_000_000_000 / 120.0
+base_iso = 357.0
+target_product = base_exp * base_iso * (2.0 ** 0.5)
+safe_long_exp = 2.0 * 8_333_333.0
+solved_iso = target_product / safe_long_exp
+require(245.0 <= solved_iso <= 260.0,
+        f"60-Hz +0.5EV shutter-priority solve drifted: ISO {solved_iso}")
+require(safe_long_exp > base_exp and solved_iso < base_iso,
+        "+0.5EV 60-Hz example must lengthen shutter and lower ISO")
 
 # 038 / 042 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.10' in workflow
-        and 'run-id: 33458017737' in workflow,
-        "workflow must download the exact successful V1.4.10 Actions authority")
-require('run-id: 33445772128' not in workflow,
-        "V1.4.11 must not silently fall back to V1.4.9 authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11' in workflow
+        and 'run-id: 33464019593' in workflow,
+        "workflow must download the exact successful V1.4.11 Actions authority")
+require('run-id: 33458017737' not in workflow,
+        "V1.4.12 must not silently fall back to V1.4.10 authority")
 
 # 039 / 043 - V1.4.7 red/orange speck and skin-tone correction is color-ownership only.
 require('highlightColorOwnership' in hdr_shader and 'applyHighlightColorOwnership' in fusion,
@@ -522,22 +535,34 @@ require(hdr_shader.count('texture(shortTex') == 3 and hdr_shader.count('texture(
 require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
         "no spatial/cross-edge chroma filtering is permitted")
 
-# Brightness is one explicit WYSIWYG control with frozen shutter-time ownership.
+# Brightness is one explicit AUTO exposure-intent control with frozen shutter-time ownership.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -1.0f' in main
         and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in main
         and 'DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10' in main,
         "Brightness slider must be -1..+1 EV in 0.1 EV increments")
-require('brightnessLabelText' in main and 'glView.setDisplayBrightnessEv(displayBrightnessEv);' in main
-        and 'controller.setDisplayBrightnessEv(displayBrightnessEv);' in main,
-        "Brightness slider must drive both live and saved paths")
+require('brightnessLabelText' in main and 'controller.setDisplayBrightnessEv(displayBrightnessEv);' in main,
+        "Brightness slider must drive the AUTO exposure solver")
+require('glView.setDisplayBrightnessEv' not in main,
+        "Brightness slider must not drive a post-fusion GL gain")
+require('requestedGain = Math.pow(2.0' in camera and 'targetLongProduct = Math.max(1.0, baseLongProduct * requestedGain);' in camera,
+        "Brightness EV must change physical LONG exposure product")
+require('if (Math.abs(displayBrightnessEv) < 0.0001f)' in camera
+        and 'autoLongExposureNs = baseLongExposure;' in camera
+        and 'autoLongIso = baseLongIso;' in camera,
+        "0.0 EV must preserve the exact unbiased clean-AE LONG pair without re-quantization")
+require('desiredLongExposure = clampExposure(Math.round(baseLongExposure * requestedGain));' in camera,
+        "Brightness solver must attempt shutter-time gain before ISO residual")
+require('autoLongIso = solveIsoForProduct(targetLongProduct, autoLongExposureNs);' in camera,
+        "LONG ISO must solve only the residual after shutter selection")
 require('captureDisplayBrightnessEv = displayBrightnessEv;' in camera,
-        "shutter press must freeze the exact displayed Brightness EV")
+        "shutter press must freeze the exact requested Brightness EV")
 require('captureDisplayBrightnessEv' in camera[camera.index('new CaptureSetSaver('):camera.index('stillSessionActive = true;')],
-        "saved fusion must receive frozen shutter-time Brightness EV")
-require('displayBrightnessEv' in saver and 'JpegFusion.fuse(shortJpeg, longJpeg, ratio, displayBrightnessEv)' in saver,
-        "CaptureSetSaver must pass frozen Brightness EV into JPEG fusion")
-require('root.put("displayBrightnessEv", displayBrightnessEv);' in saver,
-        "capture metadata must record the applied Brightness EV")
+        "capture metadata must receive frozen shutter-time Brightness EV")
+require('displayBrightnessEv' in saver and 'JpegFusion.fuse(shortJpeg, longJpeg, ratio)' in saver,
+        "CaptureSetSaver must retain Brightness metadata but fusion must not consume it")
+require('root.put("brightnessEv", displayBrightnessEv);' in saver
+        and 'AUTO_LONG_SHUTTER_PRIORITY' in saver,
+        "capture metadata must record Brightness EV and its physical exposure owner")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -564,14 +589,12 @@ require('captureShortExposureNs' in still_burst and 'captureLongExposureNs' in s
 require('CAPTURE_INPUTS' in camera and 'acquiredMs=' in camera and 'totalMs=' in camera,
         "minimal capture timing evidence must separate sensor acquisition from post-processing")
 
-# 041 / 043 - Full-resolution fusion must stay allocation-light. Brightness pow is
-# computed once per image, never per pixel; highlight color uses one reusable scratch vector.
+# 041 / 043 / 044 - Full-resolution fusion stays allocation-light and Brightness-free.
 inner = fusion[fusion.index('for (int i = 0; i < count; i++)'):fusion.index('output.setPixels')]
 for forbidden in ['Math.exp(', 'Math.pow(', 'Math.sqrt(', 'new float[']:
     require(forbidden not in inner, f"expensive/per-pixel saved-fusion operation returned: {forbidden}")
-require('float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
-        and fusion.index('float brightnessGain = (float) Math.pow') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
-        "Brightness EV power must be computed once before full-resolution loops")
+require('clampedBrightnessEv' not in fusion and 'brightnessGain' not in fusion,
+        "saved fusion must not contain any Brightness power after capture migration")
 require('float[] colorOwned = new float[3];' in fusion and 'return new float[]' not in fusion,
         "highlight color ownership must reuse one scratch vector rather than allocate per pixel")
 
@@ -635,4 +658,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 REGRESSION PASS: fixed-3EV HDR, post-fusion Brightness EV, LONG-first highlight color, frozen capture pair, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.12 REGRESSION PASS: clean-AE baseline HDR, shutter-priority LONG Brightness with 50/60-Hz guards, no post-fusion gain, LONG-first highlight color, frozen capture pair, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")

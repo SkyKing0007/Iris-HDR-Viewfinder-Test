@@ -1,28 +1,30 @@
-# Iris HDR Viewfinder Test V1.4.11
+# Iris HDR Viewfinder Test V1.4.12
 
-V1.4.11 is a controlled image-quality experiment built from the exact successful V1.4.10 Actions compiled candidate while restoring the proven V1.4.7 HDR ownership model. It keeps V1.4.9/V1.4.10 immutable shutter-time capture controls and timing/FOV/orientation mechanics.
+V1.4.12 is a focused correction built from the exact successful V1.4.11 Actions compiled candidate. It keeps the V1.4.7 LONG-dominant HDR reconstruction and V1.4.11 LONG-first highlight color correction, but removes V1.4.11's failed post-fusion Brightness multiplier.
 
-## Fixed ~3 EV AUTO HDR bracket
+## Shutter-priority AUTO Brightness
 
-AUTO HDR returns to the V1.4.7 fixed 8x exposure-product target (about 3 EV) when flicker is reported as NONE. Under 50/60 Hz, unknown or PWM-like lighting, the proven same-integration safety behavior is retained and SHORT uses sensor-minimum gain. The wider V1.4.8-V1.4.10 aperture-derived 3-4.25 EV policy is removed.
+The existing **Brightness** control remains `-1.0 EV` to `+1.0 EV` in `0.1 EV` steps, with `0.0 EV` as the exact no-bias baseline.
 
-## WYSIWYG Brightness EV
+Brightness now changes the physical AUTO LONG exposure product by `2^EV`. The clean hidden AE result remains the unbiased baseline and SHORT remains derived from that unbiased V1.4.7 highlight-safe baseline. LONG then receives the requested Brightness EV with shutter time selected first; ISO solves only the residual needed to reach the target exposure product.
 
-A new **Brightness** control spans `-1.0 EV` to `+1.0 EV` in `0.1 EV` steps with `0.0 EV` as the no-brightness-change baseline.
+There is no Brightness multiplier in `hdr_display.frag` or `JpegFusion`. The live HDR Fused viewfinder therefore shows the actual biased SHORT/LONG pair, and the saved JPEG fuses the same frozen physical pair.
 
-SHORT/LONG reconstruction completes first. Brightness is then applied as one scene-linear exposure gain before the final HDR display fit. It therefore cannot change physical SHORT/LONG exposure, bracket width, highlight admission or fusion weights. The exact displayed EV is frozen at shutter and used by the saved fused JPEG so the live HDR Fused viewfinder and saved result share the same brightness intent.
+## 50/60 Hz anti-banding guard
 
-The V1.4.8-V1.4.10 global appearance-lift stage is removed. The V1.4.7 HDR knee/white-anchor/display-ceiling mapping is restored so requested brightness is retained through shadows and midtones while recovered highlight headroom is compressed into the display range rather than post-SDR clipped.
+The existing anti-banding ownership is preserved. Known 50 Hz lighting uses 10,000,000 ns half-cycle periods and known 60 Hz uses 8,333,333 ns periods. Brightness may step LONG to the next longer safe period only when that step can still satisfy the requested exposure product without requiring ISO below the sensor minimum. Unknown/PWM lighting retains the clean-AE baseline shutter and lets ISO solve the residual rather than inventing an unsafe intermediate shutter.
 
-## LONG-first highlight color ownership
+Forced 60 fps still caps live LONG exposure at 16,666,666 ns. At 60 Hz, a representative `1/120 ISO357` baseline with `+0.5 EV` therefore resolves to approximately `1/60 ISO252`, while SHORT remains on the unbiased highlight-safe baseline.
 
-V1.4.7's red/orange surface speckles and warm skin contamination are addressed without global chroma filtering. LONG remains the default color owner through the HDR handoff. SHORT chromaticity is admitted only when at least two LONG encoded channels are genuinely near clipping and SHORT itself has usable signal.
+## HDR and color ownership preserved
 
-The correction is strictly pixel-local: no neighborhood sampling, chroma blur, sharpening, cross-edge color transfer, extra GPU pass, texture or framebuffer is introduced. This preserves the foliage/sky and thin-edge protections required by prior Iris regressions.
+The V1.4.7 fixed 8x (~3 EV) baseline SHORT target remains the AUTO HDR reference when flicker is NONE. Any additional bracket width now comes only from explicit user Brightness raising LONG; the rejected V1.4.8-V1.4.10 aperture-derived automatic 3-4.25 EV widening does not return.
 
-## Preserved behavior
+LONG remains the default highlight chroma owner. SHORT color is admitted only when at least two LONG channels are truly near clipping and SHORT has usable signal. No neighborhood sampling, chroma blur, sharpening, cross-edge color transfer, extra GPU pass, texture or framebuffer is introduced.
 
-The successful V1.4.10 Camera2 session mechanics, immutable shutter-time SHORT/LONG controls, post-RAW boost ownership, producer-owned orientation, FOV-safe 30 fps path, optional cropped 60 fps path, RAW/JPEG capture set, DNG/JPEG saving, runtime logging and protected shader/runtime files remain unchanged unless explicitly listed in the V1.4.11 runtime allowlist.
+## Preserved mechanics
+
+The exact successful V1.4.11 immutable shutter-time capture controls, periodic clean AE remetering, post-RAW boost ownership, producer-owned orientation, FOV-safe 30 fps path, optional cropped 60 fps path, RAW/JPEG capture set, DNG/JPEG saving, runtime logging, full-index deterministic patch proof and GitHub Actions compiler/build order are inherited unchanged except for V1.4.12 authority/version/hash/regression pins.
 
 Runtime logs are written to:
 

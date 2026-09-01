@@ -11,7 +11,6 @@ uniform int haveNormal;
 uniform int haveShort;
 uniform int haveLong;
 uniform float exposureRatio;
-uniform float displayBrightnessEv;
 uniform vec2 fullFitScale;
 uniform vec2 splitFitScale;
 
@@ -201,11 +200,10 @@ void main() {
         0.995,
         longEncodedPeak) * shortConfidence;
 
-    // HDR reconstruction completes before display brightness is applied. The slider
-    // cannot change capture, bracket width, SHORT admission, or fusion ownership.
+    // Brightness is embodied by the physical LONG exposure pair before this shader.
+    // No post-fusion multiplier is allowed; live WYSIWYG uses the same HDR math as save.
     vec3 mergedScene = mix(longScene, shortScene, highlightWeight);
-    float brightnessGain = exp2(clamp(displayBrightnessEv, -1.0, 1.0));
-    vec3 displayLinear = adaptiveHdrToneMap(mergedScene * brightnessGain, ratio, bracketStops);
+    vec3 displayLinear = adaptiveHdrToneMap(mergedScene, ratio, bracketStops);
 
     // Preserve the recovered HDR luminance but keep LONG chroma through the handoff.
     // SHORT color is admitted only for true multi-channel LONG clipping. No spatial

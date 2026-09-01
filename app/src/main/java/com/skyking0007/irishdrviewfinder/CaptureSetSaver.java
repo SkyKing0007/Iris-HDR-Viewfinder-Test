@@ -218,7 +218,7 @@ final class CaptureSetSaver {
         double ratio = exposureRatio(shortData.result, longData.result);
         io.execute(() -> {
             try {
-                byte[] fused = JpegFusion.fuse(shortJpeg, longJpeg, ratio, displayBrightnessEv);
+                byte[] fused = JpegFusion.fuse(shortJpeg, longJpeg, ratio);
                 MediaStoreWriter.writeBytes(
                         context,
                         captureId + "_FUSED_HDR.jpg",
@@ -251,7 +251,8 @@ final class CaptureSetSaver {
                 root.put("short", resultJson(shortResult));
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));
-                root.put("displayBrightnessEv", displayBrightnessEv);
+                root.put("brightnessEv", displayBrightnessEv);
+                root.put("brightnessOwner", "AUTO_LONG_SHUTTER_PRIORITY");
                 Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
                 if (sensorOrientation != null) root.put("sensorOrientation", sensorOrientation);
                 JSONArray physicalIds = new JSONArray();

@@ -139,7 +139,6 @@ public final class MainActivity extends Activity implements CameraController.Lis
         buildUi();
         controller = new CameraController(this, this);
         glView.setInputSurfaceListener(controller::setPreviewSurface);
-        glView.setDisplayBrightnessEv(displayBrightnessEv);
         controller.setDisplayBrightnessEv(displayBrightnessEv);
         controller.setAllowCropped60Fps(allowCropped60Fps);
         controller.setAutoHdrExposure(autoHdrEnabled);
@@ -297,7 +296,6 @@ public final class MainActivity extends Activity implements CameraController.Lis
                 if (!fromUser || updatingControls) return;
                 displayBrightnessEv = brightnessEvForProgress(progress);
                 brightnessLabel.setText(brightnessLabelText(displayBrightnessEv));
-                glView.setDisplayBrightnessEv(displayBrightnessEv);
                 if (controller != null) controller.setDisplayBrightnessEv(displayBrightnessEv);
             }
 
@@ -509,7 +507,6 @@ public final class MainActivity extends Activity implements CameraController.Lis
         int previewRelation = (sensorOrientation - displayDegrees + 360) % 360;
         int jpegOrientation = (sensorOrientation - displayDegrees + 360) % 360;
         glView.setProducerOwnedOrientationDegrees(previewRelation);
-        glView.setDisplayBrightnessEv(displayBrightnessEv);
         controller.setDisplayBrightnessEv(displayBrightnessEv);
         controller.setJpegOrientationDegrees(jpegOrientation);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
@@ -624,14 +621,17 @@ public final class MainActivity extends Activity implements CameraController.Lis
         if (shortBar != null) shortBar.setEnabled(enabled);
         if (longBar != null) longBar.setEnabled(enabled);
         if (isoBar != null) isoBar.setEnabled(enabled);
+        if (brightnessBar != null) brightnessBar.setEnabled(!enabled);
         if (!enabled) {
             if (shortBar != null) shortBar.setAlpha(0.45f);
             if (longBar != null) longBar.setAlpha(0.45f);
             if (isoBar != null) isoBar.setAlpha(0.45f);
+            if (brightnessBar != null) brightnessBar.setAlpha(1.0f);
         } else {
             if (shortBar != null) shortBar.setAlpha(1.0f);
             if (longBar != null) longBar.setAlpha(1.0f);
             if (isoBar != null) isoBar.setAlpha(1.0f);
+            if (brightnessBar != null) brightnessBar.setAlpha(0.45f);
         }
     }
 

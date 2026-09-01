@@ -272,8 +272,20 @@ final class CameraController {
     }
 
     void setDisplayBrightnessEv(float ev) {
-        displayBrightnessEv = Math.max(-1.0f, Math.min(1.0f, ev));
-        RuntimeLogger.event("DISPLAY_BRIGHTNESS", String.format(Locale.US, "%.1fEV", displayBrightnessEv));
+        final float requestedEv = Math.max(-1.0f, Math.min(1.0f, ev));
+        cameraHandler.post(() -> {
+            displayBrightnessEv = requestedEv;
+            RuntimeLogger.event(
+                    "BRIGHTNESS_EV",
+                    String.format(Locale.US, "%+.1fEV owner=AUTO_LONG_SHUTTER_PRIORITY", displayBrightnessEv));
+            if (!autoHdrExposure || !haveAeSample || characteristics == null) return;
+            deriveAutoPairFromAnchorLocked();
+            publishAutoHdrSettingsLocked("BRIGHTNESS_UPDATE", true);
+            if (previewMode != PreviewMode.NORMAL && captureSession != null
+                    && !stillSessionActive && !autoMetering) {
+                applyPreviewRepeatingLocked();
+            }
+        });
     }
 
     void setAutoHdrExposure(boolean enabled) {
@@ -855,7 +867,7 @@ final class CameraController {
                         + " frozen short=" + exposureText(captureShortExposureNs) + " ISO" + captureShortIso
                         + " long=" + exposureText(captureLongExposureNs) + " ISO" + captureLongIso
                         + " boost=" + capturePostRawBoost + "%"
-                        + String.format(Locale.US, " brightness=%+.1fEV", captureDisplayBrightnessEv)
+                        + String.format(Locale.US, " brightnessIntent=%+.1fEV", captureDisplayBrightnessEv)
                         + " mode=" + (autoHdrExposure ? "AUTO" : manualSafetySummaryLocked()));
         listener.onStatus("Capturing matched SHORT/LONG RAW + JPEG set…");
         captureSaver = new CaptureSetSaver(
@@ -1344,23 +1356,7 @@ final class CameraController {
         haveAeSample = true;
         lastAutoAnchorNs = now;
         deriveAutoPairFromAnchorLocked();
-
-        double longProduct = Math.max(1.0, (double) autoLongExposureNs * autoLongIso);
-        double shortProduct = Math.max(1.0, (double) autoShortExposureNs * autoShortIso);
-        double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);
-        listener.onAutoHdrSettings(
-                autoShortExposureNs, autoShortIso, autoLongExposureNs, autoLongIso,
-                flickerLabel(sceneFlicker), bracketEv);
-        if (finishMeter || firstAnchor) {
-            RuntimeLogger.event(
-                    "AUTO_ANCHOR",
-                    "meter=" + exposureText(lastAeExposureNs) + " ISO" + lastAeIso
-                            + " boost=" + autoPostRawBoost + "%"
-                            + " -> short=" + exposureText(autoShortExposureNs) + " ISO" + autoShortIso
-                            + " long=" + exposureText(autoLongExposureNs) + " ISO" + autoLongIso
-                            + String.format(Locale.US, " bracket=%.2fEV", bracketEv)
-                            + " flicker=" + flickerLabel(sceneFlicker));
-        }
+        publishAutoHdrSettingsLocked("AUTO_ANCHOR", finishMeter || firstAnchor);
 
         if (finishMeter) {
             autoMetering = false;
@@ -1374,29 +1370,113 @@ final class CameraController {
         Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
         if (isoRange == null) return;
         int minIso = isoRange.getLower();
-        long longExposure = clampExposure(lastAeExposureNs);
-        int longIso = clampIso(lastAeIso);
+        long baseLongExposure = clampExposure(lastAeExposureNs);
+        int baseLongIso = clampIso(lastAeIso);
 
-        // Preserve the clean AE anchor while respecting a true 60-fps sensor cadence.
-        if (targetPreviewFps >= 60 && longExposure > SIXTY_FPS_DURATION_NS) {
-            double sensorProduct = (double) longExposure * longIso;
-            longExposure = clampExposure(SIXTY_FPS_DURATION_NS);
-            longIso = solveIsoForProduct(sensorProduct, longExposure);
+        // First reconstruct the exact clean-AE/V1.4.7 baseline pair. Brightness must
+        // never feed back into the hidden AE anchor or the SHORT highlight target.
+        if (targetPreviewFps >= 60 && baseLongExposure > SIXTY_FPS_DURATION_NS) {
+            double sensorProduct = (double) baseLongExposure * baseLongIso;
+            baseLongExposure = clampExposure(SIXTY_FPS_DURATION_NS);
+            baseLongIso = solveIsoForProduct(sensorProduct, baseLongExposure);
         }
-
-        autoLongExposureNs = longExposure;
-        autoLongIso = longIso;
+        double baseLongProduct = Math.max(1.0, (double) baseLongExposure * baseLongIso);
         autoShortIso = minIso;
         if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
-            double targetShortProduct = Math.max(1.0,
-                    ((double) autoLongExposureNs * autoLongIso) / HDR_BRACKET_RATIO);
+            double targetShortProduct = Math.max(1.0, baseLongProduct / HDR_BRACKET_RATIO);
             long desiredShort = Math.round(targetShortProduct / Math.max(1, minIso));
-            autoShortExposureNs = Math.min(autoLongExposureNs, clampExposure(desiredShort));
+            autoShortExposureNs = Math.min(baseLongExposure, clampExposure(desiredShort));
         } else {
-            // Proven V1.4.7 flicker-safe behavior: keep the exact LONG integration
-            // window and use sensor-minimum SHORT gain. The physical exposure-product
-            // separation remains whatever that safe combination provides.
-            autoShortExposureNs = autoLongExposureNs;
+            // Preserve the proven V1.4.7 anti-banding SHORT authority. Known 50/60-Hz
+            // and unknown/PWM lighting keep the un-biased clean-AE integration window
+            // for SHORT, with sensor-minimum gain. Brightness is LONG-only.
+            autoShortExposureNs = baseLongExposure;
+        }
+
+        // 0.0 EV is byte-for-byte policy-equivalent to the proven unbiased baseline.
+        // Do not quantize or re-solve a clean-AE pair when the user requested no bias.
+        if (Math.abs(displayBrightnessEv) < 0.0001f) {
+            autoLongExposureNs = baseLongExposure;
+            autoLongIso = baseLongIso;
+            return;
+        }
+
+        // V1.4.12 Brightness is capture exposure intent, not post-fusion gain. Target
+        // LONG exposure product changes by 2^EV; integration time supplies the change
+        // first, then ISO solves only the residual needed for the exact requested EV.
+        double requestedGain = Math.pow(2.0, Math.max(-1.0f, Math.min(1.0f, displayBrightnessEv)));
+        double targetLongProduct = Math.max(1.0, baseLongProduct * requestedGain);
+        long desiredLongExposure = clampExposure(Math.round(baseLongExposure * requestedGain));
+        long maxLongExposure = targetPreviewFps >= 60
+                ? SIXTY_FPS_DURATION_NS
+                : Math.max(manualFrameDurationNs, baseLongExposure);
+        desiredLongExposure = Math.min(desiredLongExposure, maxLongExposure);
+
+        autoLongExposureNs = chooseBrightnessLongExposureLocked(
+                baseLongExposure,
+                desiredLongExposure,
+                targetLongProduct,
+                minIso,
+                sceneFlicker,
+                maxLongExposure);
+        autoLongIso = solveIsoForProduct(targetLongProduct, autoLongExposureNs);
+    }
+
+    private long chooseBrightnessLongExposureLocked(
+            long baseExposureNs,
+            long desiredExposureNs,
+            double targetLongProduct,
+            int minIso,
+            int flicker,
+            long maxAllowedNs) {
+        long base = Math.min(clampExposure(baseExposureNs), maxAllowedNs);
+        long desired = Math.min(clampExposure(desiredExposureNs), maxAllowedNs);
+        long periodNs;
+        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ) {
+            periodNs = 10_000_000L;
+        } else if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) {
+            periodNs = 8_333_333L;
+        } else if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
+            return desired;
+        } else {
+            // Unknown/PWM keeps the proven baseline integration rather than inventing
+            // a potentially banding-prone intermediate shutter. ISO handles residual.
+            return base;
+        }
+
+        long maxPeriods = Math.max(1L, maxAllowedNs / periodNs);
+        long lowerPeriods = Math.max(1L, desired / periodNs);
+        long upperPeriods = Math.min(maxPeriods,
+                Math.max(1L, (long) Math.ceil(desired / (double) periodNs)));
+        long lower = clampExposure(Math.min(maxAllowedNs, lowerPeriods * periodNs));
+        long upper = clampExposure(Math.min(maxAllowedNs, upperPeriods * periodNs));
+
+        // Prefer the next longer anti-banding-safe shutter only when the requested
+        // exposure product can support it without demanding ISO below sensor minimum.
+        double upperIso = targetLongProduct / Math.max(1.0, upper);
+        if (upper >= desired && upperIso >= minIso) return upper;
+        return lower;
+    }
+
+    private void publishAutoHdrSettingsLocked(String event, boolean logEvent) {
+        double baseProduct = Math.max(1.0, (double) lastAeExposureNs * lastAeIso);
+        double longProduct = Math.max(1.0, (double) autoLongExposureNs * autoLongIso);
+        double shortProduct = Math.max(1.0, (double) autoShortExposureNs * autoShortIso);
+        double achievedBrightnessEv = Math.log(longProduct / baseProduct) / Math.log(2.0);
+        double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);
+        listener.onAutoHdrSettings(
+                autoShortExposureNs, autoShortIso, autoLongExposureNs, autoLongIso,
+                flickerLabel(sceneFlicker), bracketEv);
+        if (logEvent) {
+            RuntimeLogger.event(
+                    event,
+                    "meter=" + exposureText(lastAeExposureNs) + " ISO" + lastAeIso
+                            + " boost=" + autoPostRawBoost + "%"
+                            + String.format(Locale.US, " requestedBrightness=%+.1fEV achievedBrightness=%+.2fEV", displayBrightnessEv, achievedBrightnessEv)
+                            + " -> short=" + exposureText(autoShortExposureNs) + " ISO" + autoShortIso
+                            + " long=" + exposureText(autoLongExposureNs) + " ISO" + autoLongIso
+                            + String.format(Locale.US, " bracket=%.2fEV", bracketEv)
+                            + " flicker=" + flickerLabel(sceneFlicker));
         }
     }
 

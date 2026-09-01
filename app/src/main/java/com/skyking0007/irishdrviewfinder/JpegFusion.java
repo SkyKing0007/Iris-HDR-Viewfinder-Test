@@ -20,8 +20,7 @@ final class JpegFusion {
     static byte[] fuse(
             byte[] shortJpeg,
             byte[] longJpeg,
-            double exposureRatio,
-            float displayBrightnessEv) throws Exception {
+            double exposureRatio) throws Exception {
         Bitmap shortBitmap = decodeUpright(shortJpeg);
         Bitmap longBitmap = decodeUpright(longJpeg);
         if (shortBitmap == null || longBitmap == null) {
@@ -45,8 +44,6 @@ final class JpegFusion {
         int[] outPixels = new int[width * rowsPerStrip];
         float[] colorOwned = new float[3];
 
-        float clampedBrightnessEv = clamp(displayBrightnessEv, -1.0f, 1.0f);
-        float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
         float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 1.0f, 6.0f);
         float clipStart = clamp(0.90f + 0.01f * (bracketStops - 1.0f), 0.90f, 0.95f);
@@ -98,26 +95,24 @@ final class JpegFusion {
 
                 float scenePeak = Math.max(mr, Math.max(mg, mb));
 
-                // Brightness is a presentation exposure applied only after SHORT/LONG
-                // fusion has finished. It cannot change capture, exposure ratio, or
-                // highlight admission. V1.4.7 HDR mapping then spends only the
-                // highlight headroom needed to keep that requested lift displayable.
-                float boostedPeak = scenePeak * brightnessGain;
-                float mappedPeak = boostedPeak;
-                if (boostedPeak > HDR_KNEE) {
-                    if (boostedPeak <= 1.0f) {
-                        float t = clamp((boostedPeak - HDR_KNEE) / (1.0f - HDR_KNEE), 0.0f, 1.0f);
+                // V1.4.12 brightness is already embodied by the captured LONG frame.
+                // Fusion/tone mapping therefore sees only the physical HDR pair and
+                // never applies a second presentation exposure that can damage edges.
+                float mappedPeak = scenePeak;
+                if (scenePeak > HDR_KNEE) {
+                    if (scenePeak <= 1.0f) {
+                        float t = clamp((scenePeak - HDR_KNEE) / (1.0f - HDR_KNEE), 0.0f, 1.0f);
                         mappedPeak = HDR_KNEE + (whiteAnchor - HDR_KNEE) * t;
                     } else {
-                        float t = clamp(log2(boostedPeak) / headroomLog2, 0.0f, 1.0f);
+                        float t = clamp(log2(scenePeak) / headroomLog2, 0.0f, 1.0f);
                         mappedPeak = whiteAnchor + (displayCeiling - whiteAnchor) * t;
                     }
                 }
 
-                float toneScale = boostedPeak > 0.000001f ? mappedPeak / boostedPeak : 1.0f;
-                float tr = mr * brightnessGain * toneScale;
-                float tg = mg * brightnessGain * toneScale;
-                float tb = mb * brightnessGain * toneScale;
+                float toneScale = scenePeak > 0.000001f ? mappedPeak / scenePeak : 1.0f;
+                float tr = mr * toneScale;
+                float tg = mg * toneScale;
+                float tb = mb * toneScale;
 
                 // Preserve V1.4.7 HDR luminance while preventing normalized SHORT JPEG
                 // chroma errors from creating red/orange/pink speckles. LONG owns color
