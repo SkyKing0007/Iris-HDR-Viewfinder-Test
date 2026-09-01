@@ -11,13 +11,17 @@ final class FrameMeta {
     final long sensorTimestampNs;
     final long exposureTimeNs;
     final int iso;
+    final long exposureGeneration;
 
-    FrameMeta(String kind, long frameNumber, long sensorTimestampNs, long exposureTimeNs, int iso) {
+    FrameMeta(
+            String kind, long frameNumber, long sensorTimestampNs,
+            long exposureTimeNs, int iso, long exposureGeneration) {
         this.kind = kind;
         this.frameNumber = frameNumber;
         this.sensorTimestampNs = sensorTimestampNs;
         this.exposureTimeNs = exposureTimeNs;
         this.iso = iso;
+        this.exposureGeneration = exposureGeneration;
     }
 
     double exposureProduct() {

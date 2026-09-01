@@ -11,7 +11,8 @@ uniform int haveNormal;
 uniform int haveShort;
 uniform int haveLong;
 uniform float exposureRatio;
-uniform vec3 shortCalibration;
+uniform float shortCalibration;
+uniform float shortTemporalReliability;
 uniform vec2 fullFitScale;
 uniform vec2 splitFitScale;
 
@@ -69,6 +70,14 @@ float max3(vec3 value) {
     return max(value.r, max(value.g, value.b));
 }
 
+float min3(vec3 value) {
+    return min(value.r, min(value.g, value.b));
+}
+
+float second3(vec3 value) {
+    return value.r + value.g + value.b - min3(value) - max3(value);
+}
+
 float validChannelAgreement(vec3 longRgb, vec3 longScene, vec3 shortScene) {
     vec3 valid = vec3(1.0) - smoothstep(vec3(0.94), vec3(0.985), longRgb);
     float count = valid.r + valid.g + valid.b;
@@ -79,28 +88,40 @@ float validChannelAgreement(vec3 longRgb, vec3 longScene, vec3 shortScene) {
     return 1.0 - smoothstep(0.16, 0.55, disagreement);
 }
 
-vec3 recoverOnlyLostChannels(
+vec3 recoverStableHighlight(
         vec3 longRgb, vec3 shortRgb, vec3 longScene, vec3 shortScene) {
-    // LONG owns every channel until that channel is genuinely at the processed-JPEG
-    // ceiling and calibrated SHORT proves that more radiance exists. A saturated
-    // single chroma channel (especially skin red) is not enough by itself: recovery
-    // also requires a bright-luma highlight or a second near-clipped LONG channel.
-    vec3 longClip = smoothstep(vec3(0.985), vec3(0.999), longRgb);
-    vec3 shortUnclipped = vec3(1.0) - smoothstep(vec3(0.985), vec3(0.999), shortRgb);
-    vec3 radianceEvidence = smoothstep(
-        vec3(1.04), vec3(1.14),
-        shortScene / max(longScene, vec3(0.0005)));
+    // One current SHORT + one current LONG only. LONG owns the image. SHORT gets
+    // authority only for a coherent clipped highlight, only when all SHORT channels
+    // are comfortably below their processed ceiling, and only after consecutive
+    // live pairs prove that SHORT brightness/chroma is temporally stable.
     float longLuma = dot(longScene, vec3(0.2126, 0.7152, 0.0722));
-    float longSecond = longRgb.r + longRgb.g + longRgb.b
-        - min(longRgb.r, min(longRgb.g, longRgb.b))
-        - max(longRgb.r, max(longRgb.g, longRgb.b));
-    float highlightEligibility = max(
-        smoothstep(0.62, 0.72, longLuma),
-        smoothstep(0.94, 0.985, longSecond));
+    float shortLuma = dot(shortScene, vec3(0.2126, 0.7152, 0.0722));
+    float longSecond = second3(longRgb);
+    float longPeak = max3(longRgb);
+    float longHighlight = max(
+        smoothstep(0.965, 0.992, longSecond),
+        smoothstep(0.62, 0.78, longLuma) * smoothstep(0.985, 0.998, longPeak));
+    float shortSafe = 1.0 - smoothstep(0.965, 0.985, max3(shortRgb));
+    float radianceEvidence = smoothstep(
+        1.04, 1.14,
+        max3(shortScene) / max(max3(longScene), 0.0005));
     float agreement = validChannelAgreement(longRgb, longScene, shortScene);
-    vec3 weight = longClip * shortUnclipped * radianceEvidence
-        * agreement * highlightEligibility;
-    return mix(longScene, shortScene, clamp(weight, vec3(0.0), vec3(1.0)));
+    float weight = clamp(
+        longHighlight * shortSafe * radianceEvidence * agreement
+            * shortTemporalReliability,
+        0.0, 1.0);
+
+    // When LONG is a neutral multi-channel clip, mild SHORT ISP tint is not allowed
+    // to turn a white reflection/light pink or orange. Strong genuine SHORT chroma is
+    // retained; only weak/moderate tint on a neutral clipped LONG is neutralized.
+    float longSpread = max3(longRgb) - min3(longRgb);
+    float shortSpread = max3(shortRgb) - min3(shortRgb);
+    float neutralLongClip = (1.0 - smoothstep(0.015, 0.060, longSpread))
+        * smoothstep(0.985, 0.999, longSecond);
+    float mildShortTint = 1.0 - smoothstep(0.10, 0.25, shortSpread);
+    float neutralLock = neutralLongClip * mildShortTint;
+    vec3 trustedShort = mix(shortScene, vec3(shortLuma), neutralLock);
+    return mix(longScene, trustedShort, weight);
 }
 
 vec3 highlightOnlyToneMap(vec3 sceneLinear, float ratio) {
@@ -167,7 +188,7 @@ void main() {
     vec3 shortScene = srgbToLinear(shortRgb) * ratio * shortCalibration;
     vec3 longScene = srgbToLinear(longRgb);
 
-    vec3 mergedScene = recoverOnlyLostChannels(longRgb, shortRgb, longScene, shortScene);
+    vec3 mergedScene = recoverStableHighlight(longRgb, shortRgb, longScene, shortScene);
     vec3 displayLinear = highlightOnlyToneMap(mergedScene, ratio);
     vec3 displayRgb = linearToSrgb(displayLinear);
     outColor = vec4(clamp(displayRgb, 0.0, 1.0), 1.0);

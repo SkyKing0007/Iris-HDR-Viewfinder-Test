@@ -39,16 +39,18 @@ final class HdrGlView extends GLSurfaceView {
         final double shortExposureProduct;
         final double longExposureProduct;
         final double exposureRatio;
+        final long exposureGeneration;
         final float longMedianLinear;
         final float longP90Linear;
+        final float longP98Linear;
         final float longMeaningfulClipFraction;
         final float shortMeaningfulClipFraction;
         final float shortDarkFraction;
-        final float calibrationR;
-        final float calibrationG;
-        final float calibrationB;
+        final float calibration;
         final float overlapErrorEv;
         final int overlapSamples;
+        final boolean shortTemporalReliable;
+        final float shortTemporalUnstableFraction;
 
         SceneStats(
                 long shortFrameNumber,
@@ -56,31 +58,35 @@ final class HdrGlView extends GLSurfaceView {
                 double shortExposureProduct,
                 double longExposureProduct,
                 double exposureRatio,
+                long exposureGeneration,
                 float longMedianLinear,
                 float longP90Linear,
+                float longP98Linear,
                 float longMeaningfulClipFraction,
                 float shortMeaningfulClipFraction,
                 float shortDarkFraction,
-                float calibrationR,
-                float calibrationG,
-                float calibrationB,
+                float calibration,
                 float overlapErrorEv,
-                int overlapSamples) {
+                int overlapSamples,
+                boolean shortTemporalReliable,
+                float shortTemporalUnstableFraction) {
             this.shortFrameNumber = shortFrameNumber;
             this.longFrameNumber = longFrameNumber;
             this.shortExposureProduct = shortExposureProduct;
             this.longExposureProduct = longExposureProduct;
             this.exposureRatio = exposureRatio;
+            this.exposureGeneration = exposureGeneration;
             this.longMedianLinear = longMedianLinear;
             this.longP90Linear = longP90Linear;
+            this.longP98Linear = longP98Linear;
             this.longMeaningfulClipFraction = longMeaningfulClipFraction;
             this.shortMeaningfulClipFraction = shortMeaningfulClipFraction;
             this.shortDarkFraction = shortDarkFraction;
-            this.calibrationR = calibrationR;
-            this.calibrationG = calibrationG;
-            this.calibrationB = calibrationB;
+            this.calibration = calibration;
             this.overlapErrorEv = overlapErrorEv;
             this.overlapSamples = overlapSamples;
+            this.shortTemporalReliable = shortTemporalReliable;
+            this.shortTemporalUnstableFraction = shortTemporalUnstableFraction;
         }
     }
 
@@ -210,9 +216,15 @@ final class HdrGlView extends GLSurfaceView {
         private final ByteBuffer shortStatsBuffer = ByteBuffer.allocateDirect(STATS_PIXELS * 4)
                 .order(ByteOrder.nativeOrder());
         private long lastStatsNs;
-        private float shortCalibrationR = 1.0f;
-        private float shortCalibrationG = 1.0f;
-        private float shortCalibrationB = 1.0f;
+        private float shortCalibration = 1.0f;
+        private float shortTemporalReliability;
+        private int shortTemporalStableSamples;
+        private boolean havePreviousStats;
+        private final float[] previousLongLuma = new float[STATS_PIXELS];
+        private final float[] previousShortSceneR = new float[STATS_PIXELS];
+        private final float[] previousShortSceneG = new float[STATS_PIXELS];
+        private final float[] previousShortSceneB = new float[STATS_PIXELS];
+        private long highestExposureGenerationSeen;
         private Surface inputSurface;
         private int frameWidth;
         private int frameHeight;
@@ -301,9 +313,11 @@ final class HdrGlView extends GLSurfaceView {
             lastShortMeta = null;
             lastLongMeta = null;
             lastStatsNs = 0L;
-            shortCalibrationR = 1.0f;
-            shortCalibrationG = 1.0f;
-            shortCalibrationB = 1.0f;
+            shortCalibration = 1.0f;
+            shortTemporalReliability = 0.0f;
+            shortTemporalStableSamples = 0;
+            havePreviousStats = false;
+            highestExposureGenerationSeen = 0L;
             fpsWindowStartNs = System.nanoTime();
             fpsWindowInputFrames = 0;
             fpsWindowPairs = 0;
@@ -359,9 +373,11 @@ final class HdrGlView extends GLSurfaceView {
             lastShortMeta = null;
             lastLongMeta = null;
             lastStatsNs = 0L;
-            shortCalibrationR = 1.0f;
-            shortCalibrationG = 1.0f;
-            shortCalibrationB = 1.0f;
+            shortCalibration = 1.0f;
+            shortTemporalReliability = 0.0f;
+            shortTemporalStableSamples = 0;
+            havePreviousStats = false;
+            highestExposureGenerationSeen = 0L;
             metaByTimestamp.clear();
         }
 
@@ -436,15 +452,26 @@ final class HdrGlView extends GLSurfaceView {
             if (FrameMeta.METER.equals(meta.kind)) {
                 return;
             }
+            if (FrameMeta.SHORT.equals(meta.kind) || FrameMeta.LONG.equals(meta.kind)) {
+                if (meta.exposureGeneration < highestExposureGenerationSeen) return;
+                if (meta.exposureGeneration > highestExposureGenerationSeen) {
+                    highestExposureGenerationSeen = meta.exposureGeneration;
+                    haveStagingShort = false;
+                    stagingShortMeta = null;
+                }
+            }
             if (FrameMeta.SHORT.equals(meta.kind)) {
                 haveStagingShort = true;
                 stagingShortMeta = meta;
                 return;
             }
             if (FrameMeta.LONG.equals(meta.kind)) {
-                // Only publish a complete temporal pair. A LONG result without a
-                // preceding SHORT leaves the previous complete pair on screen.
+                // Publish only an exact exposure-generation pair. Old requests can
+                // remain in the Camera2 pipeline after an adaptive update; they may
+                // never be mixed with the new generation. Until a complete new pair
+                // arrives, the previous complete HDR image remains on screen.
                 if (haveStagingShort && stagingShortMeta != null
+                        && stagingShortMeta.exposureGeneration == meta.exposureGeneration
                         && meta.frameNumber > stagingShortMeta.frameNumber
                         && meta.frameNumber - stagingShortMeta.frameNumber <= 3) {
                     int oldShort = shortTexture;
@@ -532,9 +559,12 @@ final class HdrGlView extends GLSurfaceView {
                 ratio = (float) Math.max(1.0, Math.min(65_536.0, r));
             }
             GLES30.glUniform1f(GLES30.glGetUniformLocation(displayProgram, "exposureRatio"), ratio);
-            GLES30.glUniform3f(
+            GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "shortCalibration"),
-                    shortCalibrationR, shortCalibrationG, shortCalibrationB);
+                    shortCalibration);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "shortTemporalReliability"),
+                    shortTemporalReliability);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 
@@ -554,9 +584,8 @@ final class HdrGlView extends GLSurfaceView {
             SceneStats stats = calculateSceneStats(
                     longStatsBuffer, shortStatsBuffer, ratio,
                     lastShortMeta, lastLongMeta);
-            shortCalibrationR = stats.calibrationR;
-            shortCalibrationG = stats.calibrationG;
-            shortCalibrationB = stats.calibrationB;
+            shortCalibration = stats.calibration;
+            shortTemporalReliability = stats.shortTemporalReliable ? 1.0f : 0.0f;
             listener.onSceneStats(stats);
         }
 
@@ -582,9 +611,7 @@ final class HdrGlView extends GLSurfaceView {
                 ByteBuffer longPixels, ByteBuffer shortPixels, double ratio,
                 FrameMeta shortMeta, FrameMeta longMeta) {
             float[] longLumas = new float[STATS_PIXELS];
-            float[] ratioR = new float[STATS_PIXELS];
-            float[] ratioG = new float[STATS_PIXELS];
-            float[] ratioB = new float[STATS_PIXELS];
+            float[] calibrationRatios = new float[STATS_PIXELS];
             int overlapCount = 0;
             int longClipped = 0;
             int shortClipped = 0;
@@ -611,8 +638,8 @@ final class HdrGlView extends GLSurfaceView {
 
                 float longMax = Math.max(lr8, Math.max(lg8, lb8));
                 float longSecond = secondLargest(lr8, lg8, lb8);
-                if ((longMax >= MEANINGFUL_CLIP_CHANNEL
-                                && (longLuma >= MEANINGFUL_CLIP_LUMA || longSecond >= 0.985f))) {
+                if (longMax >= MEANINGFUL_CLIP_CHANNEL
+                        && (longLuma >= MEANINGFUL_CLIP_LUMA || longSecond >= 0.985f)) {
                     longClipped++;
                 }
                 float shortMax = Math.max(sr8, Math.max(sg8, sb8));
@@ -623,66 +650,102 @@ final class HdrGlView extends GLSurfaceView {
                 }
                 if (shortLuma < 0.008f) shortDark++;
 
-                float nsr = (float) (sr * ratio);
-                float nsg = (float) (sg * ratio);
-                float nsb = (float) (sb * ratio);
                 boolean validLong = lr8 > 0.08f && lg8 > 0.08f && lb8 > 0.08f
                         && lr8 < 0.90f && lg8 < 0.90f && lb8 < 0.90f;
                 boolean validShort = sr8 > 0.015f && sg8 > 0.015f && sb8 > 0.015f
                         && sr8 < 0.90f && sg8 < 0.90f && sb8 < 0.90f;
-                if (validLong && validShort
-                        && nsr > 0.015f && nsg > 0.015f && nsb > 0.015f) {
-                    ratioR[overlapCount] = clampCalibration(lr / nsr);
-                    ratioG[overlapCount] = clampCalibration(lg / nsg);
-                    ratioB[overlapCount] = clampCalibration(lb / nsb);
-                    overlapCount++;
+                float normalizedShortLuma = (float) (shortLuma * ratio);
+                if (validLong && validShort && normalizedShortLuma > 0.015f) {
+                    calibrationRatios[overlapCount++] = clampCalibration(
+                            longLuma / normalizedShortLuma);
                 }
             }
 
             Arrays.sort(longLumas);
             float median = percentileSorted(longLumas, 0.50f);
             float p90 = percentileSorted(longLumas, 0.90f);
-            float calR = medianPrefix(ratioR, overlapCount, 1.0f);
-            float calG = medianPrefix(ratioG, overlapCount, 1.0f);
-            float calB = medianPrefix(ratioB, overlapCount, 1.0f);
+            float p98 = percentileSorted(longLumas, 0.98f);
+            float calibration = medianPrefix(calibrationRatios, overlapCount, 1.0f);
 
             float[] errors = new float[Math.max(1, overlapCount)];
             int errorCount = 0;
-            if (overlapCount > 0) {
-                for (int i = 0; i < STATS_PIXELS; i++) {
-                    int o = i * 4;
-                    float lr8 = (longPixels.get(o) & 0xFF) / 255.0f;
-                    float lg8 = (longPixels.get(o + 1) & 0xFF) / 255.0f;
-                    float lb8 = (longPixels.get(o + 2) & 0xFF) / 255.0f;
-                    float sr8 = (shortPixels.get(o) & 0xFF) / 255.0f;
-                    float sg8 = (shortPixels.get(o + 1) & 0xFF) / 255.0f;
-                    float sb8 = (shortPixels.get(o + 2) & 0xFF) / 255.0f;
-                    boolean validLong = lr8 > 0.08f && lg8 > 0.08f && lb8 > 0.08f
-                            && lr8 < 0.90f && lg8 < 0.90f && lb8 < 0.90f;
-                    boolean validShort = sr8 > 0.015f && sg8 > 0.015f && sb8 > 0.015f
-                            && sr8 < 0.90f && sg8 < 0.90f && sb8 < 0.90f;
-                    if (!validLong || !validShort) continue;
-                    float ll = 0.2126f * srgbToLinear(lr8)
-                            + 0.7152f * srgbToLinear(lg8)
-                            + 0.0722f * srgbToLinear(lb8);
-                    float sl = 0.2126f * srgbToLinear(sr8) * calR
-                            + 0.7152f * srgbToLinear(sg8) * calG
-                            + 0.0722f * srgbToLinear(sb8) * calB;
-                    sl *= ratio;
-                    if (ll > 0.015f && sl > 0.015f && errorCount < errors.length) {
-                        errors[errorCount++] = (float) Math.abs(Math.log(sl / ll) / Math.log(2.0));
+            int temporalHighlightCells = 0;
+            int unstableHighlightCells = 0;
+            for (int i = 0; i < STATS_PIXELS; i++) {
+                int o = i * 4;
+                float lr8 = (longPixels.get(o) & 0xFF) / 255.0f;
+                float lg8 = (longPixels.get(o + 1) & 0xFF) / 255.0f;
+                float lb8 = (longPixels.get(o + 2) & 0xFF) / 255.0f;
+                float sr8 = (shortPixels.get(o) & 0xFF) / 255.0f;
+                float sg8 = (shortPixels.get(o + 1) & 0xFF) / 255.0f;
+                float sb8 = (shortPixels.get(o + 2) & 0xFF) / 255.0f;
+                float lr = srgbToLinear(lr8);
+                float lg = srgbToLinear(lg8);
+                float lb = srgbToLinear(lb8);
+                float sr = (float) (srgbToLinear(sr8) * ratio * calibration);
+                float sg = (float) (srgbToLinear(sg8) * ratio * calibration);
+                float sb = (float) (srgbToLinear(sb8) * ratio * calibration);
+                float ll = 0.2126f * lr + 0.7152f * lg + 0.0722f * lb;
+                float sl = 0.2126f * sr + 0.7152f * sg + 0.0722f * sb;
+
+                boolean validLong = lr8 > 0.08f && lg8 > 0.08f && lb8 > 0.08f
+                        && lr8 < 0.90f && lg8 < 0.90f && lb8 < 0.90f;
+                boolean validShort = sr8 > 0.015f && sg8 > 0.015f && sb8 > 0.015f
+                        && sr8 < 0.90f && sg8 < 0.90f && sb8 < 0.90f;
+                if (validLong && validShort && ll > 0.015f && sl > 0.015f
+                        && errorCount < errors.length) {
+                    errors[errorCount++] = (float) Math.abs(Math.log(sl / ll) / Math.log(2.0));
+                }
+
+                float longMax = Math.max(lr8, Math.max(lg8, lb8));
+                boolean highlight = longMax >= 0.97f || ll >= 0.55f;
+                if (havePreviousStats && highlight && ll > 0.01f && sl > 0.01f) {
+                    temporalHighlightCells++;
+                    float previousLl = previousLongLuma[i];
+                    float previousSl = 0.2126f * previousShortSceneR[i]
+                            + 0.7152f * previousShortSceneG[i]
+                            + 0.0722f * previousShortSceneB[i];
+                    boolean longStable = previousLl > 0.01f
+                            && Math.abs(Math.log(ll / previousLl) / Math.log(2.0)) <= 0.15;
+                    if (longStable && previousSl > 0.01f) {
+                        float shortDeltaEv = (float) Math.abs(
+                                Math.log(sl / previousSl) / Math.log(2.0));
+                        float invSl = 1.0f / Math.max(sl, 0.0005f);
+                        float invPrevSl = 1.0f / Math.max(previousSl, 0.0005f);
+                        float chromaDelta = Math.max(
+                                Math.abs(sr * invSl - previousShortSceneR[i] * invPrevSl),
+                                Math.max(
+                                        Math.abs(sg * invSl - previousShortSceneG[i] * invPrevSl),
+                                        Math.abs(sb * invSl - previousShortSceneB[i] * invPrevSl)));
+                        if (shortDeltaEv > 0.20f || chromaDelta > 0.08f) {
+                            unstableHighlightCells++;
+                        }
                     }
                 }
+                previousLongLuma[i] = ll;
+                previousShortSceneR[i] = sr;
+                previousShortSceneG[i] = sg;
+                previousShortSceneB[i] = sb;
             }
+            havePreviousStats = true;
+
             float overlapError = medianPrefix(errors, errorCount, 0.0f);
+            float unstableFraction = temporalHighlightCells == 0 ? 0.0f
+                    : unstableHighlightCells / (float) temporalHighlightCells;
+            boolean temporalCandidateReliable = unstableHighlightCells == 0;
+            if (temporalCandidateReliable) shortTemporalStableSamples++;
+            else shortTemporalStableSamples = 0;
+            boolean shortTemporalReliable = shortTemporalStableSamples >= 2;
+
             return new SceneStats(
                     shortMeta.frameNumber, longMeta.frameNumber,
                     shortMeta.exposureProduct(), longMeta.exposureProduct(), ratio,
-                    median, p90,
+                    longMeta.exposureGeneration, median, p90, p98,
                     longClipped / (float) STATS_PIXELS,
                     shortClipped / (float) STATS_PIXELS,
                     shortDark / (float) STATS_PIXELS,
-                    calR, calG, calB, overlapError, overlapCount);
+                    calibration, overlapError, overlapCount,
+                    shortTemporalReliable, unstableFraction);
         }
 
         private static float srgbToLinear(float value) {

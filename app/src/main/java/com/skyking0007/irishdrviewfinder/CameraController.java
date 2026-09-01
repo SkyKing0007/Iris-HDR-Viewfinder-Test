@@ -101,11 +101,20 @@ final class CameraController {
     private static final double AUTO_SHORT_CLIP_TARGET = 0.0025;
     private static final double MANUAL_SHORT_CLIP_TARGET = 0.0015;
     private static final double SHORT_CLIP_RELEASE_FRACTION = 0.0005;
-    private static final double BRACKET_STEP_UP_EV = 0.35;
+    private static final double BRACKET_STEP_UP_EV = 0.30;
     private static final double BRACKET_STEP_DOWN_EV = 0.15;
-    private static final double AUTO_MID_HYSTERESIS_EV = 0.10;
-    private static final double AUTO_MID_MAX_STEP_EV = 0.30;
-    private static final long ADAPTIVE_PAIR_UPDATE_MIN_NS = 180_000_000L;
+    private static final int BRACKET_CONFIRM_UP_SAMPLES = 2;
+    private static final int BRACKET_CONFIRM_DOWN_SAMPLES = 3;
+    private static final double AUTO_MID_HYSTERESIS_EV = 0.08;
+    private static final double AUTO_MID_MAX_STEP_EV = 0.20;
+    // Processed sRGB median target for the scene body at Brightness 0 EV. Clean AE
+    // remains the seed, but a highlight-protecting seed may not permanently define a
+    // dark room as the correct appearance. A strong p98 highlight tail raises the
+    // minimum target so LONG exposes the room and SHORT owns the clipped tail.
+    private static final double AUTO_BASE_BODY_TARGET_LINEAR = 0.030;
+    private static final double AUTO_HDR_BODY_TARGET_LINEAR = 0.045;
+    private static final double AUTO_HDR_BRIGHT_TAIL_LINEAR = 0.20;
+    private static final long ADAPTIVE_PAIR_UPDATE_MIN_NS = 200_000_000L;
     private static final int DEFAULT_POST_RAW_BOOST = 100;
     private static final int MAX_SRGB_CURVE_POINTS = 64;
     private static final double FOV_MAX_REPORTED_SCALE = 1.03;
@@ -172,6 +181,9 @@ final class CameraController {
     private double manualBracketFloorEv = AUTO_BRACKET_MIN_EV;
     private long lastAdaptiveStatsFrame = -1L;
     private long lastAdaptivePairUpdateNs;
+    private int bracketIncreaseEvidence;
+    private int bracketDecreaseEvidence;
+    private long previewExposureGeneration;
     private volatile int jpegOrientationDegrees;
     private long lastAeExposureNs = ONE_SECOND_NS / 60;
     private int lastAeIso = 400;
@@ -323,6 +335,8 @@ final class CameraController {
             autoMetering = false;
             lastAdaptiveStatsFrame = -1L;
             lastAdaptivePairUpdateNs = 0L;
+            bracketIncreaseEvidence = 0;
+            bracketDecreaseEvidence = 0;
             if (enabled) {
                 autoTargetBaseMidLuma = -1.0;
                 if (haveAeSample && autoSceneBaseLongProduct <= 0.0) {
@@ -663,10 +677,11 @@ final class CameraController {
                 int activeShortIso = activeShortIso();
                 int activeLongIso = activeLongIso();
                 int postRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;
+                long generation = ++previewExposureGeneration;
                 CaptureRequest shortRequest = buildManualPreviewRequest(
-                        TAG_SHORT, activeShortNs, activeShortIso, postRawBoost);
+                        FrameMeta.SHORT, generation, activeShortNs, activeShortIso, postRawBoost);
                 CaptureRequest longRequest = buildManualPreviewRequest(
-                        TAG_LONG, activeLongNs, activeLongIso, postRawBoost);
+                        FrameMeta.LONG, generation, activeLongNs, activeLongIso, postRawBoost);
                 captureSession.setRepeatingBurst(
                         Arrays.asList(shortRequest, longRequest),
                         previewCaptureCallback,
@@ -681,6 +696,7 @@ final class CameraController {
                                 + (autoHdrExposure ? " boost=" + postRawBoost + "%"
                                         : String.format(Locale.US, "  bracket=%.1fEV", manualEffectiveBracketEv))
                                 + "  flicker=" + flickerLabel(sceneFlicker)
+                                + "  generation=" + generation
                                 + "  target=" + targetPreviewFps + " sensor fps");
             }
         } catch (Throwable t) {
@@ -690,7 +706,8 @@ final class CameraController {
     }
 
     private CaptureRequest buildManualPreviewRequest(
-            String tag, long exposureNs, int iso, int postRawBoost) throws CameraAccessException {
+            String kind, long generation, long exposureNs, int iso, int postRawBoost)
+            throws CameraAccessException {
         CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
         builder.addTarget(previewSurface);
         configureManualRequest(builder, exposureNs, iso, postRawBoost, true);
@@ -700,7 +717,7 @@ final class CameraController {
             builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, aeFpsRange);
         }
         configurePreviewRotateAndCrop(builder);
-        builder.setTag(tag);
+        builder.setTag(new PreviewRequestTag(kind, generation));
         return builder.build();
     }
 
@@ -805,14 +822,20 @@ final class CameraController {
                         CaptureRequest request,
                         TotalCaptureResult result) {
                     Object tagObject = request.getTag();
-                    if (!(tagObject instanceof String)) return;
-                    String tag = (String) tagObject;
                     String kind;
-                    if (TAG_SHORT.equals(tag)) kind = FrameMeta.SHORT;
-                    else if (TAG_LONG.equals(tag)) kind = FrameMeta.LONG;
-                    else if (TAG_NORMAL.equals(tag)) kind = FrameMeta.NORMAL;
-                    else if (TAG_METER.equals(tag)) kind = FrameMeta.METER;
-                    else return;
+                    long generation = 0L;
+                    if (tagObject instanceof PreviewRequestTag) {
+                        PreviewRequestTag previewTag = (PreviewRequestTag) tagObject;
+                        kind = previewTag.kind;
+                        generation = previewTag.generation;
+                    } else if (tagObject instanceof String) {
+                        String tag = (String) tagObject;
+                        if (TAG_NORMAL.equals(tag)) kind = FrameMeta.NORMAL;
+                        else if (TAG_METER.equals(tag)) kind = FrameMeta.METER;
+                        else return;
+                    } else {
+                        return;
+                    }
 
                     Long timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP);
                     Long exposure = result.get(CaptureResult.SENSOR_EXPOSURE_TIME);
@@ -848,7 +871,8 @@ final class CameraController {
                         processAutoMeterResultLocked(result, exposure, iso, sceneFlicker);
                     }
 
-                    FrameMeta meta = new FrameMeta(kind, result.getFrameNumber(), timestamp, exposure, iso);
+                    FrameMeta meta = new FrameMeta(
+                            kind, result.getFrameNumber(), timestamp, exposure, iso, generation);
                     listener.onPreviewMeta(meta);
                     previewResultCount++;
                     Long frameDuration = result.get(CaptureResult.SENSOR_FRAME_DURATION);
@@ -1401,6 +1425,8 @@ final class CameraController {
         autoSceneBaseLongProduct = Math.max(1.0, (double) lastAeExposureNs * lastAeIso);
         autoTargetBaseMidLuma = -1.0;
         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
+        bracketIncreaseEvidence = 0;
+        bracketDecreaseEvidence = 0;
         deriveAdaptiveAutoPairLocked();
         publishAutoHdrSettingsLocked("AUTO_ANCHOR", finishMeter || firstAnchor);
 
@@ -1414,6 +1440,9 @@ final class CameraController {
     private void processHdrSceneStatsLocked(HdrGlView.SceneStats stats) {
         if (previewMode == PreviewMode.NORMAL || stillSessionActive || autoMetering
                 || characteristics == null || captureSession == null) return;
+        // Exposure updates are asynchronous. Never feed statistics from a retired
+        // generation back into the controller after a new SHORT/LONG pair was issued.
+        if (stats.exposureGeneration != previewExposureGeneration) return;
         if (stats.longFrameNumber <= lastAdaptiveStatsFrame) return;
         lastAdaptiveStatsFrame = stats.longFrameNumber;
 
@@ -1429,15 +1458,20 @@ final class CameraController {
             if (!haveAeSample) return;
             double brightnessGain = Math.pow(2.0, clampBrightnessEv(displayBrightnessEv));
             if (autoTargetBaseMidLuma <= 0.0 && stats.longMedianLinear > 0.003f) {
+                double observedBaseMid = stats.longMedianLinear / Math.max(0.03125, brightnessGain);
+                boolean hdrTail = stats.longP98Linear >= AUTO_HDR_BRIGHT_TAIL_LINEAR
+                        || stats.longMeaningfulClipFraction >= 0.001f;
+                double bodyFloor = hdrTail
+                        ? AUTO_HDR_BODY_TARGET_LINEAR : AUTO_BASE_BODY_TARGET_LINEAR;
                 autoTargetBaseMidLuma = clampDouble(
-                        stats.longMedianLinear / Math.max(0.03125, brightnessGain),
-                        0.015, 0.45);
+                        Math.max(observedBaseMid, bodyFloor), 0.015, 0.18);
                 RuntimeLogger.event(
                         "AUTO_LIVE_TARGET",
                         String.format(
                                 Locale.US,
-                                "baseMid=%.4f currentMid=%.4f brightness=%+.1fEV",
-                                autoTargetBaseMidLuma, stats.longMedianLinear, displayBrightnessEv));
+                                "baseMid=%.4f observed=%.4f p98=%.4f hdrTail=%s brightness=%+.1fEV",
+                                autoTargetBaseMidLuma, observedBaseMid, stats.longP98Linear,
+                                hdrTail, displayBrightnessEv));
             } else if (autoTargetBaseMidLuma > 0.0 && stats.longMedianLinear > 0.002f) {
                 double desiredMid = clampDouble(autoTargetBaseMidLuma * brightnessGain, 0.012, 0.80);
                 double errorEv = Math.log(desiredMid / stats.longMedianLinear) / Math.log(2.0);
@@ -1498,19 +1532,37 @@ final class CameraController {
         boolean meaningfulLongClip = stats.longMeaningfulClipFraction >= LONG_CLIP_TRIGGER_FRACTION;
         boolean shortFragile = stats.shortDarkFraction > 0.94f
                 || stats.overlapSamples < 12
-                || stats.overlapErrorEv > 0.50f;
+                || stats.overlapErrorEv > 0.50f
+                || !stats.shortTemporalReliable;
 
-        double next = currentEv;
-        if (meaningfulLongClip && stats.shortMeaningfulClipFraction > shortTarget) {
-            double qualityMax = shortFragile && stats.longMeaningfulClipFraction < 0.02f
-                    ? Math.min(maxEv, 4.5) : maxEv;
-            next = Math.min(qualityMax, currentEv + BRACKET_STEP_UP_EV);
-        } else if (!meaningfulLongClip
+        boolean wantsMoreHeadroom = meaningfulLongClip
+                && stats.shortMeaningfulClipFraction > shortTarget
+                && !shortFragile;
+        boolean wantsLessHeadroom = !meaningfulLongClip
                 && stats.shortMeaningfulClipFraction <= SHORT_CLIP_RELEASE_FRACTION
-                && currentEv > minEv) {
-            next = Math.max(minEv, currentEv - BRACKET_STEP_DOWN_EV);
+                && currentEv > minEv;
+
+        if (wantsMoreHeadroom) {
+            bracketIncreaseEvidence++;
+            bracketDecreaseEvidence = 0;
+            if (bracketIncreaseEvidence >= BRACKET_CONFIRM_UP_SAMPLES) {
+                bracketIncreaseEvidence = 0;
+                return clampDouble(
+                        Math.min(maxEv, currentEv + BRACKET_STEP_UP_EV), minEv, maxEv);
+            }
+        } else if (wantsLessHeadroom) {
+            bracketDecreaseEvidence++;
+            bracketIncreaseEvidence = 0;
+            if (bracketDecreaseEvidence >= BRACKET_CONFIRM_DOWN_SAMPLES) {
+                bracketDecreaseEvidence = 0;
+                return clampDouble(
+                        Math.max(minEv, currentEv - BRACKET_STEP_DOWN_EV), minEv, maxEv);
+            }
+        } else {
+            bracketIncreaseEvidence = 0;
+            bracketDecreaseEvidence = 0;
         }
-        return clampDouble(next, minEv, maxEv);
+        return clampDouble(currentEv, minEv, maxEv);
     }
 
     private void deriveAdaptiveAutoPairLocked() {
@@ -1545,13 +1597,16 @@ final class CameraController {
         desired = Math.min(desired, maxAllowed);
 
         long period = flickerPeriodNs(sceneFlicker);
-        if (period > 0L && desired >= period) {
-            long periods = Math.max(1L, Math.round(desired / (double) period));
+        if (period > 0L && maxAllowed >= period) {
+            // Known mains flicker: never cross below a full 50/60-Hz integration
+            // period merely to hit the appearance target. Use ISO for the residual.
+            long periods = Math.max(1L, Math.round(Math.max(desired, period) / (double) period));
             desired = Math.min(maxAllowed, clampExposure(periods * period));
         } else if (sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE
-                && period == 0L && gain >= 1.0) {
-            // Unknown/PWM: preserve the clean-AE integration and use gain rather than
-            // inventing a new potentially banding-prone shutter.
+                && period == 0L) {
+            // Unknown/PWM: preserve the clean-AE integration in both directions and
+            // move gain first. Changing shutter can expose a modulation phase that
+            // was absent from the clean bootstrap frame.
             desired = Math.min(maxAllowed, preferred);
         }
         int iso = solveIsoForProduct(targetProduct, desired);
@@ -1574,15 +1629,22 @@ final class CameraController {
         long desired = clampExposure(Math.round(targetProduct / Math.max(1, minIso)));
         desired = Math.min(desired, maxAllowed);
         long period = flickerPeriodNs(sceneFlicker);
-        if (period > 0L && desired >= period) {
-            long periods = Math.max(1L, desired / period);
-            long safe = clampExposure(periods * period);
-            safe = Math.min(safe, maxAllowed);
+        if (period > 0L) {
+            // A stable white clip is preferable to revealing LED/PWM phase. When a
+            // known 50/60-Hz source cannot be protected at one full safe period and
+            // sensor-minimum ISO, stop there and intentionally leave residual clipping.
+            long safe = Math.min(maxAllowed, clampExposure(period));
+            if (desired >= period) {
+                long periods = Math.max(1L, desired / period);
+                safe = Math.min(maxAllowed, clampExposure(periods * period));
+            }
             return new ExposureSetting(safe, solveIsoForProduct(targetProduct, safe));
         }
-        // If the scene genuinely needs more headroom than one full anti-banding period
-        // at sensor-minimum ISO can provide, use the required shorter SHORT exposure.
-        // Only clipped LONG highlight channels can consume this frame during fusion.
+        if (sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
+            // Unknown/PWM: keep SHORT on the same integration as LONG and obtain only
+            // the headroom available from lower ISO. Beyond that, leave a clean clip.
+            return new ExposureSetting(maxAllowed, solveIsoForProduct(targetProduct, maxAllowed));
+        }
         return new ExposureSetting(desired, minIso);
     }
 
@@ -1932,6 +1994,16 @@ final class CameraController {
         return range.getLower().equals(range.getUpper())
                 ? range.getUpper().toString()
                 : range.getLower() + "-" + range.getUpper();
+    }
+
+    private static final class PreviewRequestTag {
+        final String kind;
+        final long generation;
+
+        PreviewRequestTag(String kind, long generation) {
+            this.kind = kind;
+            this.generation = generation;
+        }
     }
 
     private static final class ExposureSetting {

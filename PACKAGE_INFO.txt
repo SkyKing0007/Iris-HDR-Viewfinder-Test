@@ -1,41 +1,43 @@
-Iris HDR Viewfinder Test V1.4.15
+Iris HDR Viewfinder Test V1.4.16
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.4.14 Actions compiled candidate
-- Commit: 93c43a08e32eed5a0ccb146b81dd3907b2474b39
-- Tree: c0cf1f2f513a89ad883e3f349decff6e034fef5a
-- Actions run: 33507939111
-- Artifact ID: 9800417423
-- Artifact digest: sha256:2b3d22d996c3f840b46587e4a0109830b76e9522a45a5a1ef83cf0ae908d14a1
-- APK SHA-256: cbdf715c516767b1e806e055dcb317a645d2d5b8674a727c00963bf1404d8107
-- Source-candidate TAR SHA-256: b3752fa393c498ee1879e358f96f16705abf6fe8a21a9fb2cd14a8622712ffb2
-- Runtime manifest SHA-256: b8be504ae0047eb7124a25c2dcbda3e64a47be8d63e2c0c31863d6b555523b6b
-- Repository manifest SHA-256: 375a6ef7aef7ab108c235c5d58c757c4b68997bac9ae29bc0d35f11b2e421ede
-- Regressions SHA-256: febf1c4a24c0e71ba6c6888384e1ce7e8158f0fcdda2e75132f678b1047c84ca
+- Exact successful V1.4.15 GitHub Actions compiled candidate/artifact
+- Commit: 947824b8f3bb7a9fd08aee4a79a013fbd54ea22c
+- Tree: 4a0a05ae34735f3d924cd62963511fc162d3796b
+- Actions run: 33528646507 (successful attempt 2)
+- Artifact ID: 9809011771
+- Artifact digest: sha256:e4f07e53b295a3c100212d7d0107fe3ca487831126297e3e63b4b1359a258def
+- APK SHA-256: a607126da05b87da994f9ac53e66a90a463e4b89c19329ae8f6b0b45fdce3491
+- Source-candidate TAR SHA-256: 4c76326bf2a89a382e51d8799345aee68f4fd1634c9ccb61c017f2dec92e55f6
+- Runtime manifest SHA-256: 9edafd4c1a59369434a9d792022c7124b1633bf1b4e2230912cf13ab18e31db0
+- Repository manifest SHA-256: 9459459d12600756063d26fd862e9333026dc281221dbcd51b8a2155e0900e3c
+- Regressions SHA-256: 1152e9214c5e4e4df933192ae128ee6c30e6f6080b33cfaacb44edf6a1fab2be
 
 Verification-mechanics authority:
-- Exact successful V1.4.14 Actions sequence/order.
-- Infrastructure delta is intentionally limited to V1.4.15 authority/version/hash/regression pins plus one stable-signing materialization step before compiler gates.
+- Exact successful V1.4.15 Actions sequence/order.
+- V1.4.16 adds no workflow step and changes no compiler/build/invariance ordering.
+- Infrastructure delta is authority/version/hash/regression pins only; stable-signing mechanics remain byte-semantically identical.
 - Real GLSL/Java/full assemble proof remains GitHub Actions authority.
 
-Architectural backup:
-backup-v1.4.14-pre-adaptive-hdr -> 93c43a08e32eed5a0ccb146b81dd3907b2474b39
+Backup policy:
+- No new backup for V1.4.16, per user request and localized forward/rollback proof.
+- Existing architectural backup remains:
+  backup-v1.4.14-pre-adaptive-hdr -> 93c43a08e32eed5a0ccb146b81dd3907b2474b39
 
-V1.4.15 runtime changed-file allowlist: exactly six files:
+V1.4.16 runtime changed-file allowlist: exactly five files:
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
 Infrastructure changed-file list:
 - .github/workflows/build.yml
 - BUILD_WORKFLOW_COPY.yml
 - scripts/verify_orientation.py
-- app/build.gradle.kts (version + stable test signing config)
+- app/build.gradle.kts (version only; stable signing unchanged)
 
 Documentation/hash pins:
 - PACKAGE_INFO.txt
@@ -43,24 +45,25 @@ Documentation/hash pins:
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-V1.4.15 architecture:
-- Initial clean AE is bootstrap-only. After first anchor, periodic 5-second AE takeover/remeter is removed.
-- Live SHORT/LONG burst remains active continuously; 32x24 displayed-pair scene statistics are sampled at low duty to update exposure without replacing the repeating HDR request.
-- LONG owns natural scene appearance and user Brightness intent (-5.0..+2.0 EV).
-- AUTO SHORT independently adapts only as dark as needed for meaningful highlight recovery, normally 3 EV and bounded to 5 EV.
-- Tiny clipped areas below the meaningful-area budget are allowed to remain clipped rather than forcing excessively dark/noisy SHORT.
-- MANUAL SAFE retains user LONG/brightness intent but uses the same adaptive SHORT logic, with slightly more headroom and a 6 EV ceiling.
-- SHORT quality guard uses dark-pixel fraction, overlap sample count, and overlap error to avoid blotchy over-normalization.
-- Capture metadata reports the new LONG_APPEARANCE_SHORT_ADAPTIVE ownership instead of the retired whole-pair label.
-- Live and saved fusion derive per-channel SHORT-to-LONG overlap calibration before recovery.
-- LONG remains complete RGB/color owner wherever valid. SHORT only recovers genuinely clipped channels when normalized SHORT proves extra radiance and valid channels agree.
-- V1.4.7 full-RGB one-bright-channel handoff is removed to address peach/orange skin and colored-white reflective contamination without global desaturation/chroma filtering.
-- Highlight tone mapping preserves LONG mids/appearance and compresses only the upper/recovered range.
-- 50/60-Hz, unknown/PWM, forced-60 cadence, FOV, orientation, DNG, frozen capture-set and logging protections remain.
+V1.4.16 architecture:
+- Live HDR remains exactly one current SHORT + one current LONG. Prior pairs may influence control/reliability hysteresis only; they never contribute image pixels.
+- Clean HAL AE remains bootstrap-only, but no longer defines a highlight-protected dark LONG as permanent 0EV reality.
+- LONG is the scene-appearance owner. A robust scene-body target uses median + p98 highlight-tail evidence; a strong HDR tail raises the 0EV body floor to 0.045 linear. The supplied V1.4.15 office failure measured 0.01462 linear median / 0.32845 p98 and therefore receives roughly +1.6EV correction at 0EV.
+- LONG adapts in at most 0.20EV live steps. Brightness remains -5.0..+2.0EV and biases LONG appearance, not bracket size.
+- SHORT independently owns highlight insurance. Bracket widening needs two consecutive stable meaningful-clipping samples; release needs three samples, preventing threshold chatter.
+- Every live SHORT/LONG request set carries an immutable exposure-generation ID. HdrGlView publishes only exact same-generation pairs, and CameraController rejects statistics from retired generations.
+- Live SHORT authority requires two consecutive temporally stable 32x24 samples. If normalized SHORT highlight brightness/chroma changes while LONG remains stable, fusion falls back to LONG until stability returns.
+- Known 50/60-Hz lighting never deliberately crosses below the safe 10ms/8.333333ms integration period merely for more HDR headroom. Unknown/PWM preserves clean-AE LONG integration and keeps SHORT on LONG integration while using ISO headroom first.
+- SHORT-to-LONG overlap calibration is one scalar luminance/exposure calibration, not independent R/G/B gains. This prevents exposure calibration from manufacturing hue shifts.
+- Highlight fusion is coherent RGB, not independent per-channel recovery. If any SHORT channel approaches the processed ceiling, SHORT is rejected for that highlight.
+- A neutral multi-channel clipped LONG suppresses weak/moderate SHORT ISP tint, so a white car reflection/ceiling light cannot become pink/orange merely because SHORT and LONG differ.
+- LONG remains full RGB owner everywhere outside genuinely lost highlights. A clean stable white clip is intentionally preferred to pink/orange/PWM/blotchy recovery.
+- Saved JPEG fusion mirrors scalar calibration, coherent SHORT safety, neutral-highlight protection and LONG-first tone ownership.
+- AUTO and MANUAL SAFE retain the same adaptive SHORT intelligence; MANUAL keeps user LONG intent with its existing extra headroom policy.
+- Orientation, FOV, cadence, DNG, sRGB, noise/edge ownership, frozen still pair, stable signing and capture protections are inherited unchanged.
 
 Stable updates:
-- GitHub Actions secret required once: IRIS_TEST_SIGNING_KEY_B64.
+- Reuses the V1.4.15 stable signing secret IRIS_TEST_SIGNING_KEY_B64; do not regenerate it.
 - Stable keystore SHA-256: 2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e
 - Signing certificate SHA-256: 53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8
-- The private key is NOT in the repository or upload ZIP.
-- V1.4.15 may require one final uninstall because V1.4.14 was signed with a different ephemeral debug certificate. Later builds using the same secret + higher versionCode should install directly as updates.
+- If V1.4.15 is installed with this signer, V1.4.16 versionCode 21 should install as a normal update after successful Actions proof.

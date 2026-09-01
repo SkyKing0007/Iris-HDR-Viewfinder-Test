@@ -1,52 +1,49 @@
-# Iris HDR Viewfinder Test V1.4.15
+# Iris HDR Viewfinder Test V1.4.16
 
-V1.4.15 is an architectural HDR correction built from the exact successful V1.4.14 GitHub Actions compiled candidate. It preserves the successful V1.4.14 build/compiler/invariance mechanics, orientation/FOV/cadence/DNG protections, compact navigation-safe UI, and Brightness range while replacing the periodic metering takeover and fixed whole-pair HDR exposure policy.
+V1.4.16 is a live two-exposure HDR stability/appearance correction built from the exact successful V1.4.15 GitHub Actions compiled candidate. The HDR image is still exactly **one current SHORT + one current LONG**; previous pairs are used only for controller/reliability hysteresis, never image stacking.
 
-## Continuous live AUTO metering
+## LONG represents the scene
 
-Clean HAL AE is now used only once as the initial natural-scene bootstrap. After that first anchor, the live HDR preview remains a continuous repeating SHORT/LONG burst; the old periodic five-second AE request takeover is removed.
+Clean HAL AE remains the bootstrap seed, but V1.4.16 no longer lets a highlight-protecting initial exposure permanently define a dark room as correct `0 EV` appearance.
 
-`HdrGlView` samples a small 32x24 representation of the already displayed SHORT/LONG pair every 200 ms. Those statistics are passed directly to `CameraController`, so scene changes can update exposure without replacing the repeating HDR stream or freezing the displayed pair.
+The live 32x24 statistics now include the LONG median and p98 highlight tail. LONG targets the main scene body, while bright windows/lights are allowed to clip into SHORT ownership. A strong HDR tail raises the `0 EV` scene-body floor to `0.045` linear. LONG convergence is limited to `0.20 EV` per live update so scene adaptation remains smooth.
 
-AUTO LONG exposure is adjusted in bounded steps of at most 0.30 EV per live update. This is intended to respond much faster than the old five-second remeter while avoiding abrupt multi-stop jumps.
+Brightness stays `-5.0 EV` to `+2.0 EV` in 0.1-EV steps and continues to bias LONG appearance. It does not directly widen the HDR bracket.
 
-## LONG appearance and adaptive SHORT are separate owners
+## SHORT is highlight insurance, not a second appearance image
 
-Brightness remains `-5.0 EV` through `+2.0 EV` in 0.1 EV steps. It now expresses desired LONG/scene appearance, not HDR bracket size.
+SHORT adapts only to recover meaningful highlight loss from LONG. Bracket widening requires two consecutive stable clipping samples; release requires three, so one noisy threshold crossing cannot make successive fused pairs alternate.
 
-AUTO begins near 3 EV of SHORT headroom, then uses measured highlight evidence to choose more headroom only when needed. AUTO is bounded to 5 EV. MANUAL SAFE uses the same adaptive engine, retains the user's LONG/Brightness intent and requested SHORT headroom floor, adds 0.25 EV of safety margin, and can reach 6 EV when justified.
+Every live exposure configuration has an immutable generation ID. Only SHORT and LONG from the exact same generation can become a displayed pair, and statistics from an older generation are discarded after new settings are issued.
 
-The policy deliberately targets a clean ~95% HDR result rather than forcing every tiny specular to recover. A meaningful clipped region must occupy at least about 0.5% of the sampled image before it can force SHORT darker. AUTO targets roughly 0.25% residual clipped SHORT area; MANUAL targets roughly 0.15%. Tiny isolated highlights may remain clipped instead of forcing SHORT into a noisy/quantized regime.
+## No pink/white/pink pulsation
 
-SHORT quality is also guarded by dark-pixel fraction, usable SHORT/LONG overlap count, and overlap radiometric error. Extreme headroom is not preferred when SHORT no longer contains trustworthy information.
+V1.4.16 treats SHORT reliability as part of HDR fusion:
 
-## Color-safe fusion
+- two consecutive 32x24 samples must show stable normalized SHORT highlight brightness/chroma before live SHORT gains highlight authority;
+- if LONG stays stable while SHORT varies, the viewfinder falls back to LONG until SHORT stabilizes again;
+- overlap calibration is one scalar exposure/luma correction, never independent R/G/B gains;
+- if any SHORT channel is near the processed ceiling, SHORT is rejected for that highlight;
+- neutral multi-channel LONG clips suppress weak/moderate SHORT ISP tint;
+- highlight recovery is coherent RGB rather than independent per-channel fill-in.
 
-V1.4.7's full-RGB handoff is removed. LONG remains the complete RGB/color owner wherever its data is still valid.
+The intended failure mode is therefore a **stable neutral white clip**, not a pink/orange/green/pulsating recovered highlight.
 
-SHORT is first exposure-normalized, then calibrated back to LONG from pixels where both exposures are valid. Calibration is per channel and bounded. A SHORT channel can replace a LONG channel only when:
+## Flicker/PWM safety
 
-- that LONG channel is genuinely at the processed-JPEG ceiling;
-- calibrated SHORT proves additional radiance;
-- SHORT itself is not clipped;
-- the other valid channels agree between exposures; and
-- the pixel is a real bright highlight or has a second near-clipped LONG channel.
+Known 50/60-Hz illumination keeps the full `10 ms` / `8.333333 ms` safe integration boundary instead of shortening SHORT simply to chase the last highlight stop. Unknown/PWM preserves the clean-AE LONG integration and uses ISO separation for SHORT before accepting residual clipping.
 
-That last requirement specifically protects saturated single-channel colors such as reddish/peach skin from pulling SHORT into otherwise valid faces. No neighborhood chroma blur or broad desaturation/color repair is added.
+This is deliberately conservative: clean stable clipping is preferred to revealing illumination modulation on ceiling lights, white surfaces, reflections or other bright areas.
 
-Tone mapping leaves normal LONG mids alone and compresses only the upper/recovered highlight range, using one RGB scale so recovered highlight hue is preserved.
+## Still capture
 
-## MANUAL SAFE remains adaptive
-
-HDR MANUAL is not locked to a fixed bracket. The user retains manual LONG/brightness intent and a SHORT headroom floor, while the same live highlight detector can make SHORT darker when the scene requires more protection. MANUAL carries slightly more headroom than AUTO rather than becoming a separate fixed-bracket algorithm.
+Pressing HDR Capture Set still freezes exactly one SHORT and one LONG exposure/ISO pair. Saved JPEG fusion uses the same LONG-first philosophy, scalar SHORT calibration, clipped-SHORT veto and neutral-highlight protection. RAW/DNG, JPEG orientation, FOV, cadence, sRGB and capture-session ownership are unchanged.
 
 ## Stable APK updates
 
-V1.4.15 introduces a stable test signing identity for GitHub Actions. The private PKCS12 key is not committed to this repository or included in the upload ZIP; Actions reconstructs it from the repository secret `IRIS_TEST_SIGNING_KEY_B64` and verifies both the keystore hash and final APK signing certificate before artifact export.
+V1.4.16 reuses the stable V1.4.15 GitHub Actions signing identity. Do not regenerate `IRIS_TEST_SIGNING_KEY_B64`.
 
-Because V1.4.14 and earlier successful GitHub debug APKs used ephemeral runner debug keys, installing V1.4.15 may require one final uninstall. After V1.4.15 is installed, future builds using the same secret and higher `versionCode` should install through Android's normal update path.
-
-Stable signing certificate SHA-256:
+Signing certificate SHA-256:
 
 `531aeed9ead79d28c424ad8f71a459b4ced8aff37e95c11bd295083fbb25c4e8`
 

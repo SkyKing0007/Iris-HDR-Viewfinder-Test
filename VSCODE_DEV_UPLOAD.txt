@@ -1,35 +1,34 @@
-Iris HDR Viewfinder Test V1.4.15 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.16 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 Base requirement:
-main must point exactly to successful V1.4.14 commit 93c43a08e32eed5a0ccb146b81dd3907b2474b39 before the V1.4.15 upload/commit.
+main must point exactly to successful V1.4.15 commit 947824b8f3bb7a9fd08aee4a79a013fbd54ea22c before the V1.4.16 upload/commit.
 
-Required architectural backup already created:
+Backup:
+No new V1.4.16 backup is required.
+Existing architectural backup remains:
 backup-v1.4.14-pre-adaptive-hdr -> 93c43a08e32eed5a0ccb146b81dd3907b2474b39
 
-ONE-TIME GITHUB ACTIONS SECRET REQUIRED BEFORE PUSHING V1.4.15:
-Repository -> Settings -> Secrets and variables -> Actions -> New repository secret
-Name: IRIS_TEST_SIGNING_KEY_B64
-Value: copy the entire contents of the separate file IRIS_TEST_SIGNING_KEY_B64_DO_NOT_UPLOAD.txt supplied by ChatGPT.
-DO NOT upload that separate secret file into the repository.
-
-V1.4.15 may require one final uninstall because V1.4.14 used a different ephemeral debug signing certificate. After V1.4.15 is installed, later builds signed with this same secret should install directly as updates.
+Signing:
+Reuse the existing repository secret IRIS_TEST_SIGNING_KEY_B64 created for V1.4.15.
+Do NOT regenerate the signing key and do NOT upload any private key file.
+If V1.4.15 is already installed with the stable signer, V1.4.16 versionCode 21 should install as a normal update after Actions succeeds.
 
 IMPORTANT:
 Upload ALL CONTENTS of the extracted FULL-UPLOAD ZIP into the repository root from a fresh vscode.dev workspace based on current remote main.
-Do not upload only app/ or only the six runtime files.
+Do not upload only app/ or only the five runtime files.
 
 Before committing, confirm BUILD_WORKFLOW_COPY.yml begins exactly with:
-name: Build Iris HDR Viewfinder Test V1.4.15
+name: Build Iris HDR Viewfinder Test V1.4.16
 and contains no commit-message text before that line.
 
 Suggested commit message:
-V1.4.15 continuous adaptive HDR + stable updates
+V1.4.16 stable two-frame HDR + natural LONG
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.15.
-Do not call V1.4.15 build-proven until the workflow succeeds and its compiled artifact/signing certificate are verified.
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.16.
+Do not call V1.4.16 build-proven until the workflow succeeds and its compiled artifact/signing certificate are verified.
 
 Runtime logs after installation:
 Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt

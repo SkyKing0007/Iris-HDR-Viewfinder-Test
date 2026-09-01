@@ -41,7 +41,7 @@ final class JpegFusion {
         int width = shortBitmap.getWidth();
         int height = shortBitmap.getHeight();
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
-        Calibration calibration = calibrateShortToLong(shortBitmap, longBitmap, ratio);
+        float calibration = calibrateShortToLong(shortBitmap, longBitmap, ratio);
 
         Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         int rowsPerStrip = 32;
@@ -66,9 +66,9 @@ final class JpegFusion {
                 int lg8 = (l >>> 8) & 0xFF;
                 int lb8 = l & 0xFF;
 
-                float sr = SRGB_TO_LINEAR[sr8] * ratio * calibration.r;
-                float sg = SRGB_TO_LINEAR[sg8] * ratio * calibration.g;
-                float sb = SRGB_TO_LINEAR[sb8] * ratio * calibration.b;
+                float sr = SRGB_TO_LINEAR[sr8] * ratio * calibration;
+                float sg = SRGB_TO_LINEAR[sg8] * ratio * calibration;
+                float sb = SRGB_TO_LINEAR[sb8] * ratio * calibration;
                 float lr = SRGB_TO_LINEAR[lr8];
                 float lg = SRGB_TO_LINEAR[lg8];
                 float lb = SRGB_TO_LINEAR[lb8];
@@ -80,20 +80,39 @@ final class JpegFusion {
                 float shortEncodedG = sg8 / 255.0f;
                 float shortEncodedB = sb8 / 255.0f;
                 float longLuma = 0.2126f * lr + 0.7152f * lg + 0.0722f * lb;
+                float shortLuma = 0.2126f * sr + 0.7152f * sg + 0.0722f * sb;
                 float longSecond = secondLargest(longEncodedR, longEncodedG, longEncodedB);
-                float highlightEligibility = smoothstep(0.62f, 0.72f, longLuma);
-                highlightEligibility = Math.max(
-                        highlightEligibility,
-                        smoothstep(0.94f, 0.985f, longSecond));
+                float longPeak = Math.max(longEncodedR, Math.max(longEncodedG, longEncodedB));
+                float longHighlight = Math.max(
+                        smoothstep(0.965f, 0.992f, longSecond),
+                        smoothstep(0.62f, 0.78f, longLuma)
+                                * smoothstep(0.985f, 0.998f, longPeak));
+                float shortPeak = Math.max(shortEncodedR, Math.max(shortEncodedG, shortEncodedB));
+                float shortSafe = 1.0f - smoothstep(0.965f, 0.985f, shortPeak);
+                float shortScenePeak = Math.max(sr, Math.max(sg, sb));
+                float longScenePeak = Math.max(lr, Math.max(lg, lb));
+                float radianceEvidence = smoothstep(
+                        1.04f, 1.14f, shortScenePeak / Math.max(longScenePeak, 0.0005f));
                 float agreement = validChannelAgreement(
                         longEncodedR, longEncodedG, longEncodedB,
                         lr, lg, lb, sr, sg, sb);
-                float mr = recoverChannel(
-                        longEncodedR, shortEncodedR, lr, sr, agreement * highlightEligibility);
-                float mg = recoverChannel(
-                        longEncodedG, shortEncodedG, lg, sg, agreement * highlightEligibility);
-                float mb = recoverChannel(
-                        longEncodedB, shortEncodedB, lb, sb, agreement * highlightEligibility);
+                float weight = clamp(
+                        longHighlight * shortSafe * radianceEvidence * agreement, 0.0f, 1.0f);
+
+                float longSpread = Math.max(longEncodedR, Math.max(longEncodedG, longEncodedB))
+                        - Math.min(longEncodedR, Math.min(longEncodedG, longEncodedB));
+                float shortSpread = Math.max(shortEncodedR, Math.max(shortEncodedG, shortEncodedB))
+                        - Math.min(shortEncodedR, Math.min(shortEncodedG, shortEncodedB));
+                float neutralLongClip = (1.0f - smoothstep(0.015f, 0.060f, longSpread))
+                        * smoothstep(0.985f, 0.999f, longSecond);
+                float mildShortTint = 1.0f - smoothstep(0.10f, 0.25f, shortSpread);
+                float neutralLock = neutralLongClip * mildShortTint;
+                float trustedSr = sr + (shortLuma - sr) * neutralLock;
+                float trustedSg = sg + (shortLuma - sg) * neutralLock;
+                float trustedSb = sb + (shortLuma - sb) * neutralLock;
+                float mr = lr + (trustedSr - lr) * weight;
+                float mg = lg + (trustedSg - lg) * weight;
+                float mb = lb + (trustedSb - lb) * weight;
 
                 float scenePeak = Math.max(mr, Math.max(mg, mb));
                 float mappedPeak = mappedPeak(scenePeak, ratio);
@@ -118,15 +137,13 @@ final class JpegFusion {
         return bytes.toByteArray();
     }
 
-    private static Calibration calibrateShortToLong(
+    private static float calibrateShortToLong(
             Bitmap shortBitmap, Bitmap longBitmap, float ratio) {
         int width = shortBitmap.getWidth();
         int height = shortBitmap.getHeight();
         int step = Math.max(4, Math.min(width, height) / 192);
         int maxSamples = ((width + step - 1) / step) * ((height + step - 1) / step);
-        float[] rr = new float[maxSamples];
-        float[] rg = new float[maxSamples];
-        float[] rb = new float[maxSamples];
+        float[] values = new float[maxSamples];
         int count = 0;
         int[] shortRow = new int[width];
         int[] longRow = new int[width];
@@ -135,54 +152,33 @@ final class JpegFusion {
             shortBitmap.getPixels(shortRow, 0, width, 0, y, width, 1);
             longBitmap.getPixels(longRow, 0, width, 0, y, width, 1);
             for (int x = step / 2; x < width; x += step) {
-                int s = shortRow[x];
-                int l = longRow[x];
-                int sr8 = (s >>> 16) & 0xFF;
-                int sg8 = (s >>> 8) & 0xFF;
-                int sb8 = s & 0xFF;
-                int lr8 = (l >>> 16) & 0xFF;
-                int lg8 = (l >>> 8) & 0xFF;
-                int lb8 = l & 0xFF;
+                int sp = shortRow[x];
+                int lp = longRow[x];
+                int sr8 = (sp >>> 16) & 0xFF;
+                int sg8 = (sp >>> 8) & 0xFF;
+                int sb8 = sp & 0xFF;
+                int lr8 = (lp >>> 16) & 0xFF;
+                int lg8 = (lp >>> 8) & 0xFF;
+                int lb8 = lp & 0xFF;
                 if (!overlapEncoded(sr8, sg8, sb8, lr8, lg8, lb8)) continue;
-
-                float sr = SRGB_TO_LINEAR[sr8] * ratio;
-                float sg = SRGB_TO_LINEAR[sg8] * ratio;
-                float sb = SRGB_TO_LINEAR[sb8] * ratio;
-                float lr = SRGB_TO_LINEAR[lr8];
-                float lg = SRGB_TO_LINEAR[lg8];
-                float lb = SRGB_TO_LINEAR[lb8];
-                if (sr <= 0.015f || sg <= 0.015f || sb <= 0.015f) continue;
-                rr[count] = clamp(lr / sr, 0.75f, 1.33f);
-                rg[count] = clamp(lg / sg, 0.75f, 1.33f);
-                rb[count] = clamp(lb / sb, 0.75f, 1.33f);
-                count++;
+                float sl = (0.2126f * SRGB_TO_LINEAR[sr8]
+                        + 0.7152f * SRGB_TO_LINEAR[sg8]
+                        + 0.0722f * SRGB_TO_LINEAR[sb8]) * ratio;
+                float ll = 0.2126f * SRGB_TO_LINEAR[lr8]
+                        + 0.7152f * SRGB_TO_LINEAR[lg8]
+                        + 0.0722f * SRGB_TO_LINEAR[lb8];
+                if (sl <= 0.015f || ll <= 0.015f) continue;
+                values[count++] = clamp(ll / sl, 0.75f, 1.33f);
             }
         }
-
-        if (count < 24) return new Calibration(1.0f, 1.0f, 1.0f, count);
-        return new Calibration(
-                medianPrefix(rr, count),
-                medianPrefix(rg, count),
-                medianPrefix(rb, count),
-                count);
+        if (count < 24) return 1.0f;
+        return medianPrefix(values, count);
     }
 
     private static boolean overlapEncoded(
             int sr, int sg, int sb, int lr, int lg, int lb) {
         return sr >= 4 && sg >= 4 && sb >= 4 && sr <= 230 && sg <= 230 && sb <= 230
                 && lr >= 20 && lg >= 20 && lb >= 20 && lr <= 230 && lg <= 230 && lb <= 230;
-    }
-
-    private static float recoverChannel(
-            float longEncoded, float shortEncoded,
-            float longLinear, float shortLinear, float agreement) {
-        float longClip = smoothstep(LONG_CLIP_START, LONG_CLIP_END, longEncoded);
-        float shortUnclipped = 1.0f - smoothstep(SHORT_CLIP_START, SHORT_CLIP_END, shortEncoded);
-        float evidence = smoothstep(
-                1.04f, 1.14f,
-                shortLinear / Math.max(longLinear, 0.0005f));
-        float weight = clamp(longClip * shortUnclipped * evidence * agreement, 0.0f, 1.0f);
-        return longLinear + (shortLinear - longLinear) * weight;
     }
 
     private static float validChannelAgreement(
@@ -317,17 +313,4 @@ final class JpegFusion {
         }
     }
 
-    private static final class Calibration {
-        final float r;
-        final float g;
-        final float b;
-        final int samples;
-
-        Calibration(float r, float g, float b, int samples) {
-            this.r = r;
-            this.g = g;
-            this.b = b;
-            this.samples = samples;
-        }
-    }
 }
