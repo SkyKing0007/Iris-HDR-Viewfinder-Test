@@ -1,4 +1,4 @@
-Vname: Build Iris HDR Viewfinder Test V1.4.17
+name: Build Iris HDR Viewfinder Test V1.4.17
 
 on:
   workflow_dispatch:
@@ -26,7 +26,7 @@ jobs:
       - name: Checkout exact candidate history
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
       - name: Download exact successful V1.4.16 Actions authority artifact
         uses: actions/download-artifact@v4
@@ -42,6 +42,8 @@ jobs:
           set -euo pipefail
           authority='ef7accc0b3824bc5d1cb0d61132b98cfd7242722'
           authority_tree='efd62a9e36915000339f540f96b23b0d81c49199'
+          failed_candidate='e7821c20e131577bb2a76184b06fb8e6b1ef3a8e'
+          failed_candidate_tree='00a9365ba952d1eb96fc7dcedacb95b3095fdfa5'
           backup='backup-v1.4.14-pre-adaptive-hdr'
           backup_authority='93c43a08e32eed5a0ccb146b81dd3907b2474b39'
           authority_dir="$RUNNER_TEMP/v1416-authority-artifact"
@@ -49,11 +51,33 @@ jobs:
 
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'main'
-          test "$(git rev-parse HEAD^)" = "$authority"
+          test "$(git rev-parse HEAD^)" = "$failed_candidate"
+          test "$(git rev-parse "$failed_candidate^{tree}")" = "$failed_candidate_tree"
+          test "$(git rev-parse HEAD^^)" = "$authority"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           backup_sha="$(git ls-remote origin "refs/heads/$backup" | awk '{print $1}')"
           test "$backup_sha" = "$backup_authority"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
+          python3 - "$failed_candidate" <<'PY'
+          import subprocess, sys
+          failed = sys.argv[1]
+          expected = {
+              '.github/workflows/build.yml': 'M',
+              'BUILD_WORKFLOW_COPY.yml': 'M',
+              'PACKAGE_MANIFEST_SHA256.txt': 'M',
+          }
+          raw = subprocess.check_output(['git', 'diff', '--name-status', failed, 'HEAD'], text=True).splitlines()
+          actual = {}
+          for line in raw:
+              parts = line.split('\t')
+              actual[parts[-1]] = parts[0][0]
+          if actual != expected:
+              raise SystemExit(f'V1.4.17 V1.1 CORRECTION ALLOWLIST FAIL: actual={actual} expected={expected}')
+          runtime = subprocess.check_output(['git', 'diff', '--name-only', failed, 'HEAD', '--', 'app/src'], text=True).strip()
+          if runtime:
+              raise SystemExit(f'V1.4.17 V1.1 RUNTIME INVARIANCE FAIL: {runtime}')
+          print('V1.4.17 V1.1 INFRASTRUCTURE-ONLY CORRECTION: PASS')
+          PY
           grep -Fq 'versionCode = 22' app/build.gradle.kts
           grep -Fq 'versionName = "1.0-v1.4.17"' app/build.gradle.kts
           grep -Fq 'compileSdk = 37' app/build.gradle.kts
@@ -479,6 +503,7 @@ jobs:
           069 - Live fusion is a soft masked compositor: LONG remains untouched outside true highlight need; SHORT enters only where LONG is failing and SHORT radiance is locally trustworthy.
           070 - SHORT luminance/detail and SHORT chroma are separate authorities. Bad color may not veto good detail; bad temporal luminance may not be pasted into LONG.
           071 - Recovered SHORT highlights receive a useful highlight-only display range rather than being compressed into a near-white sliver; this mapping may not tone-map the ordinary LONG scene body.
+          073 - V1.4.17 V1 infrastructure-copy failure: .github/workflows/build.yml and BUILD_WORKFLOW_COPY.yml must be byte-identical before compilers; V1.1 correction changes no app/src runtime bytes.
           REGRESSIONS
           sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.17-debug.apk \
                     output/Iris-HDR-Viewfinder-Test-V1.4.17-source-candidate.tar \
