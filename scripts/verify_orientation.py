@@ -17,7 +17,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.9 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.10 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -213,17 +213,23 @@ require('toneScale = scenePeak > 0.000001f ? mappedPeak / scenePeak : 1.0f;' in 
         "saved HDR compression must use one hue-preserving RGB scale")
 require('adaptiveAppearanceLift' in hdr_shader and 'appearanceLiftScale' in fusion,
         "live/save post-fusion appearance lift missing")
-require('0.70 * perceptualY * (1.0 - perceptualY)' in hdr_shader
-        and '0.70f * perceptualY * (1.0f - perceptualY)' in fusion,
-        "live/save appearance curve constants must match")
-require('(perceptualY - 0.20) / 0.11' in hdr_shader
-        and '(perceptualY - 0.20f) / 0.11f' in fusion,
-        "appearance lift must target lower/mid tones consistently")
+require('1.50 * perceptualY * perceptualY * oneMinusY2 * oneMinusY2' in hdr_shader
+        and '1.50f * perceptualY * perceptualY * oneMinusY2 * oneMinusY2' in fusion,
+        "live/save monotonic appearance curve constants must match")
+require('float oneMinusY2 = oneMinusY * oneMinusY;' in hdr_shader
+        and 'float oneMinusY2 = oneMinusY * oneMinusY;' in fusion,
+        "appearance lift polynomial must match live/save without Gaussian exp")
 require('displayLinear = adaptiveAppearanceLift(displayLinear);' in hdr_shader,
         "brightness lift must occur after completed V1.4.7 HDR reconstruction")
-require('0.82 - 0.04 * (bracketStops - 1.0)' in hdr_shader
-        and '0.82f - 0.04f * (bracketStops - 1.0f)' in fusion,
-        "live/save display headroom must adapt to bracket width")
+require('const float knee = 0.78;' in hdr_shader and 'HDR_KNEE = 0.78f' in fusion,
+        "live/save HDR knee must match V1.4.10")
+require('0.95 - 0.015 * (bracketStops - 1.0)' in hdr_shader
+        and '0.95f - 0.015f * (bracketStops - 1.0f)' in fusion
+        and '0.88, 0.95' in hdr_shader and '0.88f, 0.95f' in fusion,
+        "live/save monotonic HDR white-anchor policy must match")
+require('whiteAnchor + 0.065' in hdr_shader and 'whiteAnchor + 0.065f' in fusion
+        and '0.965, 0.995' in hdr_shader and '0.965f, 0.995f' in fusion,
+        "live/save HDR display ceiling policy must match")
 require('65_536.0' in fusion and '65_536.0' in saver and '65_536.0' in gl,
         "widened exposure normalization must be consistent live/save/metadata")
 require('smoothstep(0.68, 0.94' not in hdr_shader and 'smoothstep(0.68f, 0.94f' not in fusion,
@@ -478,8 +484,8 @@ def v147_policy(exposure_ratio):
     ratio = max(1.0, min(65536.0, exposure_ratio))
     stops = max(1.0, min(6.0, math.log(max(ratio, 1.0001), 2.0)))
     clip_start = max(0.90, min(0.95, 0.90 + 0.01 * (stops - 1.0)))
-    white_anchor = max(0.68, min(0.82, 0.82 - 0.04 * (stops - 1.0)))
-    display_ceiling = max(0.84, min(0.96, white_anchor + 0.14))
+    white_anchor = max(0.88, min(0.95, 0.95 - 0.015 * (stops - 1.0)))
+    display_ceiling = max(0.965, min(0.995, white_anchor + 0.065))
     return ratio, stops, clip_start, white_anchor, display_ceiling
 
 def smoothstep_math(edge0, edge1, value):
@@ -488,7 +494,7 @@ def smoothstep_math(edge0, edge1, value):
 
 def map_peak_math(scene_peak, exposure_ratio):
     ratio, stops, _, white_anchor, display_ceiling = v147_policy(exposure_ratio)
-    knee = 0.70
+    knee = 0.78
     if scene_peak <= knee:
         return scene_peak
     if scene_peak <= 1.0:
@@ -506,20 +512,20 @@ require(smoothstep_math(clip8, 0.995, 1.0) == 1.0,
         "fully clipped LONG highlight must hand off to normalized SHORT")
 require(map_peak_math(0.50, 8.0) == 0.50,
         "HDR mapping must leave LONG-owned shadow/midtone values unchanged")
-require(map_peak_math(1.0, 8.0) < 0.80,
-        "LONG white must reserve visible code space for recovered HDR detail")
-require(map_peak_math(2.0, 8.0) < map_peak_math(4.0, 8.0) < map_peak_math(8.0, 8.0) < 0.90,
-        "recovered 1/2/3-stop highlight structure must remain separated below display white")
+require(0.90 < map_peak_math(1.0, 8.0) < 0.94,
+        "LONG white must stay bright while reserving code space for recovered HDR detail")
+require(map_peak_math(1.0, 8.0) < map_peak_math(2.0, 8.0) < map_peak_math(4.0, 8.0) < map_peak_math(8.0, 8.0) < 0.995,
+        "recovered 0/1/2/3-stop highlight structure must remain strictly ordered below display white")
 _, _, clip64, anchor64, ceiling64 = v147_policy(64.0)
 require(clip64 > clip8 and anchor64 <= anchor8 and ceiling64 <= ceiling8,
         "wider brackets must adapt by protecting SHORT noise and reserving more display headroom")
 
-# 038 - V1.4.8 pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.8' in workflow
-        and 'run-id: 33435639235' in workflow,
-        "workflow must download the exact successful V1.4.8 Actions authority")
-require('run-id: 33424140112' not in workflow,
-        "stale V1.4.7 Actions run-id must never be reused for V1.4.8 authority")
+# 038 / 042 - Exact current pre-handoff authority pin regression.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.9' in workflow
+        and 'run-id: 33445772128' in workflow,
+        "workflow must download the exact successful V1.4.9 Actions authority")
+require('run-id: 33435639235' not in workflow,
+        "V1.4.10 must not silently fall back to the older V1.4.8 authority run")
 
 # 037 - V1.4.8 two-device adaptive exposure/appearance regression.
 def target_bracket_ev(aperture):
@@ -559,24 +565,27 @@ def srgb_to_linear_math(v):
     return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
 
 def appearance_map_encoded(v):
-    centered = (v - 0.20) / 0.11
-    return max(0.0, min(1.0, v + 0.70 * v * (1.0 - v) * math.exp(-(centered * centered))))
+    one_minus = 1.0 - v
+    return max(0.0, min(1.0, v + 1.50 * v * v * one_minus ** 4))
 
 samples = [i / 2000.0 for i in range(2001)]
 mapped = [appearance_map_encoded(v) for v in samples]
-require(all(mapped[i + 1] >= mapped[i] - 1e-12 for i in range(len(mapped) - 1)),
-        "appearance lift must remain monotonic and never reverse local contrast")
+slopes = [(mapped[i + 1] - mapped[i]) * 2000.0 for i in range(len(mapped) - 1)]
+require(min(slopes) > 0.89,
+        "appearance lift must preserve a strong positive local slope with no plateau/reversal")
+require(max(slopes) < 1.17,
+        "appearance lift must not aggressively expand local noise/quantization contrast")
 def gain_ev(v):
     out = appearance_map_encoded(v)
     return math.log(srgb_to_linear_math(out) / srgb_to_linear_math(v), 2.0)
-require(1.0 < gain_ev(0.22) < 1.4,
-        "darker Xiaomi-like lower midtones must receive the intended stock-parity lift")
-require(0.25 < gain_ev(0.31) < 0.70,
-        "brighter Motorola-like lower midtones must receive a smaller balanced lift")
-require(gain_ev(0.05) < 0.20,
-        "deep shadows must remain effectively protected from noise-revealing lift")
-require(abs(appearance_map_encoded(0.60) - 0.60) < 1e-5,
-        "recovered highlights must converge back to the V1.4.7 appearance")
+require(0.25 < gain_ev(0.22) < 0.40,
+        "darker lower midtones must retain a bounded appearance lift")
+require(0.20 < gain_ev(0.31) < 0.38,
+        "brighter lower midtones must retain a bounded balanced lift")
+require(gain_ev(0.05) < 0.12,
+        "deep shadows must remain protected from noise-revealing lift")
+require(gain_ev(0.80) < 0.02,
+        "highlights must converge closely back to the pre-appearance HDR result")
 
 # 039 - Exact V1.4.8 muted-color regression and the earlier unsupported-highlight-color failure.
 # SHORT remains part of every HDR reliability calculation, but source-color repair is
@@ -763,4 +772,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.9 REGRESSION PASS: adaptive headroom/brightness, highlight-domain color, frozen capture pair, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.10 REGRESSION PASS: adaptive headroom/brightness, highlight-domain color, frozen capture pair, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")

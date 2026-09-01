@@ -1,26 +1,30 @@
-# Iris HDR Viewfinder Test V1.4.9
+# Iris HDR Viewfinder Test V1.4.10
 
-V1.4.9 is a corrective build on the successful V1.4.8 compiled candidate. V1.4.8's adaptive brightness and wide-aperture AUTO SHORT headroom are retained, while three on-device regressions are corrected: muted FUSED color, a shutter/remeter exposure race, and slow full-resolution saved fusion.
+V1.4.10 is a localized image-quality correction on the exact successful V1.4.9 compiled candidate. Capture timing, SHORT/LONG exposure ownership, highlight-color reconstruction, Camera2 routing, FOV/FPS behavior, DNG/JPEG handling and UI remain unchanged.
 
-## HDR and color ownership
+## Monotonic appearance mapping
 
-SHORT remains part of every HDR reliability decision. LONG continues to own clean shadows and ordinary midtones; normalized SHORT progressively contributes as LONG approaches saturation. The V1.4.8 global encoded-chroma limiter is removed because it muted ordinary color across much of the image.
+V1.4.9's narrow lower-mid Gaussian appearance bump could expand dark tonal differences and then collapse adjacent lower-mid levels into a nearly flat output region. V1.4.10 replaces that bump with a broad pointwise perceptual lift:
 
-Source-color reconstruction is now restricted to the actual highlight handoff. Where SHORT is contributing to HDR recovery, the already-solved FUSED luminance is preserved while chromaticity transitions toward the unscaled SHORT/LONG ISP source color. Low/moderate source chroma is not multiplied by the full display gain, strong source-supported color can retain its saturation, and gamut fitting is performed around fixed fused luma rather than by independent RGB clipping.
+`y' = y + 1.50 * y^2 * (1 - y)^4`
 
-This is content-agnostic and cross-device: no skin/white/foliage classifier, device model table, universal sensor color matrix, extra GPU pass, extra texture/framebuffer, or neighborhood filter is introduced.
+For normalized perceptual luma `y` in `[0,1]`, its derivative is strictly positive and bounded. The mapping therefore preserves tonal ordering and cannot create the V1.4.9 plateau/reversal behavior. The saved JPEG path still precomputes the sRGB transfer into a LUT, so its inner pixel loop does not add per-pixel exp/pow work.
 
-## Frozen shutter-time capture controls
+## Monotonic HDR highlight compression
 
-At shutter press V1.4.9 snapshots SHORT exposure/ISO, LONG exposure/ISO, and post-RAW sensitivity boost before closing the preview session. A clean-AE remeter result arriving while the temporary RAW/JPEG still session is being configured is ignored for that in-flight HDR set and can only affect subsequent preview/captures.
+V1.4.9 allowed the adaptive white anchor to approach or fall below the fixed HDR knee on wider brackets, causing severe highlight flattening and allowing non-monotonic mapping. V1.4.10 raises the knee to `0.78` linear and constrains the adaptive white anchor to `0.88..0.95`, always above the knee. The above-white display ceiling remains above the white anchor for every supported bracket width.
 
-## Faster saved fusion
+This keeps recovered highlights bright while preserving their ordering and separation instead of compressing a large bright range into only a few display levels.
 
-V1.4.8's appearance curve is mathematically retained. For the saved full-resolution JPEG path its expensive exp/pow work is precomputed into a LUT, and the inner pixel loop contains no per-pixel exp/pow/sqrt or float-array allocation. Runtime logging now separates sensor-input acquisition time from total save/fusion time.
+## Edge-artifact protection
 
-## Preserved V1.4.8 behavior
+The correction introduces no neighborhood sampling, edge filter, sharpening, chroma spread or cross-edge operation. Both HDR tone mapping and appearance lift remain pointwise and apply one scalar to all RGB channels, preserving RGB ratios. The proven V1.4.9 SHORT/LONG highlight-color handoff is byte-for-byte unchanged.
 
-Adaptive brightness, aperture/capability-derived AUTO SHORT headroom, LONG-owned clean shadows, full-RGB near-clipping SHORT handoff, bracket-aware HDR compression, explicit Camera2 sRGB curve, `NOISE_REDUCTION_MODE_OFF`, `EDGE_MODE_OFF`, FOV SAFE fixed-30 mode, optional explicit cropped-60 mode, full RAW/JPEG still session, DNG/JPEG orientation and runtime logging remain otherwise unchanged.
+This is specifically intended to avoid reviving earlier Iris edge failures such as cyan/blue foliage-versus-sky halos, colored fine-edge contamination and thin-detail smearing while correcting the tonal response.
+
+## Preserved V1.4.9 behavior
+
+V1.4.9's frozen shutter-time SHORT/LONG capture pair, remeter isolation, highlight-only source-color reconstruction, fast full-resolution fusion, adaptive exposure headroom, explicit Camera2 sRGB curve, `NOISE_REDUCTION_MODE_OFF`, `EDGE_MODE_OFF`, FOV SAFE fixed-30 mode, optional explicit cropped-60 mode, full RAW/JPEG still session, DNG/JPEG orientation and runtime logging remain unchanged.
 
 Runtime logs are written to:
 

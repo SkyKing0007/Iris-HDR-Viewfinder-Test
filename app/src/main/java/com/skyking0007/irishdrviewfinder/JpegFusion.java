@@ -13,7 +13,7 @@ final class JpegFusion {
     private static final int[] LINEAR_TO_SRGB = buildEncodeLut();
     private static final float[] APPEARANCE_TARGET_LINEAR = buildAppearanceTargetLinearLut();
     private static final double LOG_2 = Math.log(2.0);
-    private static final float HDR_KNEE = 0.70f;
+    private static final float HDR_KNEE = 0.78f;
     private static final float HDR_CLIP_END = 0.995f;
 
     private JpegFusion() {}
@@ -45,8 +45,8 @@ final class JpegFusion {
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
         float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 1.0f, 6.0f);
         float clipStart = clamp(0.90f + 0.01f * (bracketStops - 1.0f), 0.90f, 0.95f);
-        float whiteAnchor = clamp(0.82f - 0.04f * (bracketStops - 1.0f), 0.68f, 0.82f);
-        float displayCeiling = clamp(whiteAnchor + 0.14f, 0.84f, 0.96f);
+        float whiteAnchor = clamp(0.95f - 0.015f * (bracketStops - 1.0f), 0.88f, 0.95f);
+        float displayCeiling = clamp(whiteAnchor + 0.065f, 0.965f, 0.995f);
         float headroomLog2 = Math.max(log2(Math.max(ratio, 1.0001f)), 0.0001f);
 
         for (int y = 0; y < height; y += rowsPerStrip) {
@@ -187,8 +187,8 @@ final class JpegFusion {
     }
 
     private static float appearanceLiftScale(float r, float g, float b) {
-        // Same V1.4.8 appearance curve as the live shader, with expensive exp/pow
-        // precomputed once so full-resolution JPEG fusion only interpolates a LUT.
+        // V1.4.10 uses the same bounded monotonic appearance curve as the live shader.
+        // sRGB transfer pow remains precomputed so full-resolution fusion only interpolates a LUT.
         float linearY = 0.2126f * r + 0.7152f * g + 0.0722f * b;
         if (linearY <= 0.000001f) return 1.0f;
         float position = clamp(linearY, 0.0f, 1.0f) * (APPEARANCE_TARGET_LINEAR.length - 1);
@@ -286,10 +286,10 @@ final class JpegFusion {
         for (int i = 0; i < lut.length; i++) {
             float linearY = i / (float) (lut.length - 1);
             float perceptualY = linearToSrgbFloat(linearY);
-            float centered = (perceptualY - 0.20f) / 0.11f;
+            float oneMinusY = 1.0f - perceptualY;
+            float oneMinusY2 = oneMinusY * oneMinusY;
             float targetY = perceptualY
-                    + 0.70f * perceptualY * (1.0f - perceptualY)
-                            * (float) Math.exp(-(centered * centered));
+                    + 1.50f * perceptualY * perceptualY * oneMinusY2 * oneMinusY2;
             lut[i] = srgbToLinearFloat(clamp(targetY, 0.0f, 1.0f));
         }
         return lut;

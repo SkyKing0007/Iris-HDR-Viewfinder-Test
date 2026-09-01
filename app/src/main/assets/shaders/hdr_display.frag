@@ -78,12 +78,12 @@ float adaptiveClipStart(float bracketStops) {
 vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
     // LONG owns shadows/midtones unchanged. Recovered scene values above the
     // display range are compressed by bracket width while preserving RGB ratios.
-    const float knee = 0.70;
+    const float knee = 0.78;
     float scenePeak = max3(sceneLinear);
     if (scenePeak <= knee || scenePeak <= 0.000001) return sceneLinear;
 
-    float whiteAnchor = clamp(0.82 - 0.04 * (bracketStops - 1.0), 0.68, 0.82);
-    float displayCeiling = clamp(whiteAnchor + 0.14, 0.84, 0.96);
+    float whiteAnchor = clamp(0.95 - 0.015 * (bracketStops - 1.0), 0.88, 0.95);
+    float displayCeiling = clamp(whiteAnchor + 0.065, 0.965, 0.995);
     float mappedPeak;
 
     if (scenePeak <= 1.0) {
@@ -99,15 +99,17 @@ vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
 }
 
 vec3 adaptiveAppearanceLift(vec3 displayLinear) {
-    // V1.4.7 HDR reconstruction is already complete here. Apply a monotonic,
-    // pointwise perceptual lift only to lower/mid tones. Deep shadows barely move
-    // and recovered highlights converge back to identity, preserving noise and HDR.
+    // V1.4.10 keeps the lift pointwise and RGB-ratio preserving, but replaces the
+    // narrow V1.4.8 Gaussian bump with an analytically monotonic broad lift. The
+    // perceptual mapping derivative stays positive, so neighboring tones cannot
+    // collapse or reverse and no spatial/cross-edge operator is introduced.
     float linearY = dot(displayLinear, vec3(0.2126, 0.7152, 0.0722));
     if (linearY <= 0.000001) return displayLinear;
     float perceptualY = linearToSrgbChannel(clamp(linearY, 0.0, 1.0));
-    float centered = (perceptualY - 0.20) / 0.11;
+    float oneMinusY = 1.0 - perceptualY;
+    float oneMinusY2 = oneMinusY * oneMinusY;
     float targetY = perceptualY
-            + 0.70 * perceptualY * (1.0 - perceptualY) * exp(-(centered * centered));
+            + 1.50 * perceptualY * perceptualY * oneMinusY2 * oneMinusY2;
     targetY = clamp(targetY, 0.0, 1.0);
     float targetLinearY = srgbToLinearChannel(targetY);
     float scale = targetLinearY / linearY;
