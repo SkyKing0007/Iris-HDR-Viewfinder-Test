@@ -87,6 +87,8 @@ final class CameraController {
     private static final long SIXTY_FPS_DURATION_NS = 16_666_666L;
     private static final long THIRTY_FPS_DURATION_NS = 33_333_333L;
     private static final double HDR_BRACKET_RATIO = 8.0;
+    private static final float DISPLAY_BRIGHTNESS_MIN_EV = -5.0f;
+    private static final float DISPLAY_BRIGHTNESS_MAX_EV = 2.0f;
     private static final int AUTO_METER_MIN_FRAMES = 4;
     private static final int AUTO_METER_MAX_FRAMES = 12;
     private static final int AUTO_METER_STABLE_FRAMES = 3;
@@ -140,6 +142,7 @@ final class CameraController {
     private int manualEffectiveLongIso = 400;
     private boolean manualFlickerSafetyApplied;
     private double manualEffectiveBracketEv = 3.0;
+    private double manualAchievedBrightnessEv;
     private boolean autoHdrExposure = true;
     private long autoShortExposureNs = ONE_SECOND_NS / 120;
     private long autoLongExposureNs = ONE_SECOND_NS / 60;
@@ -272,15 +275,26 @@ final class CameraController {
     }
 
     void setDisplayBrightnessEv(float ev) {
-        final float requestedEv = Math.max(-1.0f, Math.min(1.0f, ev));
+        final float requestedEv = clampBrightnessEv(ev);
         cameraHandler.post(() -> {
             displayBrightnessEv = requestedEv;
             RuntimeLogger.event(
                     "BRIGHTNESS_EV",
-                    String.format(Locale.US, "%+.1fEV owner=AUTO_LONG_SHUTTER_PRIORITY", displayBrightnessEv));
-            if (!autoHdrExposure || !haveAeSample || characteristics == null) return;
-            deriveAutoPairFromAnchorLocked();
-            publishAutoHdrSettingsLocked("BRIGHTNESS_UPDATE", true);
+                    String.format(
+                            Locale.US,
+                            "%+.1fEV owner=LONG_EXPOSURE_SHUTTER_PRIORITY mode=%s",
+                            displayBrightnessEv,
+                            autoHdrExposure ? "AUTO" : "MANUAL_SAFE"));
+            if (characteristics == null) return;
+            if (autoHdrExposure) {
+                if (!haveAeSample) return;
+                deriveAutoPairFromAnchorLocked();
+                publishAutoHdrSettingsLocked("BRIGHTNESS_UPDATE", true);
+            } else {
+                recomputeManualFlickerSafetyLocked();
+                RuntimeLogger.event("MANUAL_BRIGHTNESS_UPDATE", manualSafetySummaryLocked());
+                listener.onStatus(manualSafetySummaryLocked());
+            }
             if (previewMode != PreviewMode.NORMAL && captureSession != null
                     && !stillSessionActive && !autoMetering) {
                 applyPreviewRepeatingLocked();
@@ -1404,7 +1418,7 @@ final class CameraController {
         // V1.4.12 Brightness is capture exposure intent, not post-fusion gain. Target
         // LONG exposure product changes by 2^EV; integration time supplies the change
         // first, then ISO solves only the residual needed for the exact requested EV.
-        double requestedGain = Math.pow(2.0, Math.max(-1.0f, Math.min(1.0f, displayBrightnessEv)));
+        double requestedGain = Math.pow(2.0, clampBrightnessEv(displayBrightnessEv));
         double targetLongProduct = Math.max(1.0, baseLongProduct * requestedGain);
         long desiredLongExposure = clampExposure(Math.round(baseLongExposure * requestedGain));
         long maxLongExposure = targetPreviewFps >= 60
@@ -1480,6 +1494,10 @@ final class CameraController {
         }
     }
 
+    private static float clampBrightnessEv(float ev) {
+        return Math.max(DISPLAY_BRIGHTNESS_MIN_EV, Math.min(DISPLAY_BRIGHTNESS_MAX_EV, ev));
+    }
+
     private int resultPostRawBoost(TotalCaptureResult result) {
         Integer value = result.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST);
         return clampPostRawBoost(value == null ? DEFAULT_POST_RAW_BOOST : value);
@@ -1497,7 +1515,7 @@ final class CameraController {
         boolean oldSafety = manualFlickerSafetyApplied;
 
         int minIso = sensorMinIsoLocked();
-        double targetLongProduct = Math.max(1.0, (double) longExposureNs * manualIso);
+        double requestedBaseLongProduct = Math.max(1.0, (double) longExposureNs * manualIso);
         boolean safeTiming = sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE;
         if (!safeTiming) {
             manualEffectiveShortExposureNs = shortExposureNs;
@@ -1510,7 +1528,7 @@ final class CameraController {
             manualEffectiveShortExposureNs = commonExposure;
             manualEffectiveLongExposureNs = commonExposure;
             manualEffectiveShortIso = minIso;
-            manualEffectiveLongIso = solveIsoForProduct(targetLongProduct, commonExposure);
+            manualEffectiveLongIso = solveIsoForProduct(requestedBaseLongProduct, commonExposure);
             manualFlickerSafetyApplied = true;
         }
 
@@ -1524,6 +1542,36 @@ final class CameraController {
             manualEffectiveLongExposureNs = clampExposure(cappedLong);
             manualEffectiveShortIso = minIso;
             manualEffectiveLongIso = solveIsoForProduct(
+                    requestedBaseLongProduct, manualEffectiveLongExposureNs);
+        }
+
+        // MANUAL SAFE Brightness uses the same ownership as AUTO: the selected manual
+        // pair is the unbiased base, SHORT remains the highlight-safe owner, and only
+        // LONG receives the requested exposure bias. Anti-banding/cadence limits remain
+        // authoritative; ISO solves only the residual that shutter time cannot supply.
+        long baseLongExposure = manualEffectiveLongExposureNs;
+        int baseLongIso = manualEffectiveLongIso;
+        double baseLongProduct = Math.max(1.0, (double) baseLongExposure * baseLongIso);
+        double shortProductBeforeBias = Math.max(
+                1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
+        if (Math.abs(displayBrightnessEv) >= 0.0001f) {
+            double requestedGain = Math.pow(2.0, clampBrightnessEv(displayBrightnessEv));
+            double targetLongProduct = Math.max(
+                    shortProductBeforeBias,
+                    baseLongProduct * requestedGain);
+            long desiredLongExposure = clampExposure(Math.round(baseLongExposure * requestedGain));
+            long maxLongExposure = targetPreviewFps >= 60
+                    ? SIXTY_FPS_DURATION_NS
+                    : Math.max(manualFrameDurationNs, baseLongExposure);
+            desiredLongExposure = Math.min(desiredLongExposure, maxLongExposure);
+            manualEffectiveLongExposureNs = chooseBrightnessLongExposureLocked(
+                    baseLongExposure,
+                    desiredLongExposure,
+                    targetLongProduct,
+                    minIso,
+                    sceneFlicker,
+                    maxLongExposure);
+            manualEffectiveLongIso = solveIsoForProduct(
                     targetLongProduct, manualEffectiveLongExposureNs);
         }
 
@@ -1532,6 +1580,7 @@ final class CameraController {
         double shortProduct = Math.max(
                 1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
         manualEffectiveBracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);
+        manualAchievedBrightnessEv = Math.log(longProduct / baseLongProduct) / Math.log(2.0);
 
         return oldShortExposure != manualEffectiveShortExposureNs
                 || oldLongExposure != manualEffectiveLongExposureNs
@@ -1574,6 +1623,11 @@ final class CameraController {
                 + " actual=" + exposureText(manualEffectiveShortExposureNs) + " ISO" + manualEffectiveShortIso
                 + "/" + exposureText(manualEffectiveLongExposureNs) + " ISO" + manualEffectiveLongIso
                 + String.format(Locale.US, " %.1fEV", manualEffectiveBracketEv)
+                + String.format(
+                        Locale.US,
+                        " brightness=%+.1fEV achieved=%+.2fEV",
+                        displayBrightnessEv,
+                        manualAchievedBrightnessEv)
                 + " flicker=" + flickerLabel(sceneFlicker);
     }
 

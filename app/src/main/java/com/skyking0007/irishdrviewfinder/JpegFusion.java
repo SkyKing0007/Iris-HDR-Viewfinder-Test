@@ -13,7 +13,11 @@ final class JpegFusion {
     private static final int[] LINEAR_TO_SRGB = buildEncodeLut();
     private static final double LOG_2 = Math.log(2.0);
     private static final float HDR_KNEE = 0.70f;
-    private static final float HDR_CLIP_END = 0.995f;
+    private static final float HDR_TRUE_CLIP_START = 0.985f;
+    private static final float HDR_TRUE_CLIP_END = 0.998f;
+    private static final float HDR_WHITE_ANCHOR = 0.74f;
+    private static final float HDR_DISPLAY_CEILING = 0.88f;
+    private static final float HDR_TONE_REFERENCE_STOPS = 3.0f;
 
     private JpegFusion() {}
 
@@ -45,11 +49,6 @@ final class JpegFusion {
         float[] colorOwned = new float[3];
 
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
-        float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 1.0f, 6.0f);
-        float clipStart = clamp(0.90f + 0.01f * (bracketStops - 1.0f), 0.90f, 0.95f);
-        float whiteAnchor = clamp(0.82f - 0.04f * (bracketStops - 1.0f), 0.68f, 0.82f);
-        float displayCeiling = clamp(whiteAnchor + 0.14f, 0.84f, 0.96f);
-        float headroomLog2 = Math.max(log2(Math.max(ratio, 1.0001f)), 0.0001f);
 
         for (int y = 0; y < height; y += rowsPerStrip) {
             int rows = Math.min(rowsPerStrip, height - y);
@@ -75,37 +74,43 @@ final class JpegFusion {
                 float lg = SRGB_TO_LINEAR[lg8];
                 float lb = SRGB_TO_LINEAR[lb8];
 
-                float longEncodedPeak = Math.max(lr8, Math.max(lg8, lb8)) / 255.0f;
-                float longScenePeak = Math.max(0.000001f, Math.max(lr, Math.max(lg, lb)));
-                float shortScenePeak = Math.max(sr, Math.max(sg, sb));
-                float shortConfidence = smoothstep(
-                        0.35f,
-                        0.65f,
-                        shortScenePeak / longScenePeak);
-                float highlightWeight = smoothstep(
-                        clipStart,
-                        HDR_CLIP_END,
-                        longEncodedPeak) * shortConfidence;
+                float longEncodedR = lr8 / 255.0f;
+                float longEncodedG = lg8 / 255.0f;
+                float longEncodedB = lb8 / 255.0f;
+                float shortEncodedR = sr8 / 255.0f;
+                float shortEncodedG = sg8 / 255.0f;
+                float shortEncodedB = sb8 / 255.0f;
 
-                // Full-RGB handoff: LONG remains the clean shadow/midtone owner and
-                // normalized SHORT enters only near LONG saturation.
-                float mr = lr + (sr - lr) * highlightWeight;
-                float mg = lg + (sg - lg) * highlightWeight;
-                float mb = lb + (sb - lb) * highlightWeight;
+                // V1.4.13: SHORT no longer full-RGB blends into a valid LONG pixel.
+                // LONG owns scene color and ordinary luminance. SHORT supplies only
+                // genuinely missing highlight radiance after at least two LONG channels
+                // approach clipping, and only when the normalized SHORT sample agrees
+                // with the same bright side of the edge. This rejects the displaced
+                // dark-leaf/bright-wall case without any neighborhood blur.
+                recoverHighlightScene(
+                        lr, lg, lb,
+                        sr, sg, sb,
+                        longEncodedR, longEncodedG, longEncodedB,
+                        shortEncodedR, shortEncodedG, shortEncodedB,
+                        colorOwned);
+                float mr = colorOwned[0];
+                float mg = colorOwned[1];
+                float mb = colorOwned[2];
 
                 float scenePeak = Math.max(mr, Math.max(mg, mb));
 
-                // V1.4.12 brightness is already embodied by the captured LONG frame.
-                // Fusion/tone mapping therefore sees only the physical HDR pair and
-                // never applies a second presentation exposure that can damage edges.
+                // Tone ownership is fixed to the proven ~3 EV V1.4.7 display shape.
+                // The physical exposure ratio remains necessary for SHORT normalization,
+                // but changing Brightness must not move the tone knee/white/ceiling.
                 float mappedPeak = scenePeak;
                 if (scenePeak > HDR_KNEE) {
                     if (scenePeak <= 1.0f) {
                         float t = clamp((scenePeak - HDR_KNEE) / (1.0f - HDR_KNEE), 0.0f, 1.0f);
-                        mappedPeak = HDR_KNEE + (whiteAnchor - HDR_KNEE) * t;
+                        mappedPeak = HDR_KNEE + (HDR_WHITE_ANCHOR - HDR_KNEE) * t;
                     } else {
-                        float t = clamp(log2(scenePeak) / headroomLog2, 0.0f, 1.0f);
-                        mappedPeak = whiteAnchor + (displayCeiling - whiteAnchor) * t;
+                        float t = clamp(log2(scenePeak) / HDR_TONE_REFERENCE_STOPS, 0.0f, 1.0f);
+                        mappedPeak = HDR_WHITE_ANCHOR
+                                + (HDR_DISPLAY_CEILING - HDR_WHITE_ANCHOR) * t;
                     }
                 }
 
@@ -113,23 +118,6 @@ final class JpegFusion {
                 float tr = mr * toneScale;
                 float tg = mg * toneScale;
                 float tb = mb * toneScale;
-
-                // Preserve V1.4.7 HDR luminance while preventing normalized SHORT JPEG
-                // chroma errors from creating red/orange/pink speckles. LONG owns color
-                // throughout the handoff unless LONG has lost at least two highlight
-                // channels and SHORT has usable signal. This is strictly pixel-local.
-                if (highlightWeight > 0.0005f) {
-                    applyHighlightColorOwnership(
-                            tr, tg, tb,
-                            lr, lg, lb,
-                            sr, sg, sb,
-                            lr8 / 255.0f, lg8 / 255.0f, lb8 / 255.0f,
-                            sr8 / 255.0f, sg8 / 255.0f, sb8 / 255.0f,
-                            highlightWeight, colorOwned);
-                    tr = colorOwned[0];
-                    tg = colorOwned[1];
-                    tb = colorOwned[2];
-                }
 
                 int ro = encode(tr);
                 int go = encode(tg);
@@ -190,55 +178,57 @@ final class JpegFusion {
         return upright;
     }
 
-    private static void applyHighlightColorOwnership(
-            float targetR, float targetG, float targetB,
+    private static void recoverHighlightScene(
             float longSceneR, float longSceneG, float longSceneB,
             float shortSceneR, float shortSceneG, float shortSceneB,
             float longEncodedR, float longEncodedG, float longEncodedB,
             float shortEncodedR, float shortEncodedG, float shortEncodedB,
-            float highlightWeight,
             float[] out) {
-        float targetY = linearLuma(targetR, targetG, targetB);
         float longY = linearLuma(longSceneR, longSceneG, longSceneB);
-        if (targetY <= 0.000001f || longY <= 0.000001f) {
-            out[0] = targetR; out[1] = targetG; out[2] = targetB;
+        float shortY = linearLuma(shortSceneR, shortSceneG, shortSceneB);
+        if (longY <= 0.000001f || shortY <= 0.000001f) {
+            out[0] = longSceneR;
+            out[1] = longSceneG;
+            out[2] = longSceneB;
             return;
         }
 
-        float longScale = targetY / longY;
+        float secondLong = secondLargest3(longEncodedR, longEncodedG, longEncodedB);
+        float trueClip = smoothstep(HDR_TRUE_CLIP_START, HDR_TRUE_CLIP_END, secondLong);
+
+        // After exposure normalization, the same bright scene point should not become
+        // materially darker in SHORT. A low ratio is strong one-sided evidence that the
+        // two JPEGs sampled opposite sides of an edge, so SHORT is rejected there.
+        float shortAgreement = smoothstep(0.80f, 0.98f, shortY / longY);
+        float recoveryWeight = trueClip * shortAgreement;
+        float recoveredY = longY
+                + (Math.max(longY, shortY) - longY) * recoveryWeight;
+
+        float longScale = recoveredY / longY;
         float ownedR = longSceneR * longScale;
         float ownedG = longSceneG * longScale;
         float ownedB = longSceneB * longScale;
 
-        float secondLong = secondLargest3(longEncodedR, longEncodedG, longEncodedB);
-        float multiChannelClip = smoothstep(0.985f, 0.998f, secondLong);
-        float shortPeak = Math.max(shortEncodedR, Math.max(shortEncodedG, shortEncodedB));
-        float shortSignal = smoothstep(0.025f, 0.10f, shortPeak);
-        float shortColorNeed = clamp(highlightWeight * multiChannelClip * shortSignal, 0.0f, 1.0f);
-
-        float shortY = linearLuma(shortSceneR, shortSceneG, shortSceneB);
-        if (shortColorNeed > 0.0005f && shortY > 0.000001f) {
-            float shortScale = targetY / shortY;
-            float shortR = shortSceneR * shortScale;
-            float shortG = shortSceneG * shortScale;
-            float shortB = shortSceneB * shortScale;
-            ownedR += (shortR - ownedR) * shortColorNeed;
-            ownedG += (shortG - ownedG) * shortColorNeed;
-            ownedB += (shortB - ownedB) * shortColorNeed;
+        // SHORT chromaticity is an emergency-only source after virtually complete
+        // multi-channel LONG clipping. This keeps the V1.4.7 red/orange speckle source
+        // out of ordinary walls, skin, shelf lighting and foliage boundaries.
+        float extremeClip = smoothstep(0.997f, 0.9995f, secondLong);
+        float shortSignal = smoothstep(0.025f, 0.10f,
+                Math.max(shortEncodedR, Math.max(shortEncodedG, shortEncodedB)));
+        float shortColorNeed = recoveryWeight * extremeClip * shortSignal;
+        if (shortColorNeed > 0.0005f) {
+            float shortScale = recoveredY / shortY;
+            float shortOwnedR = shortSceneR * shortScale;
+            float shortOwnedG = shortSceneG * shortScale;
+            float shortOwnedB = shortSceneB * shortScale;
+            ownedR += (shortOwnedR - ownedR) * shortColorNeed;
+            ownedG += (shortOwnedG - ownedG) * shortColorNeed;
+            ownedB += (shortOwnedB - ownedB) * shortColorNeed;
         }
 
-        float ownedY = linearLuma(ownedR, ownedG, ownedB);
-        float chromaR = ownedR - ownedY;
-        float chromaG = ownedG - ownedY;
-        float chromaB = ownedB - ownedY;
-        float gamutScale = 1.0f;
-        gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaR);
-        gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaG);
-        gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaB);
-        gamutScale = clamp(gamutScale, 0.0f, 1.0f);
-        out[0] = clamp(targetY + chromaR * gamutScale, 0.0f, 1.0f);
-        out[1] = clamp(targetY + chromaG * gamutScale, 0.0f, 1.0f);
-        out[2] = clamp(targetY + chromaB * gamutScale, 0.0f, 1.0f);
+        out[0] = Math.max(0.0f, ownedR);
+        out[1] = Math.max(0.0f, ownedG);
+        out[2] = Math.max(0.0f, ownedB);
     }
 
     private static float linearLuma(float r, float g, float b) {
@@ -249,12 +239,6 @@ final class JpegFusion {
         float maximum = Math.max(r, Math.max(g, b));
         float minimum = Math.min(r, Math.min(g, b));
         return r + g + b - maximum - minimum;
-    }
-
-    private static float gamutScaleForChannel(float current, float targetY, float chroma) {
-        if (chroma > 0.000001f) return Math.min(current, (1.0f - targetY) / chroma);
-        if (chroma < -0.000001f) return Math.min(current, targetY / (-chroma));
-        return current;
     }
 
     private static int encode(float linear) {

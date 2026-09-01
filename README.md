@@ -1,30 +1,36 @@
-# Iris HDR Viewfinder Test V1.4.12
+# Iris HDR Viewfinder Test V1.4.13
 
-V1.4.12 is a focused correction built from the exact successful V1.4.11 Actions compiled candidate. It keeps the V1.4.7 LONG-dominant HDR reconstruction and V1.4.11 LONG-first highlight color correction, but removes V1.4.11's failed post-fusion Brightness multiplier.
+V1.4.13 is built from the exact successful V1.4.12 Actions compiled candidate. It keeps V1.4.12 shutter-priority physical Brightness and anti-banding behavior, while correcting the widening-bracket HDR artifacts seen on walls, shelf lighting and plant edges.
 
-## Shutter-priority AUTO Brightness
+## Brightness: -5 EV to +2 EV in AUTO and MANUAL SAFE
 
-The existing **Brightness** control remains `-1.0 EV` to `+1.0 EV` in `0.1 EV` steps, with `0.0 EV` as the exact no-bias baseline.
+**Brightness** now spans `-5.0 EV` to `+2.0 EV` in `0.1 EV` steps and remains enabled in both HDR AUTO and HDR MANUAL SAFE.
 
-Brightness now changes the physical AUTO LONG exposure product by `2^EV`. The clean hidden AE result remains the unbiased baseline and SHORT remains derived from that unbiased V1.4.7 highlight-safe baseline. LONG then receives the requested Brightness EV with shutter time selected first; ISO solves only the residual needed to reach the target exposure product.
+AUTO continues to use clean hidden AE as the unbiased baseline. SHORT remains on the unbiased highlight-safe baseline and LONG receives the requested Brightness exposure intent using shutter time first, then ISO only for residual target error.
 
-There is no Brightness multiplier in `hdr_display.frag` or `JpegFusion`. The live HDR Fused viewfinder therefore shows the actual biased SHORT/LONG pair, and the saved JPEG fuses the same frozen physical pair.
+MANUAL SAFE now uses the selected manual SHORT/LONG/ISO settings as its unbiased base, keeps SHORT as the highlight-safe owner, and applies the same shutter-priority Brightness bias to LONG. Negative Brightness is clamped so LONG never falls below the SHORT exposure product and the HDR pair cannot invert.
 
-## 50/60 Hz anti-banding guard
+Known 50 Hz lighting retains the 10 ms anti-banding family; known 60 Hz retains the 8.333333 ms family. Unknown/PWM retains baseline integration rather than inventing an unsafe intermediate shutter. Forced 60 fps still caps live LONG integration at 16.666666 ms.
 
-The existing anti-banding ownership is preserved. Known 50 Hz lighting uses 10,000,000 ns half-cycle periods and known 60 Hz uses 8,333,333 ns periods. Brightness may step LONG to the next longer safe period only when that step can still satisfy the requested exposure product without requiring ISO below the sensor minimum. Unknown/PWM lighting retains the clean-AE baseline shutter and lets ISO solve the residual rather than inventing an unsafe intermediate shutter.
+## V1.4.13 highlight artifact correction
 
-Forced 60 fps still caps live LONG exposure at 16,666,666 ns. At 60 Hz, a representative `1/120 ISO357` baseline with `+0.5 EV` therefore resolves to approximately `1/60 ISO252`, while SHORT remains on the unbiased highlight-safe baseline.
+V1.4.12 proved that the physical Brightness solver worked, but increasing the LONG/SHORT separation also made the older full-RGB highlight handoff increasingly visible. The normalized SHORT JPEG was being multiplied by the wider exposure ratio and blended into valid LONG pixels before the color-protection stage, creating wall/highlight blotchiness and displaced plant-edge artifacts.
 
-## HDR and color ownership preserved
+V1.4.13 removes that full-RGB handoff. LONG remains the complete owner of ordinary scene RGB and luminance. SHORT contributes only missing highlight radiance after at least two LONG channels are genuinely near clipping. A one-sided normalized-luminance agreement test rejects a SHORT sample that becomes materially darker than the same bright LONG sample, which protects thin leaves/branches against a bright shelf or wall without any neighborhood sampling or cross-edge blur.
 
-The V1.4.7 fixed 8x (~3 EV) baseline SHORT target remains the AUTO HDR reference when flicker is NONE. Any additional bracket width now comes only from explicit user Brightness raising LONG; the rejected V1.4.8-V1.4.10 aperture-derived automatic 3-4.25 EV widening does not return.
+SHORT chromaticity is emergency-only after virtually complete multi-channel LONG clipping. The broad V1.4.8-V1.4.10 appearance/color reconstruction does not return.
 
-LONG remains the default highlight chroma owner. SHORT color is admitted only when at least two LONG channels are truly near clipping and SHORT has usable signal. No neighborhood sampling, chroma blur, sharpening, cross-edge color transfer, extra GPU pass, texture or framebuffer is introduced.
+## Stable tone ownership
+
+The physical exposure ratio is still used to normalize SHORT correctly, but Brightness no longer changes the display tone policy. Live and saved fusion use one fixed ~3 EV V1.4.7 display shape: knee `0.70`, white anchor `0.74`, display ceiling `0.88`, with a fixed 3-EV highlight headroom mapping. This prevents Brightness from simultaneously moving LONG exposure, SHORT admission and the tone curve.
+
+## Compact navigation-safe controls
+
+The diagnostic control panel uses smaller text/buttons/slider rows and reserves the Android navigation-bar bottom inset. The Brightness slider therefore remains above the Android gesture pill/system bar in portrait while preserving both portrait and landscape layouts.
 
 ## Preserved mechanics
 
-The exact successful V1.4.11 immutable shutter-time capture controls, periodic clean AE remetering, post-RAW boost ownership, producer-owned orientation, FOV-safe 30 fps path, optional cropped 60 fps path, RAW/JPEG capture set, DNG/JPEG saving, runtime logging, full-index deterministic patch proof and GitHub Actions compiler/build order are inherited unchanged except for V1.4.12 authority/version/hash/regression pins.
+The exact successful V1.4.12 immutable shutter-time pair, hidden AE remetering, 50/60-Hz guards, post-RAW boost ownership, producer-owned orientation, FOV-safe 30 fps path, optional cropped 60 fps path, RAW/JPEG capture set, DNG/JPEG saving, logging, deterministic full-index patch proof, real GLSL/Java compiler gates and full Android assemble order are inherited unchanged except for V1.4.13 authority/version/hash/regression pins.
 
 Runtime logs are written to:
 

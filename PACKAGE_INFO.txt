@@ -1,26 +1,25 @@
-Iris HDR Viewfinder Test V1.4.12
+Iris HDR Viewfinder Test V1.4.13
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
-Runtime authority: exact successful V1.4.11 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.11
-Authority commit: 47b1f792347dfb1cf548f6a230b6423df826367b
-Authority tree: 1168bfb814e81746bca426a4158cfb11e4a143b8
-Authority Actions run: 33464019593
-Authority job: 99720012615
-Authority artifact ID: 9784219383
-Authority artifact digest: sha256:e0e290354cc0a5d2292ed633aaa8f0b7447b8dd1a2466d738744de155f070378
-Authority V1.4.11 source TAR SHA-256: e402fdb3a6fc3f419a334799daff2b2a8a5de39adad525fa56a2d7c374cc267c
-Authority V1.4.11 runtime manifest SHA-256: cb80c139009ef7e39cc9a56cf1ab9d4862bb0c22965aa2b90b428ff05c26f534
-Authority V1.4.11 repository manifest SHA-256: d751e16cf8e4ce3f3ebbd0be4acd6863bea7f897dfa360becb721865b3b44482
-Authority V1.4.11 regressions SHA-256: c02a5deeed5bbf461413fcf525b182ea04f34a5dda249e97e28fccff895541c4
-Authority V1.4.11 APK SHA-256: 0e1573f02f756dfa4d6f9828ad614eb5f0c54110e5f7e362dc5d984bbf6f4047
+Runtime authority: exact successful V1.4.12 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.12
+Authority commit: 950b9bc8df130ccf35ae19d7a241a07ab54d470c
+Authority tree: 274e284abdd172eeeaeddc76482e745c710c4641
+Authority Actions run: 33465979840
+Authority job: 99725818237
+Authority artifact ID: 9784875922
+Authority artifact digest: sha256:0a99f13da23c0b493b151a89783d36f11c46abcbcaea1f56055703d684511b9a
+Authority V1.4.12 source TAR SHA-256: 6755fd6bf565525f31f20431a07006efd65cfd77a8a128d5a29e422fb9a29a24
+Authority V1.4.12 runtime manifest SHA-256: 3f5ea6f33df1771a2c28fb2bf81ae061d351162c4685cefb931d9f90e5c3d6f9
+Authority V1.4.12 repository manifest SHA-256: b102dbd1e1d63790aaf0547582d550b69d6277b6962e15a613686a2f19336c0d
+Authority V1.4.12 regressions SHA-256: 3b8da6e62ede96912efb508c219d1f6f5c76d08d1f1df747ce66da5ec6a48ddb
+Authority V1.4.12 APK SHA-256: 2abd41e9a96bc473f454e7e33879a32d935fb4c191a0439ae2daebb59aeebbb3
 Existing architectural rollback backup: backup-v1.4.7-pre-adaptive-exposure-headroom -> cb91702446d18b963b25f9ae2d8e84a0651be2ff
-New backup for V1.4.12: NONE by explicit request; exact V1.4.11 hashes and deterministic forward/rollback patches are immediate rollback authority.
+New backup for V1.4.13: NONE by explicit request; exact V1.4.12 hashes and deterministic forward/rollback patches are immediate rollback authority.
 
-V1.4.12 runtime changed-file allowlist: exactly six files:
+V1.4.13 runtime changed-file allowlist: exactly five files:
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
@@ -35,22 +34,22 @@ Plus candidate documentation/version/hash pins:
 - VSCODE_DEV_UPLOAD.txt
 - app/build.gradle.kts
 
-Infrastructure mechanics: inherited in the same order from successful V1.4.11. No build/gate redesign. Changes are authority/version/hash/allowlist/regression pins only; verify_shaders.py is unchanged.
+Infrastructure mechanics: inherited in the same order from successful V1.4.12. No build/gate redesign. Changes are authority/version/hash/allowlist/regression pins only; verify_shaders.py is unchanged.
 
-V1.4.12 correction:
-- Remove V1.4.11 post-fusion Brightness gain from live GLSL and saved JPEG fusion.
-- Keep clean hidden AE as the unbiased AUTO baseline.
-- Keep SHORT derived from the unbiased V1.4.7 highlight-safe baseline.
-- Bias physical LONG exposure product by 2^BrightnessEV.
-- Use shutter time first; solve ISO only for residual target error.
-- Known 50 Hz uses 10 ms safe periods; known 60 Hz uses 8.333333 ms safe periods.
-- Unknown/PWM retains baseline shutter rather than inventing an unsafe intermediate timing.
-- A longer safe shutter step is allowed only when it does not require ISO below sensor minimum.
-- Forced 60 fps caps LONG at 16.666666 ms.
-- Retain V1.4.11 LONG-first highlight chroma ownership with no neighborhood/cross-edge filtering.
-- Freeze the already brightness-biased SHORT/LONG pair at shutter; the EV value is metadata only for saved fusion.
+V1.4.13 correction:
+- Keep V1.4.12 physical LONG shutter-priority Brightness and 50/60-Hz anti-banding ownership.
+- Expand Brightness to -5.0 EV through +2.0 EV in 0.1 EV steps.
+- Keep Brightness active in both HDR AUTO and HDR MANUAL SAFE.
+- MANUAL SAFE treats the selected manual pair as the unbiased base, preserves SHORT, biases LONG only, uses shutter first, and lets ISO solve only residual target error.
+- Negative Brightness never inverts LONG below the SHORT exposure product.
+- Remove V1.4.12 full-RGB SHORT/LONG highlight blend from both live and saved fusion.
+- LONG owns ordinary scene RGB and luminance; SHORT contributes only missing highlight radiance after true multi-channel LONG clipping.
+- Add a one-sided normalized SHORT/LONG luminance-agreement gate that rejects displaced dark-leaf/bright-wall edge samples without neighborhood blur.
+- SHORT chromaticity is emergency-only after virtually complete multi-channel LONG clipping.
+- Decouple tone mapping from actual Brightness-widened bracket: fixed ~3 EV V1.4.7 knee/white/ceiling shape, while actual ratio remains used only for SHORT exposure normalization.
+- Compact the diagnostic button/slider panel and reserve Android navigation-bar bottom inset so Brightness remains usable above the gesture pill.
 
-Preserved byte-for-byte runtime from successful V1.4.11:
-AndroidManifest.xml, copy_2d.frag, fullscreen.vert, oes_to_rgb.frag, FrameMeta.java, MediaStoreWriter.java.
+Preserved byte-for-byte runtime from successful V1.4.12:
+AndroidManifest.xml, copy_2d.frag, fullscreen.vert, oes_to_rgb.frag, FrameMeta.java, HdrGlView.java, MediaStoreWriter.java.
 
-Toolchain/build mechanics: inherited unchanged from successful V1.4.11 (AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2).
+Toolchain/build mechanics: inherited unchanged from successful V1.4.12 (AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2).
