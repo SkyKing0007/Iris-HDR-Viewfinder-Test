@@ -42,6 +42,7 @@ final class CaptureSetSaver {
     private final String captureId;
     private final int dngOrientation;
     private final float displayBrightnessEv;
+    private final byte[] shortReliabilityMap;
     private final Listener listener;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Map<Long, String> labelByTimestamp = new HashMap<>();
@@ -64,6 +65,7 @@ final class CaptureSetSaver {
             String captureId,
             int captureOrientationDegrees,
             float displayBrightnessEv,
+            byte[] shortReliabilityMap,
             Listener listener) {
         this.context = context.getApplicationContext();
         this.characteristics = characteristics;
@@ -71,6 +73,8 @@ final class CaptureSetSaver {
         this.captureId = captureId;
         this.dngOrientation = dngOrientationForDegrees(captureOrientationDegrees);
         this.displayBrightnessEv = Math.max(-5.0f, Math.min(2.0f, displayBrightnessEv));
+        this.shortReliabilityMap = shortReliabilityMap == null
+                ? null : shortReliabilityMap.clone();
         this.listener = listener;
     }
 
@@ -218,7 +222,7 @@ final class CaptureSetSaver {
         double ratio = exposureRatio(shortData.result, longData.result);
         io.execute(() -> {
             try {
-                byte[] fused = JpegFusion.fuse(shortJpeg, longJpeg, ratio);
+                byte[] fused = JpegFusion.fuse(shortJpeg, longJpeg, ratio, shortReliabilityMap);
                 MediaStoreWriter.writeBytes(
                         context,
                         captureId + "_FUSED_HDR.jpg",

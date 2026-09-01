@@ -1,52 +1,69 @@
-# Iris HDR Viewfinder Test V1.4.17
+# Iris HDR Viewfinder Test V1.4.18
 
-V1.4.17 keeps the successful V1.4.16 anti-pink/temporal foundation but changes the HDR ownership model in two focused ways: **LONG learns scene-body appearance adaptively**, and **SHORT is a masked highlight-recovery layer rather than a broad blend partner**.
+V1.4.18 keeps V1.4.17's successful adaptive LONG exposure and adaptive SHORT headroom unchanged, and corrects the remaining fusion-specific defect: live SHORT recovery could pulse locally and a genuinely clipped LONG region could receive only partial SHORT authority.
 
-## LONG is the master image
+## Scene-general fusion ownership
 
-System/HAL AE is bootstrap-only. After startup, AUTO LONG is driven by matched-pair scene statistics rather than by highlight-protecting AE or a fixed office-derived brightness correction.
+The fused image still begins as LONG. LONG remains literal through shadows, midtones, ordinary color and every location where it retains usable highlight information.
 
-The controller measures the robust P25/P35/P50 scene body and uses P90/P50 plus P98/P50 histogram shape to estimate whether a meaningful bright tail exists. Broad windows/lights are therefore treated as SHORT's responsibility instead of forcing the whole LONG exposure darker. The target also adapts downward for genuinely high-demand low-light scenes, so the office correction is not a global +EV lock.
+Fusion decisions are not keyed to the office sample or to a fixed scene brightness. They use normalized processed-output clipping, linear luminance, exposure-normalized SHORT signal, SHORT saturation safety and local temporal trust. The same rules therefore apply to indoor, outdoor, daylight, low light, neutral highlights and saturated real color.
 
-LONG changes require consecutive evidence and are limited to 0.18 EV per update. The user Brightness control remains -5.0..+2.0 EV and biases this learned LONG appearance target.
+## Full recoverable clipped core
 
-## SHORT is a masked highlight layer
+V1.4.18 separates the highlight region into two domains:
 
-The fused image begins as LONG. SHORT has no authority outside regions where LONG's highlight shoulder/clip genuinely needs recovery.
+- **True clipped core:** when LONG has actually lost information and SHORT still contains usable signal, SHORT-derived luminance/detail authority reaches 1.0. Recovery is no longer weakened by multiplying several soft masks together.
+- **Highlight shoulder:** only the outer transition around the clipped core is softly blended back into LONG to prevent a hard boundary.
 
-Inside that mask, SHORT is evaluated locally for:
+SHORT that is itself clipped or too dark is still rejected in the true core. Temporal luma history shapes only the recoverable shoulder, while chroma history continues to reject unstable color. If both exposures lack the scene information, V1.4.18 leaves a clean LONG clip instead of inventing data.
 
-- usable signal and unclipped highlight information;
-- normalized radiance evidence beyond LONG;
-- temporal luminance stability;
-- temporal chroma stability;
-- processed-RGB channel agreement;
-- neutral-highlight color safety.
+## Stable live FUSED preview
 
-The live 32x24 reliability map stores luminance/detail trust separately from chroma trust. This means a stable window can recover even if a different ceiling lamp is unstable, and a SHORT frame can contribute highlight structure without being allowed to import pink/orange tint.
+The current SHORT/LONG textures continue to publish only as complete, generation-matched pairs. At a 60-fps alternating input stream this permits roughly 30 newly fused complete pairs per second; the 200-ms statistics pass is not the display frame-rate owner.
 
-Neutral LONG highlights retain LONG chromaticity unless SHORT color is genuinely trustworthy. A locally unreliable SHORT region simply stays LONG/clean clipped.
+The 32x24 local reliability field is now graded rather than binary. Luma/detail history shapes the soft highlight shoulder but cannot scale down a genuinely clipped core when the current SHORT itself is usable. Chroma trust releases faster, so questionable SHORT tint is rejected before valid SHORT detail is discarded.
 
-Recovered highlights use a wider masked-only tone range so useful SHORT structure is visible rather than compressed almost entirely into near-white. LONG shadows/midtones are not globally tone-mapped by this recovery curve.
+One marginal statistics sample can therefore no longer switch a valid recovery region from full SHORT authority to zero and then make it wait for two more samples to return.
 
-## Still capture
+## Live-to-JPEG trust parity
 
-HDR Capture Set still freezes exactly one SHORT and one LONG exposure/ISO pair. Saved JPEG fusion uses the same LONG-base masked philosophy with separate brightness/detail versus color trust. Previous preview pairs are never accumulated into the still image.
+At shutter press, the current 32x24 two-channel reliability field is frozen together with the already-frozen SHORT/LONG exposure/ISO pair. That exact luma/chroma trust field is passed into full-resolution `JpegFusion` and bilinearly sampled over the captured image. Both live and saved fusion use current SHORT safety—not the slower history map—to grant complete luma/detail authority inside a true clipped core; the frozen history field shapes the shoulder and color confidence.
 
-## Preserved V1.4.16 protections
+The saved FUSED JPEG therefore uses the same decision contract and the same shutter-time temporal prior as the live FUSED preview instead of independently inventing temporal reliability from a single still pair.
 
-- exact exposure-generation SHORT/LONG matching;
-- anti-pink/anti-pulsation temporal reliability;
-- scalar SHORT-to-LONG overlap calibration;
-- known 50/60-Hz and unknown/PWM safety policy;
+## Luminance and color remain separate authorities
+
+Full SHORT detail authority never means blind SHORT RGB replacement. V1.4.18 preserves the V1.4.17 anti-pink design:
+
+- trustworthy SHORT luminance/detail may fully recover a clipped LONG core;
+- questionable SHORT chroma is replaced by LONG chromaticity at the recovered luminance;
+- neutral LONG clips keep an additional white/neutral lock;
+- only locally coherent SHORT color receives chroma authority.
+
+## Preserved V1.4.17 behavior
+
+- adaptive P25/P35/P50 LONG scene-body appearance;
+- P90/P98 bright-tail evidence assigned to SHORT rather than globally darkening LONG;
+- maximum 0.18-EV LONG update step with consecutive evidence;
 - adaptive AUTO and MANUAL SAFE SHORT headroom;
-- frozen still controls;
-- FOV/cadence, orientation/DNG and explicit sRGB protections;
-- stable GitHub Actions signing identity.
+- exact exposure-generation pair publication;
+- known 50/60-Hz and unknown/PWM safety;
+- scalar SHORT/LONG overlap calibration;
+- frozen still exposure/ISO/post-RAW controls;
+- Brightness remains LONG-appearance intent, not a post-fusion gain;
+- FOV/cadence, orientation/DNG, explicit sRGB and stable-signing protections.
+
+## Architectural backup
+
+Before committing V1.4.18, create this branch from the exact successful V1.4.17 authority commit:
+
+`backup-v1.4.17-pre-full-core-fusion` -> `b2c783c09e8e0a9050141e00c3bf23ee1617119e`
+
+The V1.4.18 Actions gate verifies that branch before any compiler runs.
 
 ## Stable APK updates
 
-V1.4.17 reuses the existing `IRIS_TEST_SIGNING_KEY_B64` repository secret. Do not regenerate the signing key.
+V1.4.18 reuses the existing `IRIS_TEST_SIGNING_KEY_B64` repository secret. Do not regenerate the signing key.
 
 Signing certificate SHA-256:
 

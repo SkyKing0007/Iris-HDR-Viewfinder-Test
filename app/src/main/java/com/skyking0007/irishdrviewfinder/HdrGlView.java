@@ -174,6 +174,10 @@ final class HdrGlView extends GLSurfaceView {
         return renderer.hdrPairFps;
     }
 
+    byte[] snapshotShortReliabilityMap() {
+        return renderer.snapshotShortReliabilityMap();
+    }
+
     private void publishInputSurface(Surface surface) {
         currentInputSurface = surface;
         InputSurfaceListener listener = inputSurfaceListener;
@@ -190,6 +194,16 @@ final class HdrGlView extends GLSurfaceView {
         private static final long STATS_INTERVAL_NS = 200_000_000L;
         private static final float MEANINGFUL_CLIP_CHANNEL = 0.992f;
         private static final float MEANINGFUL_CLIP_LUMA = 0.72f;
+        // V1.4.18 temporal continuity: luma/detail trust releases gradually so one
+        // marginal SHORT sample cannot make a recoverable highlight blink off. Chroma
+        // releases faster so unstable processed-ISP tint is rejected before detail.
+        private static final int RELIABILITY_MAX = 255;
+        private static final int LUMA_RELIABILITY_INITIAL = 224;
+        private static final int CHROMA_RELIABILITY_INITIAL = 128;
+        private static final int LUMA_RELIABILITY_ATTACK = 48;
+        private static final int LUMA_RELIABILITY_RELEASE = 64;
+        private static final int CHROMA_RELIABILITY_ATTACK = 48;
+        private static final int CHROMA_RELIABILITY_RELEASE = 96;
 
         private final Context context;
         private final FloatBuffer vertexBuffer;
@@ -227,8 +241,9 @@ final class HdrGlView extends GLSurfaceView {
         private long lastStatsNs;
         private float shortCalibration = 1.0f;
         private boolean havePreviousStats;
-        private final int[] shortLumaStableCounts = new int[STATS_PIXELS];
-        private final int[] shortChromaStableCounts = new int[STATS_PIXELS];
+        private final int[] shortLumaReliability = new int[STATS_PIXELS];
+        private final int[] shortChromaReliability = new int[STATS_PIXELS];
+        private volatile byte[] latestShortReliabilitySnapshot = defaultReliabilitySnapshot();
         private final float[] previousLongLuma = new float[STATS_PIXELS];
         private final float[] previousShortSceneR = new float[STATS_PIXELS];
         private final float[] previousShortSceneG = new float[STATS_PIXELS];
@@ -261,6 +276,10 @@ final class HdrGlView extends GLSurfaceView {
             for (int i = 0; i < pendingFrames.length; i++) {
                 pendingFrames[i] = new PendingFrame();
             }
+        }
+
+        byte[] snapshotShortReliabilityMap() {
+            return latestShortReliabilitySnapshot.clone();
         }
 
         void enqueueMeta(FrameMeta meta) {
@@ -735,20 +754,24 @@ final class HdrGlView extends GLSurfaceView {
                         }
                     }
 
-                    shortLumaStableCounts[i] = lumaStable
-                            ? Math.min(3, shortLumaStableCounts[i] + 1) : 0;
-                    shortChromaStableCounts[i] = chromaStable
-                            ? Math.min(3, shortChromaStableCounts[i] + 1) : 0;
+                    shortLumaReliability[i] = lumaStable
+                            ? Math.min(RELIABILITY_MAX,
+                                    shortLumaReliability[i] + LUMA_RELIABILITY_ATTACK)
+                            : Math.max(0,
+                                    shortLumaReliability[i] - LUMA_RELIABILITY_RELEASE);
+                    shortChromaReliability[i] = chromaStable
+                            ? Math.min(RELIABILITY_MAX,
+                                    shortChromaReliability[i] + CHROMA_RELIABILITY_ATTACK)
+                            : Math.max(0,
+                                    shortChromaReliability[i] - CHROMA_RELIABILITY_RELEASE);
                     if (!lumaStable) unstableHighlightCells++;
                 } else {
-                    shortLumaStableCounts[i] = 3;
-                    shortChromaStableCounts[i] = 3;
+                    shortLumaReliability[i] = RELIABILITY_MAX;
+                    shortChromaReliability[i] = RELIABILITY_MAX;
                 }
 
-                int lumaReliability = shortLumaStableCounts[i] >= 2 ? 255 : 0;
-                int chromaReliability = shortChromaStableCounts[i] >= 2 ? 255 : 0;
-                shortReliabilityBuffer.put((byte) lumaReliability);
-                shortReliabilityBuffer.put((byte) chromaReliability);
+                shortReliabilityBuffer.put((byte) shortLumaReliability[i]);
+                shortReliabilityBuffer.put((byte) shortChromaReliability[i]);
                 previousLongLuma[i] = ll;
                 previousShortSceneR[i] = sr;
                 previousShortSceneG[i] = sg;
@@ -760,6 +783,7 @@ final class HdrGlView extends GLSurfaceView {
             float unstableFraction = temporalHighlightCells == 0 ? 0.0f
                     : unstableHighlightCells / (float) temporalHighlightCells;
             shortReliabilityBuffer.flip();
+            latestShortReliabilitySnapshot = snapshotReliabilityBuffer();
             // Bracket adaptation only asks whether instability is widespread. The
             // renderer consumes the local R/G reliability texture, so one bad lamp
             // cannot disable a stable window or other recoverable highlight.
@@ -842,15 +866,33 @@ final class HdrGlView extends GLSurfaceView {
         }
 
         private void resetShortReliabilityHistory() {
-            Arrays.fill(shortLumaStableCounts, 0);
-            Arrays.fill(shortChromaStableCounts, 0);
+            Arrays.fill(shortLumaReliability, LUMA_RELIABILITY_INITIAL);
+            Arrays.fill(shortChromaReliability, CHROMA_RELIABILITY_INITIAL);
             shortReliabilityBuffer.clear();
             for (int i = 0; i < STATS_PIXELS; i++) {
-                shortReliabilityBuffer.put((byte) 0);
-                shortReliabilityBuffer.put((byte) 0);
+                shortReliabilityBuffer.put((byte) LUMA_RELIABILITY_INITIAL);
+                shortReliabilityBuffer.put((byte) CHROMA_RELIABILITY_INITIAL);
             }
             shortReliabilityBuffer.flip();
+            latestShortReliabilitySnapshot = snapshotReliabilityBuffer();
             if (shortReliabilityTexture != 0) uploadShortReliabilityTexture();
+        }
+
+        private byte[] snapshotReliabilityBuffer() {
+            ByteBuffer copy = shortReliabilityBuffer.asReadOnlyBuffer();
+            copy.rewind();
+            byte[] out = new byte[STATS_PIXELS * 2];
+            copy.get(out);
+            return out;
+        }
+
+        private static byte[] defaultReliabilitySnapshot() {
+            byte[] out = new byte[STATS_PIXELS * 2];
+            for (int i = 0; i < STATS_PIXELS; i++) {
+                out[i * 2] = (byte) LUMA_RELIABILITY_INITIAL;
+                out[i * 2 + 1] = (byte) CHROMA_RELIABILITY_INITIAL;
+            }
+            return out;
         }
 
         private void uploadShortReliabilityTexture() {

@@ -18,7 +18,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.17 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.18 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -240,15 +240,34 @@ require('calibrateShortToLong' in fusion and 'float calibration = calibrateShort
 require('uniform sampler2D shortReliabilityTex;' in hdr_shader
         and 'shortReliabilityTexture' in gl and 'GL_RG8' in gl,
         "local two-channel SHORT reliability map missing")
-require('shortLumaStableCounts' in gl and 'shortChromaStableCounts' in gl
-        and 'shortLumaStableCounts[i] >= 2' in gl
-        and 'shortChromaStableCounts[i] >= 2' in gl,
-        "separate local luminance/chroma temporal confidence missing")
+require('shortLumaReliability' in gl and 'shortChromaReliability' in gl
+        and 'LUMA_RELIABILITY_INITIAL = 224' in gl
+        and 'CHROMA_RELIABILITY_INITIAL = 128' in gl
+        and 'LUMA_RELIABILITY_RELEASE = 64' in gl
+        and 'CHROMA_RELIABILITY_RELEASE = 96' in gl,
+        "graded local luminance/chroma temporal confidence missing")
+require('shortLumaStableCounts' not in gl and 'shortChromaStableCounts' not in gl,
+        "V1.4.17 binary 0/255 local trust state returned")
+require('snapshotShortReliabilityMap()' in gl
+        and 'latestShortReliabilitySnapshot' in gl,
+        "shutter-time live reliability snapshot owner missing")
 require('unstableFraction <= 0.25f' in gl and 'shortTemporalReliable' in gl,
         "widespread SHORT instability must still block bracket widening")
-require('longHighlightMask' in hdr_shader and 'maskedHighlightRecovery' in hdr_shader
-        and 'highlightNeed' in fusion and 'recoveryMask' in fusion,
-        "LONG-base masked highlight compositor missing")
+require('longHighlightShoulder' in hdr_shader and 'longClippedCore' in hdr_shader
+        and 'maskedHighlightRecovery' in hdr_shader
+        and 'highlightNeed' in fusion and 'clippedCore' in fusion and 'recoveryMask' in fusion,
+        "LONG-base full-core/soft-shoulder highlight compositor missing")
+require('float corePermission = smoothstep(0.25, 0.55, shortUsable);' in hdr_shader
+        and 'float coreMask = clippedCore * corePermission;' in hdr_shader
+        and 'float recoveryMask = max(coreMask, shoulderMask);' in hdr_shader,
+        "live clipped core must use current SHORT safety for complete detail authority")
+require('float corePermission = smoothstep(0.25f, 0.55f, shortUsable);' in fusion
+        and 'float coreMask = clippedCore * corePermission;' in fusion
+        and 'float recoveryMask = Math.max(coreMask, shoulderMask);' in fusion,
+        "saved clipped core must use captured SHORT safety for complete recovery")
+require('shortUsable * temporalTrust.r' not in hdr_shader
+        and 'shortUsable * lumaReliability' not in fusion,
+        "coarse temporal luma trust must never attenuate a recoverable clipped core")
 require('temporalTrust.r' in hdr_shader and 'temporalTrust.g' in hdr_shader
         and 'colorTrust' in hdr_shader and 'colorTrust' in fusion,
         "SHORT luminance/detail trust must remain separate from color trust")
@@ -264,6 +283,11 @@ require('mapRecoveredHighlight' in hdr_shader and 'mappedRecoveryPeak' in fusion
 require('mix(longScene, mappedShort, recoveryMask)' in hdr_shader
         and 'float mr = lr + (mappedSr - lr) * recoveryMask;' in fusion,
         "SHORT must enter only through the local highlight recovery mask")
+require('coreMask = clippedCore * corePermission' in hdr_shader
+        and 'shoulderMask' in hdr_shader
+        and 'coreMask = clippedCore * corePermission' in fusion
+        and 'shoulderMask' in fusion,
+        "full clipped core and soft transition shoulder must remain separate")
 require('recoverOnlyLostChannels' not in hdr_shader and 'recoverChannel(' not in fusion
         and 'mix(longScene, shortScene, highlightWeight)' not in hdr_shader,
         "retired broad/per-channel/threshold-pulsing highlight handoff returned")
@@ -274,6 +298,24 @@ require('displayBrightnessEv' not in gl,
         "GL renderer must not own Brightness EV")
 require('65_536.0' in fusion and '65_536.0' in saver and '65_536.0' in gl,
         "exposure normalization range must remain consistent live/save/metadata")
+require('controller.captureHdrSet(glView.snapshotShortReliabilityMap());' in main,
+        "shutter must freeze the currently displayed live reliability field")
+require('captureHdrSet(byte[] shortReliabilityMap)' in camera
+        and 'frozenShortReliabilityMap' in camera,
+        "CameraController must carry frozen live fusion trust into still capture")
+require('byte[] shortReliabilityMap' in saver
+        and 'shortReliabilityMap.clone()' in saver
+        and 'JpegFusion.fuse(shortJpeg, longJpeg, ratio, shortReliabilityMap)' in saver,
+        "saved FUSED JPEG must consume the frozen live trust field")
+require('RELIABILITY_WIDTH = 32' in fusion and 'RELIABILITY_HEIGHT = 24' in fusion
+        and 'sampleReliability' in fusion and 'chromaReliability * rgbSafe * agreement' in fusion
+        and 'radianceEvidence * lumaReliability' in fusion,
+        "full-resolution JPEG fusion must consume frozen trust for shoulder/chroma priors")
+require('((imageX + 0.5f) * RELIABILITY_WIDTH / imageWidth) - 0.5f' in fusion
+        and '((imageY + 0.5f) * RELIABILITY_HEIGHT / imageHeight) - 0.5f' in fusion,
+        "saved JPEG reliability sampling must mirror GL_LINEAR texel-center geometry")
+require('0.045' not in hdr_shader and '0.045' not in fusion,
+        "retired office-derived brightness constant must never enter fusion ownership")
 require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
         "no neighborhood blur/cross-edge chroma smoothing may enter live HDR")
 # 016 / 022 - V1.4.2 on-device sideways preview: producer transform owns live orientation.
@@ -422,7 +464,7 @@ require('targetPreviewFps = 30;' in fps_policy and 'aeFpsRange = chooseAeFpsRang
         "turning cropped-60 OFF must immediately restore stable 30-fps policy")
 require('FOV_OVERRIDE' in camera and 'allowCropped60Fps' in camera,
         "cropped-60 sensor-readout difference must remain explicit and logged")
-callback = camera[camera.index('private final CameraCaptureSession.CaptureCallback previewCaptureCallback'):camera.index('private void beginCaptureLocked()')]
+callback = camera[camera.index('private final CameraCaptureSession.CaptureCallback previewCaptureCallback'):camera.index('private void beginCaptureLocked(byte[] frozenShortReliabilityMap)')]
 require('if (!FrameMeta.METER.equals(kind)) {' in callback
         and 'updateCaptureResultFpsLocked();' in callback
         and 'updateFovEvidenceLocked(result);' in callback,
@@ -606,14 +648,14 @@ require(neutral_highlight > 0.75 and bright_green > 0.70,
 require(short_safe((247/255,1.0,1.0)) < 0.01,
         "V1.4.15 white-car failure: a SHORT with clipped G/B must not create a red-only fill")
 
-# 056 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.16' in workflow
-        and 'run-id: 33545839700' in workflow,
-        "workflow must download the exact successful V1.4.16 Actions authority")
-require('ef7accc0b3824bc5d1cb0d61132b98cfd7242722' in workflow,
-        "V1.4.16 authority commit pin missing")
-require('backup-v1.4.14-pre-adaptive-hdr' in workflow,
-        "architectural backup branch proof missing")
+# 056 / 074 - Exact current pre-handoff authority + architectural backup pin.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.17' in workflow
+        and 'run-id: 33556328139' in workflow,
+        "workflow must download the exact successful V1.4.17 Actions authority")
+require('b2c783c09e8e0a9050141e00c3bf23ee1617119e' in workflow,
+        "V1.4.17 authority commit pin missing")
+require('backup-v1.4.17-pre-full-core-fusion' in workflow,
+        "V1.4.18 architectural backup branch proof missing")
 
 # 048 / 049 / 052 / 054 - Brightness remains user LONG intent in AUTO and MANUAL.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -5.0f' in main
@@ -638,8 +680,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 22' in gradle and 'versionName = "1.0-v1.4.17"' in gradle,
-        "V1.4.17 version/build pin missing")
+require('versionCode = 23' in gradle and 'versionName = "1.0-v1.4.18"' in gradle,
+        "V1.4.18 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -650,7 +692,7 @@ require('2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e' in wo
 require('53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8' in workflow,
         "stable signing certificate fingerprint pin missing")
 # 040 / 055 - Shutter press freezes one immutable adaptive pair.
-begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
+begin_capture = camera[camera.index('private void beginCaptureLocked(byte[] frozenShortReliabilityMap)'):camera.index('private void issueStillBurstLocked()')]
 still_burst = camera[camera.index('private void issueStillBurstLocked()'):camera.index('private final CameraCaptureSession.CaptureCallback stillCaptureCallback')]
 require('autoMetering = false;' in begin_capture,
         "shutter press must ignore any initial bootstrap meter before snapshotting controls")
@@ -663,6 +705,8 @@ for token in [
     'captureDisplayBrightnessEv = displayBrightnessEv;',
 ]:
     require(token in begin_capture, f"immutable adaptive capture snapshot missing: {token}")
+require('frozenShortReliabilityMap' in begin_capture,
+        "shutter-time fusion reliability must remain frozen with the still exposure pair")
 require('activeShortExposureNs()' not in still_burst and 'activeLongExposureNs()' not in still_burst
         and 'activeShortIso()' not in still_burst and 'activeLongIso()' not in still_burst,
         "temporary still session must never re-read mutable live-adaptive exposure state")
@@ -673,17 +717,91 @@ require('captureShortExposureNs' in still_burst and 'captureLongExposureNs' in s
 require('CAPTURE_INPUTS' in camera and 'acquiredMs=' in camera and 'totalMs=' in camera,
         "minimal capture timing evidence must separate sensor acquisition from post-processing")
 # 041 / 043 / 053 - Full-resolution fusion stays Brightness-free and color-safe.
-inner = fusion[fusion.index('for (int i = 0; i < count; i++)'):fusion.index('output.setPixels')]
+inner = fusion[fusion.index('for (int row = 0; row < rows; row++)'):fusion.index('output.setPixels')]
 for forbidden in ['Math.exp(', 'Math.sqrt(', 'new float[']:
     require(forbidden not in inner, f"new expensive/per-pixel allocation introduced: {forbidden}")
 require('clampedBrightnessEv' not in fusion and 'brightnessGain' not in fusion,
         "saved fusion must not contain Brightness gain")
 require('calibrateShortToLong' in fusion and 'medianPrefix' in fusion,
         "saved fusion must calibrate SHORT from valid overlap")
-require('highlightNeed' in fusion and 'lumaSafe' in fusion and 'signalSafe' in fusion
+require('highlightNeed' in fusion and 'clippedCore' in fusion
+        and 'lumaSafe' in fusion and 'signalSafe' in fusion
+        and 'corePermission' in fusion and 'shoulderMask' in fusion
         and 'recoveryMask' in fusion and 'neutralLongClip' in fusion
         and 'validChannelAgreement' in fusion and 'colorTrust' in fusion,
-        "saved fusion must require masked, signal-safe, color-safe SHORT recovery")
+        "saved fusion must require full-core current-SHORT safety plus temporal shoulder/color protection")
+# 074 / 075 / 076 - V1.4.18 live continuity + complete recoverable-core authority.
+def update_trust(value, stable, attack, release):
+    return min(255, value + attack) if stable else max(0, value - release)
+
+luma=224
+luma=update_trust(luma, False, 48, 64)
+require(luma == 160 and luma / 255.0 > 0.55,
+        "one marginal SHORT sample must retain full luma/detail permission")
+luma=update_trust(luma, False, 48, 64)
+require(luma == 96,
+        "repeated luma instability must still decay local SHORT authority")
+chroma=128
+chroma=update_trust(chroma, False, 48, 96)
+require(chroma == 32 and chroma < luma,
+        "chroma trust must release faster than luma/detail trust")
+
+def v1418_recovery_mask(long_second, long_peak, long_luma, short_second,
+                       short_luma, radiance_ratio, luma_trust=1.0):
+    shoulder=max(smoothstep_local(0.925,0.985,long_second),
+                 smoothstep_local(0.970,0.997,long_peak)
+                 * smoothstep_local(0.55,0.82,long_luma))
+    core=max(smoothstep_local(0.980,0.990,long_second),
+             smoothstep_local(0.992,0.998,long_peak)
+             * smoothstep_local(0.50,0.78,long_luma))
+    luma_safe=1.0-smoothstep_local(0.975,0.997,short_second)
+    signal=smoothstep_local(0.008,0.025,short_luma)
+    usable=min(luma_safe,signal)
+    permission=smoothstep_local(0.25,0.55,usable)
+    core_mask=core*permission
+    shoulder_raw=shoulder*luma_safe*signal*smoothstep_local(1.01,1.10,radiance_ratio)*luma_trust
+    shoulder_mask=smoothstep_local(0.04,0.58,shoulder_raw)*(1.0-core)
+    return max(core_mask,shoulder_mask),core
+
+mask,core=v1418_recovery_mask(1.0,1.0,0.95,0.70,0.25,1.0,1.0)
+require(core > 0.999 and mask > 0.999,
+        f"recoverable LONG-clipped core must receive complete SHORT detail authority: core={core} mask={mask}")
+mask_zero_history,core_zero_history=v1418_recovery_mask(1.0,1.0,0.95,0.70,0.25,1.0,0.0)
+require(core_zero_history > 0.999 and mask_zero_history > 0.999,
+        f"coarse temporal history must not attenuate usable current SHORT in a true clipped core: {mask_zero_history}")
+mask_bad_short,_=v1418_recovery_mask(1.0,1.0,0.95,0.999,0.25,1.0,1.0)
+require(mask_bad_short < 0.05,
+        f"SHORT that is itself multi-channel clipped must not be treated as recoverable: {mask_bad_short}")
+mask_mid,_=v1418_recovery_mask(0.70,0.80,0.30,0.40,0.20,1.2,1.0)
+require(mask_mid < 0.01,
+        f"ordinary scene body must remain literal LONG: {mask_mid}")
+
+def v1418_saved_recovery_mask(long_second, long_peak, long_luma, short_second,
+                              short_luma, radiance_ratio, luma_trust=1.0):
+    shoulder=max(smoothstep_local(0.925,0.985,long_second),
+                 smoothstep_local(0.970,0.997,long_peak)
+                 * smoothstep_local(0.55,0.82,long_luma))
+    core=max(smoothstep_local(0.980,0.990,long_second),
+             smoothstep_local(0.992,0.998,long_peak)
+             * smoothstep_local(0.50,0.78,long_luma))
+    luma_safe=1.0-smoothstep_local(0.975,0.997,short_second)
+    signal=smoothstep_local(0.008,0.025,short_luma)
+    usable=min(luma_safe,signal)
+    # Saved still core uses the captured pair itself; frozen live trust remains a
+    # shoulder/chroma prior and cannot veto recoverable captured core detail.
+    permission=smoothstep_local(0.25,0.55,usable)
+    core_mask=core*permission
+    shoulder_raw=shoulder*luma_safe*signal*smoothstep_local(1.01,1.10,radiance_ratio)*luma_trust
+    shoulder_mask=smoothstep_local(0.04,0.58,shoulder_raw)*(1.0-core)
+    return max(core_mask,shoulder_mask),core
+
+saved_mask,saved_core=v1418_saved_recovery_mask(1.0,1.0,0.95,0.70,0.25,1.0,0.0)
+require(saved_core > 0.999 and saved_mask > 0.999,
+        f"stale preview trust must not suppress recoverable captured core: core={saved_core} mask={saved_mask}")
+saved_shoulder,_=v1418_saved_recovery_mask(0.96,0.98,0.65,0.70,0.25,1.2,0.0)
+require(saved_shoulder < 0.01,
+        f"frozen live trust must still suppress an untrusted soft shoulder: {saved_shoulder}")
+
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
     rotated_w = frame_h if axis_swap else frame_w
@@ -744,4 +862,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.17 REGRESSION PASS: adaptive scene-body LONG independent of bootstrap AE, LONG-base masked SHORT recovery, local luminance/chroma trust, neutral anti-pink protection, exact exposure-generation pairs, adaptive AUTO+MANUAL HDR, LONG-owned Brightness -5..+2EV, stable signing, frozen capture pair, orientation/FOV/cadence/sRGB protections")
+print("V1.4.18 REGRESSION PASS: adaptive scene-body LONG independent of bootstrap AE, LONG-base full clipped-core SHORT recovery, graded local luminance/chroma trust, frozen live-to-JPEG trust, neutral anti-pink protection, exact exposure-generation pairs, adaptive AUTO+MANUAL HDR, LONG-owned Brightness -5..+2EV, stable signing, frozen capture pair, orientation/FOV/cadence/sRGB protections")

@@ -16,10 +16,18 @@ final class JpegFusion {
     private static final float RECOVERY_KNEE = 0.72f;
     private static final float RECOVERY_WHITE_ANCHOR = 0.90f;
     private static final float RECOVERY_DISPLAY_CEILING = 0.995f;
+    static final int RELIABILITY_WIDTH = 32;
+    static final int RELIABILITY_HEIGHT = 24;
+    static final int RELIABILITY_CHANNELS = 2;
+    static final int RELIABILITY_MAP_BYTES = RELIABILITY_WIDTH * RELIABILITY_HEIGHT * RELIABILITY_CHANNELS;
+    private static final float DEFAULT_LUMA_RELIABILITY = 224.0f / 255.0f;
+    private static final float DEFAULT_CHROMA_RELIABILITY = 128.0f / 255.0f;
 
     private JpegFusion() {}
 
-    static byte[] fuse(byte[] shortJpeg, byte[] longJpeg, double exposureRatio) throws Exception {
+    static byte[] fuse(
+            byte[] shortJpeg, byte[] longJpeg, double exposureRatio,
+            byte[] shortReliabilityMap) throws Exception {
         Bitmap shortBitmap = decodeUpright(shortJpeg);
         Bitmap longBitmap = decodeUpright(longJpeg);
         if (shortBitmap == null || longBitmap == null) {
@@ -47,13 +55,16 @@ final class JpegFusion {
 
         for (int y = 0; y < height; y += rowsPerStrip) {
             int rows = Math.min(rowsPerStrip, height - y);
-            int count = width * rows;
             shortBitmap.getPixels(shortPixels, 0, width, 0, y, width, rows);
             longBitmap.getPixels(longPixels, 0, width, 0, y, width, rows);
 
-            for (int i = 0; i < count; i++) {
-                int s = shortPixels[i];
-                int l = longPixels[i];
+            for (int row = 0; row < rows; row++) {
+                int rowBase = row * width;
+                int imageY = y + row;
+                for (int imageX = 0; imageX < width; imageX++) {
+                    int i = rowBase + imageX;
+                    int s = shortPixels[i];
+                    int l = longPixels[i];
 
                 int sr8 = (s >>> 16) & 0xFF;
                 int sg8 = (s >>> 8) & 0xFF;
@@ -83,6 +94,10 @@ final class JpegFusion {
                 float brightSingleNeed = smoothstep(0.970f, 0.997f, longPeak)
                         * smoothstep(0.55f, 0.82f, longLuma);
                 float highlightNeed = Math.max(multiChannelNeed, brightSingleNeed);
+                float multiChannelCore = smoothstep(0.980f, 0.990f, longSecond);
+                float brightSingleCore = smoothstep(0.992f, 0.998f, longPeak)
+                        * smoothstep(0.50f, 0.78f, longLuma);
+                float clippedCore = Math.max(multiChannelCore, brightSingleCore);
 
                 float shortSecond = secondLargest(shortEncodedR, shortEncodedG, shortEncodedB);
                 float shortPeak = Math.max(shortEncodedR, Math.max(shortEncodedG, shortEncodedB));
@@ -94,8 +109,21 @@ final class JpegFusion {
                 float longScenePeak = Math.max(lr, Math.max(lg, lb));
                 float radianceEvidence = smoothstep(
                         1.01f, 1.10f, shortScenePeak / Math.max(longScenePeak, 0.0005f));
-                float rawMask = highlightNeed * lumaSafe * signalSafe * radianceEvidence;
-                float recoveryMask = smoothstep(0.04f, 0.58f, rawMask);
+                float lumaReliability = sampleReliability(
+                        shortReliabilityMap, imageX, imageY, width, height, 0);
+                float chromaReliability = sampleReliability(
+                        shortReliabilityMap, imageX, imageY, width, height, 1);
+                float shortUsable = Math.min(lumaSafe, signalSafe);
+                // The captured still pair owns a truly clipped core. A coarse preview
+                // history prior may shape the shoulder/chroma, but it must never block
+                // recoverable detail that the actual still SHORT demonstrably retains.
+                float corePermission = smoothstep(0.25f, 0.55f, shortUsable);
+                float coreMask = clippedCore * corePermission;
+                float shoulderRaw = highlightNeed * lumaSafe * signalSafe
+                        * radianceEvidence * lumaReliability;
+                float shoulderMask = smoothstep(0.04f, 0.58f, shoulderRaw)
+                        * (1.0f - clippedCore);
+                float recoveryMask = Math.max(coreMask, shoulderMask);
 
                 // Luminance/detail and chroma have separate trust. A questionable
                 // SHORT hue cannot block useful highlight structure or recolor white.
@@ -103,7 +131,7 @@ final class JpegFusion {
                 float agreement = validChannelAgreement(
                         longEncodedR, longEncodedG, longEncodedB,
                         lr, lg, lb, sr, sg, sb);
-                float colorTrust = clamp(rgbSafe * agreement, 0.0f, 1.0f);
+                float colorTrust = clamp(chromaReliability * rgbSafe * agreement, 0.0f, 1.0f);
 
                 float longSpread = Math.max(longEncodedR, Math.max(longEncodedG, longEncodedB))
                         - Math.min(longEncodedR, Math.min(longEncodedG, longEncodedB));
@@ -135,7 +163,8 @@ final class JpegFusion {
                 int ro = encode(mr);
                 int go = encode(mg);
                 int bo = encode(mb);
-                outPixels[i] = 0xFF000000 | (ro << 16) | (go << 8) | bo;
+                    outPixels[i] = 0xFF000000 | (ro << 16) | (go << 8) | bo;
+                }
             }
             output.setPixels(outPixels, 0, width, 0, y, width, rows);
         }
@@ -150,6 +179,40 @@ final class JpegFusion {
             throw new IllegalStateException("JPEG encoder rejected fused bitmap");
         }
         return bytes.toByteArray();
+    }
+
+    private static float sampleReliability(
+            byte[] map, int imageX, int imageY, int imageWidth, int imageHeight, int channel) {
+        if (map == null || map.length != RELIABILITY_MAP_BYTES
+                || imageWidth <= 0 || imageHeight <= 0) {
+            return channel == 0 ? DEFAULT_LUMA_RELIABILITY : DEFAULT_CHROMA_RELIABILITY;
+        }
+        // Match normalized GL_LINEAR sampling at full-resolution pixel centers:
+        // texel coordinate = uv * textureSize - 0.5, clamped at the texture edge.
+        float gx = imageWidth <= 1 ? 0.0f
+                : ((imageX + 0.5f) * RELIABILITY_WIDTH / imageWidth) - 0.5f;
+        float gy = imageHeight <= 1 ? 0.0f
+                : ((imageY + 0.5f) * RELIABILITY_HEIGHT / imageHeight) - 0.5f;
+        gx = clamp(gx, 0.0f, RELIABILITY_WIDTH - 1.0f);
+        gy = clamp(gy, 0.0f, RELIABILITY_HEIGHT - 1.0f);
+        int x0 = (int) Math.floor(gx);
+        int y0 = (int) Math.floor(gy);
+        int x1 = Math.min(RELIABILITY_WIDTH - 1, x0 + 1);
+        int y1 = Math.min(RELIABILITY_HEIGHT - 1, y0 + 1);
+        float tx = gx - x0;
+        float ty = gy - y0;
+        float a = reliabilityAt(map, x0, y0, channel);
+        float b = reliabilityAt(map, x1, y0, channel);
+        float c = reliabilityAt(map, x0, y1, channel);
+        float d = reliabilityAt(map, x1, y1, channel);
+        float top = a + (b - a) * tx;
+        float bottom = c + (d - c) * tx;
+        return top + (bottom - top) * ty;
+    }
+
+    private static float reliabilityAt(byte[] map, int x, int y, int channel) {
+        int index = (y * RELIABILITY_WIDTH + x) * RELIABILITY_CHANNELS + channel;
+        return (map[index] & 0xFF) / 255.0f;
     }
 
     private static float calibrateShortToLong(

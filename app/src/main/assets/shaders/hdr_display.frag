@@ -92,9 +92,9 @@ float validChannelAgreement(vec3 longRgb, vec3 longScene, vec3 shortScene) {
     return 1.0 - smoothstep(0.18, 0.60, disagreement);
 }
 
-float longHighlightMask(vec3 longRgb, vec3 longScene) {
-    // LONG is untouched through the scene body. This soft mask begins only in the
-    // highlight shoulder and reaches full authority around a real multi-channel clip.
+float longHighlightShoulder(vec3 longRgb, vec3 longScene) {
+    // Scene-general encoded/linear evidence: thresholds describe display clipping,
+    // not any office-specific brightness. LONG remains untouched below this shoulder.
     float longPeak = max3(longRgb);
     float longSecond = second3(longRgb);
     float longLuma = luma3(longScene);
@@ -102,6 +102,19 @@ float longHighlightMask(vec3 longRgb, vec3 longScene) {
     float brightSingleChannel = smoothstep(0.970, 0.997, longPeak)
         * smoothstep(0.55, 0.82, longLuma);
     return max(multiChannel, brightSingleChannel);
+}
+
+float longClippedCore(vec3 longRgb, vec3 longScene) {
+    // Inside a genuine clipped core LONG has lost scene information. If SHORT is
+    // usable, recovery authority must reach 1.0 rather than being weakened by a
+    // product of several soft masks. Only the outer shoulder is blended gradually.
+    float longPeak = max3(longRgb);
+    float longSecond = second3(longRgb);
+    float longLuma = luma3(longScene);
+    float multiChannelCore = smoothstep(0.980, 0.990, longSecond);
+    float brightSingleCore = smoothstep(0.992, 0.998, longPeak)
+        * smoothstep(0.50, 0.78, longLuma);
+    return max(multiChannelCore, brightSingleCore);
 }
 
 vec3 mapRecoveredHighlight(vec3 recoveredScene, float ratio) {
@@ -124,7 +137,8 @@ vec3 mapRecoveredHighlight(vec3 recoveredScene, float ratio) {
 vec3 maskedHighlightRecovery(
         vec2 uv, vec3 longRgb, vec3 shortRgb, vec3 longScene, vec3 shortScene,
         float ratio) {
-    float need = longHighlightMask(longRgb, longScene);
+    float shoulderNeed = longHighlightShoulder(longRgb, longScene);
+    float clippedCore = longClippedCore(longRgb, longScene);
     float shortEncodedLuma = luma3(shortRgb);
     float shortSceneLuma = luma3(shortScene);
     float longSceneLuma = luma3(longScene);
@@ -139,8 +153,17 @@ vec3 maskedHighlightRecovery(
     float radianceEvidence = smoothstep(
         1.01, 1.10,
         max3(shortScene) / max(max3(longScene), 0.0005));
-    float rawMask = need * lumaSafe * signalSafe * radianceEvidence * temporalTrust.r;
-    float recoveryMask = smoothstep(0.04, 0.58, rawMask);
+    // A truly clipped LONG core contains no remaining source detail to protect.
+    // Current SHORT signal/saturation safety therefore owns core luma/detail permission
+    // directly; coarse 5-Hz history may shape only the shoulder and chroma. This keeps
+    // recoverable core authority complete and prevents temporal trust from pulsing it.
+    float shortUsable = min(lumaSafe, signalSafe);
+    float corePermission = smoothstep(0.25, 0.55, shortUsable);
+    float coreMask = clippedCore * corePermission;
+    float shoulderRaw = shoulderNeed * lumaSafe * signalSafe
+        * radianceEvidence * temporalTrust.r;
+    float shoulderMask = smoothstep(0.04, 0.58, shoulderRaw) * (1.0 - clippedCore);
+    float recoveryMask = max(coreMask, shoulderMask);
 
     // Color trust is intentionally stricter than luminance trust. If SHORT color is
     // questionable, recover its brightness/detail with LONG chromaticity instead of

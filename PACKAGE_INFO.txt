@@ -1,37 +1,41 @@
-Iris HDR Viewfinder Test V1.4.17
+Iris HDR Viewfinder Test V1.4.18
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.4.16 GitHub Actions compiled candidate/artifact
-- Commit: ef7accc0b3824bc5d1cb0d61132b98cfd7242722
-- Tree: efd62a9e36915000339f540f96b23b0d81c49199
-- Actions run: 33545839700
-- Artifact ID: 9815483773
-- Artifact digest: sha256:cba01ba366b452c69a46074dad3ad4fdc701a0c2b2ba3d3303ea21763d58e6b0
-- APK SHA-256: d5a461a268e95be17217aea1a941d7eb2efeea81d5d167297925ec2d6bb386b5
-- Source-candidate TAR SHA-256: 34e324d013e854e266f745cb0197462e526241b732c4668e18addbdfc1a7ef46
-- Runtime manifest SHA-256: 6f58dfff288e9f1cb14711c79efaa664a68d1f20d664e37ec3f474dc9c62dfba
-- Repository manifest SHA-256: dd021337629fa0fda0b60327a9b2b387e1dcdd7adf2ee7e62d79bbdd104689d8
-- Regressions SHA-256: ce11b7f049168e5acfcdf5774137f86395bc23be23a15831b0312c7b6848add5
+- Exact successful V1.4.17 GitHub Actions compiled candidate/artifact
+- Commit: b2c783c09e8e0a9050141e00c3bf23ee1617119e
+- Tree: b3a8e21f1ee06d296e9338fb6138a16083f08633
+- Actions run: 33556328139
+- Job: 100017924568
+- Artifact ID: 9819495519
+- Artifact digest: sha256:e70a5210183836b76e849fd2dc2a1826e26e2a7616f7bb8ceea4f70741aeb55a
+- APK SHA-256: dd72e93f6e51a9e66915edb150d0520b7b4637f602e40d10bf7551d2d2cc4d81
+- Source-candidate TAR SHA-256: cb2bfbb5ba6346603008347d36e28b1b4729923f092f2df6826ab43013d5a452
+- Runtime manifest SHA-256: 0b11b40e11099d0b7356108e359f0cc351ba06e0c8bb2772660a9f9964c4010d
+- Repository manifest SHA-256: 2242e89f1fcb93ac2e4f30d0100983654d739ec250f85956995f6efad7f52c03
+- Regressions SHA-256: 08fb5145239775ba087f42ac0eaf2539b5d17ba8391b7f81370a54b9f6f60af6
 
 Verification-mechanics authority:
-- Exact successful V1.4.16 Actions sequence/order.
-- V1.4.17 adds no workflow step and changes no compiler/build/invariance ordering.
-- Stable-signing mechanics remain unchanged.
-- Infrastructure changes are authority/version/hash/regression pins only.
+- Exact successful V1.4.17 V1.1 Actions 16-step compiler/build/invariance sequence.
+- V1.4.18 retains the same step order and signing/compiler/build mechanics.
+- The V1.4.17 V1.1 second-commit correction lineage guard is intentionally retired because V1.4.18 is a direct child of the successful V1.4.17 authority.
+- V1.4.18 restores the normal direct-parent authority proof and adds the required architectural backup-branch proof.
 - Real GLSL/Java/full assemble proof remains GitHub Actions authority.
 
-Backup policy:
-- No new backup for V1.4.17, per user request.
-- Existing architectural backup remains:
-  backup-v1.4.14-pre-adaptive-hdr -> 93c43a08e32eed5a0ccb146b81dd3907b2474b39
+Architectural backup requirement:
+- Required before V1.4.18 source commit because fusion ownership/live-to-still trust propagation changes are high-risk runtime architecture.
+- Required branch: backup-v1.4.17-pre-full-core-fusion
+- Required commit: b2c783c09e8e0a9050141e00c3bf23ee1617119e
+- Automated branch creation was attempted but GitHub integration returned HTTP 403; create it in GitHub before committing V1.4.18.
 
-V1.4.17 runtime changed-file allowlist: exactly four files:
+V1.4.18 runtime changed-file allowlist: exactly six files:
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
 Infrastructure changed-file list:
 - .github/workflows/build.yml
@@ -45,25 +49,28 @@ Documentation/hash pins:
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-V1.4.17 architecture:
-- HDR image fusion remains exactly one current SHORT + one current LONG. Prior pairs provide only controller/reliability hysteresis; they never contribute image pixels.
-- LONG remains the master/base image and owns all shadows, midtones, normal color and every pixel outside the highlight-recovery mask.
-- System/HAL AE remains bootstrap-only. It is not the live brightness authority and no fixed office-derived +EV correction exists.
-- AUTO LONG now meters the robust P25/P35/P50 scene body. Exposure-invariant P90/P50 and P98/P50 shape estimates whether a meaningful bright tail exists; that tail is assigned to SHORT rather than allowed to darken LONG.
-- The scene-body target varies with histogram shape and inferred scene demand. High-demand genuine low-light scenes lower the target, while a broad bright-tail scene raises it. This prevents the V1.4.16 fixed 0.045-linear office target from becoming a global brightness lock.
-- LONG convergence requires two agreeing samples and is bounded to 0.18EV per update. Brightness remains -5.0..+2.0EV and biases the learned LONG appearance target rather than directly changing bracket width.
-- SHORT remains independent highlight insurance. Bracket widening still requires stable meaningful clipping evidence and is blocked when SHORT is broadly unreliable.
-- Live fusion is now masked highlight recovery: SHORT has no authority outside LONG's highlight-need mask.
-- The live 32x24 reliability field is spatial. R stores SHORT luminance/detail trust; G stores SHORT chroma trust. It is bilinear filtered, so one unstable lamp cannot globally disable a stable recoverable window.
-- Luminance and color trust are separate. SHORT may contribute useful highlight brightness/detail while questionable SHORT chroma is rejected and LONG chromaticity is retained.
-- Neutral clipped LONG regions have an additional anti-pink color lock. A white lamp/reflection may recover highlight structure without importing pink/orange processed-ISP tint.
-- A clipped/low-signal/unstable SHORT region falls back locally to LONG. Clean stable clipping remains preferable to corrupted recovery.
-- Recovered SHORT highlights receive a wider useful display range (recovery knee 0.72, white anchor 0.90, ceiling 0.995) only inside the mask, so SHORT detail is not squeezed into near-white while ordinary LONG mids remain untouched.
-- Saved JPEG fusion mirrors the LONG-base mask and separates luminance/detail trust from chroma trust. It does not apply global Brightness gain.
-- Exposure-generation matching, temporal anti-pulsation, known/unknown flicker guards, AUTO/MANUAL adaptive SHORT policy, frozen still pair, FOV/cadence, orientation/DNG, sRGB, edge/noise ownership and stable signing are inherited from successful V1.4.16.
+V1.4.18 fusion architecture:
+- Exposure generation/policy is inherited byte-for-behavior from V1.4.17; no scene-exposure target, bracket target, flicker or 60-fps exposure math is retuned for the office sample.
+- FUSED starts from LONG and keeps LONG untouched outside actual highlight need.
+- A normalized clipped-core detector identifies where LONG has genuinely lost information.
+- If current SHORT remains signal-safe/unclipped, clipped-core detail authority reaches 1.0; slower luma history may shape only the shoulder, never attenuate the true core.
+- The outer highlight shoulder remains a soft blend to prevent hard seams.
+- Local 32x24 luma trust uses graded attack/release for the soft shoulder instead of one-sample binary reset; true clipped-core luma/detail is driven by current SHORT usability and cannot blink from the 5-Hz history state.
+- Chroma trust releases faster than luma/detail trust so unstable processed-ISP color is suppressed first.
+- At shutter time the current two-channel live trust field is frozen and propagated through CameraController -> CaptureSetSaver -> JpegFusion.
+- Full-resolution JPEG fusion bilinearly samples the frozen field for shoulder/chroma confidence and uses the same clipped-core/soft-shoulder contract; the captured SHORT itself owns clipped-core luma permission so stale preview history cannot suppress recoverable still detail.
+- Questionable SHORT color may never veto good SHORT detail; LONG chromaticity is retained at SHORT-derived recovered luminance when chroma trust is lower.
+- Neutral clipped LONG highlights retain anti-pink/anti-orange protection.
+- If SHORT is itself clipped/dark/persistently unreliable, recovery falls back locally to LONG.
+- No prior preview frame contributes image pixels; history affects only the small reliability field.
+
+Representative supplied office-pair replay:
+- V1.4.17 average recovery authority inside the strongly clipped LONG core was about 0.54.
+- V1.4.18 reaches effectively 1.0 authority across the subset of that clipped core where SHORT is actually usable.
+- This replay is regression evidence only; the algorithm itself uses normalized scene-independent clipping/signal/trust criteria.
 
 Stable updates:
 - Reuses repository secret IRIS_TEST_SIGNING_KEY_B64; do not regenerate it.
 - Stable keystore SHA-256: 2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e
 - Signing certificate SHA-256: 53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8
-- V1.4.17 versionCode 22 should install as a normal update over a V1.4.16 APK signed by this identity after successful Actions proof.
+- V1.4.18 versionCode 23 should install as a normal update over successful stable-signed V1.4.17 after successful Actions proof.

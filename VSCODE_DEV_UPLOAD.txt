@@ -1,34 +1,41 @@
-Iris HDR Viewfinder Test V1.4.17 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.18 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 Base requirement:
-main must point exactly to successful V1.4.16 commit ef7accc0b3824bc5d1cb0d61132b98cfd7242722 before the V1.4.17 upload/commit.
+main must point exactly to successful V1.4.17 commit b2c783c09e8e0a9050141e00c3bf23ee1617119e before this upload/commit.
 
-Backup:
-No new V1.4.17 backup is required.
-Existing architectural backup remains:
-backup-v1.4.14-pre-adaptive-hdr -> 93c43a08e32eed5a0ccb146b81dd3907b2474b39
+REQUIRED ARCHITECTURAL BACKUP BEFORE COMMIT:
+Create branch:
+backup-v1.4.17-pre-full-core-fusion
+from exact commit:
+b2c783c09e8e0a9050141e00c3bf23ee1617119e
+
+The Actions workflow verifies that branch before compilers. Do not commit V1.4.18 until the branch exists at exactly that commit.
 
 Signing:
 Reuse the existing repository secret IRIS_TEST_SIGNING_KEY_B64.
 Do NOT regenerate the signing key and do NOT upload any private key file.
-V1.4.17 versionCode 22 should install normally over successful stable-signed V1.4.16.
+V1.4.18 versionCode 23 should install normally over successful stable-signed V1.4.17.
 
 IMPORTANT:
 Upload ALL CONTENTS of the extracted FULL-UPLOAD ZIP into the repository root from a fresh vscode.dev workspace based on current remote main.
-Do not upload only app/ or only the four runtime files.
+Do not upload only app/ or only the six runtime files.
 
-Before committing, confirm BUILD_WORKFLOW_COPY.yml begins exactly with:
-name: Build Iris HDR Viewfinder Test V1.4.17
-and contains no commit-message text before that line.
+Before committing, confirm:
+1. main was b2c783c09e8e0a9050141e00c3bf23ee1617119e before replacement.
+2. backup-v1.4.17-pre-full-core-fusion exists at b2c783c09e8e0a9050141e00c3bf23ee1617119e.
+3. BUILD_WORKFLOW_COPY.yml begins exactly with:
+   name: Build Iris HDR Viewfinder Test V1.4.18
+4. .github/workflows/build.yml and BUILD_WORKFLOW_COPY.yml are byte-identical.
+5. No file outside this FULL candidate is added or removed.
 
 Suggested commit message:
-V1.4.17 adaptive LONG + masked SHORT recovery
+V1.4.18 stable full-core live/JPEG fusion
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.17.
-Do not call V1.4.17 build-proven until the workflow succeeds and its compiled artifact/signing certificate are verified.
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.18.
+Do not call V1.4.18 build-proven until the workflow succeeds and its compiled artifact/signing certificate are verified.
 
 Runtime logs after installation:
 Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt

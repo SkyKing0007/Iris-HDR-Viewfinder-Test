@@ -400,8 +400,10 @@ final class CameraController {
         cameraHandler.post(() -> processHdrSceneStatsLocked(stats));
     }
 
-    void captureHdrSet() {
-        cameraHandler.post(this::beginCaptureLocked);
+    void captureHdrSet(byte[] shortReliabilityMap) {
+        final byte[] frozenReliability = shortReliabilityMap == null
+                ? null : shortReliabilityMap.clone();
+        cameraHandler.post(() -> beginCaptureLocked(frozenReliability));
     }
 
     void setJpegOrientationDegrees(int degrees) {
@@ -916,7 +918,7 @@ final class CameraController {
                 }
             };
 
-    private void beginCaptureLocked() {
+    private void beginCaptureLocked(byte[] frozenShortReliabilityMap) {
         if (capturing || cameraDevice == null || characteristics == null
                 || captureSession == null || previewSurface == null || !previewSurface.isValid()) {
             listener.onStatus(capturing ? "Capture already in progress" : "Camera not ready");
@@ -951,6 +953,7 @@ final class CameraController {
                 captureId,
                 jpegOrientationDegrees,
                 captureDisplayBrightnessEv,
+                frozenShortReliabilityMap,
                 new CaptureSetSaver.Listener() {
                     @Override
                     public void onInputsAcquired(String id) {
