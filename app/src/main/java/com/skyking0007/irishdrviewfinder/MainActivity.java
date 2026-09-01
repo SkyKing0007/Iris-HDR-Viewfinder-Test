@@ -55,6 +55,10 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private static final String STATE_ISO_INDEX = "isoIndex";
     private static final String STATE_AUTO_HDR = "autoHdr";
     private static final String STATE_ALLOW_CROPPED_60 = "allowCropped60";
+    private static final String STATE_DISPLAY_BRIGHTNESS_EV = "displayBrightnessEv";
+    private static final float DISPLAY_BRIGHTNESS_MIN_EV = -1.0f;
+    private static final float DISPLAY_BRIGHTNESS_MAX_EV = 1.0f;
+    private static final int DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10;
     private static final long[] EXPOSURES_NS = {
             1_000_000_000L / 8000,
             1_000_000_000L / 4000,
@@ -82,11 +86,13 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private TextView shortLabel;
     private TextView longLabel;
     private TextView isoLabel;
+    private TextView brightnessLabel;
     private Spinner cameraSpinner;
     private Spinner modeSpinner;
     private SeekBar shortBar;
     private SeekBar longBar;
     private SeekBar isoBar;
+    private SeekBar brightnessBar;
     private Button captureButton;
     private Button autoButton;
     private Button fpsButton;
@@ -99,6 +105,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private volatile int isoIndex = 2;
     private volatile boolean autoHdrEnabled = true;
     private volatile boolean allowCropped60Fps;
+    private volatile float displayBrightnessEv;
     private final Handler heartbeatHandler = new Handler(Looper.getMainLooper());
     private boolean heartbeatScheduled;
     private final Runnable heartbeatRunnable = new Runnable() {
@@ -132,6 +139,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
         buildUi();
         controller = new CameraController(this, this);
         glView.setInputSurfaceListener(controller::setPreviewSurface);
+        glView.setDisplayBrightnessEv(displayBrightnessEv);
+        controller.setDisplayBrightnessEv(displayBrightnessEv);
         controller.setAllowCropped60Fps(allowCropped60Fps);
         controller.setAutoHdrExposure(autoHdrEnabled);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
@@ -151,6 +160,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
         isoIndex = clampIndex(state.getInt(STATE_ISO_INDEX, isoIndex), ISO_VALUES.length);
         autoHdrEnabled = state.getBoolean(STATE_AUTO_HDR, autoHdrEnabled);
         allowCropped60Fps = state.getBoolean(STATE_ALLOW_CROPPED_60, allowCropped60Fps);
+        displayBrightnessEv = Math.max(DISPLAY_BRIGHTNESS_MIN_EV,
+                Math.min(DISPLAY_BRIGHTNESS_MAX_EV, state.getFloat(STATE_DISPLAY_BRIGHTNESS_EV, displayBrightnessEv)));
     }
 
     @Override
@@ -163,6 +174,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         outState.putInt(STATE_ISO_INDEX, isoIndex);
         outState.putBoolean(STATE_AUTO_HDR, autoHdrEnabled);
         outState.putBoolean(STATE_ALLOW_CROPPED_60, allowCropped60Fps);
+        outState.putFloat(STATE_DISPLAY_BRIGHTNESS_EV, displayBrightnessEv);
     }
 
     private void buildUi() {
@@ -223,6 +235,12 @@ public final class MainActivity extends Activity implements CameraController.Lis
         isoBar.setMax(ISO_VALUES.length - 1);
         isoBar.setProgress(isoIndex);
 
+        brightnessLabel = textView(brightnessLabelText(displayBrightnessEv), 12);
+        brightnessBar = new SeekBar(this);
+        brightnessBar.setMax(Math.round((DISPLAY_BRIGHTNESS_MAX_EV - DISPLAY_BRIGHTNESS_MIN_EV)
+                * DISPLAY_BRIGHTNESS_STEPS_PER_EV));
+        brightnessBar.setProgress(brightnessProgressForEv(displayBrightnessEv));
+
         if (portrait) {
             buildPortraitControls(panel, autoButton, fpsButton);
         } else {
@@ -273,6 +291,19 @@ public final class MainActivity extends Activity implements CameraController.Lis
         shortBar.setOnSeekBarChangeListener(settingsListener);
         longBar.setOnSeekBarChangeListener(settingsListener);
         isoBar.setOnSeekBarChangeListener(settingsListener);
+        brightnessBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (!fromUser || updatingControls) return;
+                displayBrightnessEv = brightnessEvForProgress(progress);
+                brightnessLabel.setText(brightnessLabelText(displayBrightnessEv));
+                glView.setDisplayBrightnessEv(displayBrightnessEv);
+                if (controller != null) controller.setDisplayBrightnessEv(displayBrightnessEv);
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
 
         autoButton.setOnClickListener(v -> {
             autoHdrEnabled = !autoHdrEnabled;
@@ -330,6 +361,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         panel.addView(makeSliderRow(shortLabel, shortBar), matchWrap());
         panel.addView(makeSliderRow(longLabel, longBar), matchWrap());
         panel.addView(makeSliderRow(isoLabel, isoBar), matchWrap());
+        panel.addView(makeSliderRow(brightnessLabel, brightnessBar), matchWrap());
     }
 
     private void buildLandscapeControls(LinearLayout panel, Button autoButton, Button fpsButton) {
@@ -349,6 +381,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         row2.addView(isoLabel, weighted(0.5f));
         row2.addView(isoBar, weighted(1f));
         panel.addView(row2, matchWrap());
+        panel.addView(makeSliderRow(brightnessLabel, brightnessBar), matchWrap());
     }
 
     private LinearLayout makeSliderRow(TextView label, SeekBar bar) {
@@ -476,6 +509,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
         int previewRelation = (sensorOrientation - displayDegrees + 360) % 360;
         int jpegOrientation = (sensorOrientation - displayDegrees + 360) % 360;
         glView.setProducerOwnedOrientationDegrees(previewRelation);
+        glView.setDisplayBrightnessEv(displayBrightnessEv);
+        controller.setDisplayBrightnessEv(displayBrightnessEv);
         controller.setJpegOrientationDegrees(jpegOrientation);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
         controller.setAutoHdrExposure(autoHdrEnabled);
@@ -553,6 +588,20 @@ public final class MainActivity extends Activity implements CameraController.Lis
                     Toast.LENGTH_LONG).show();
             statusText.setText(message);
         });
+    }
+
+    private static int brightnessProgressForEv(float ev) {
+        float clamped = Math.max(DISPLAY_BRIGHTNESS_MIN_EV, Math.min(DISPLAY_BRIGHTNESS_MAX_EV, ev));
+        return Math.round((clamped - DISPLAY_BRIGHTNESS_MIN_EV) * DISPLAY_BRIGHTNESS_STEPS_PER_EV);
+    }
+
+    private static float brightnessEvForProgress(int progress) {
+        float ev = DISPLAY_BRIGHTNESS_MIN_EV + progress / (float) DISPLAY_BRIGHTNESS_STEPS_PER_EV;
+        return Math.max(DISPLAY_BRIGHTNESS_MIN_EV, Math.min(DISPLAY_BRIGHTNESS_MAX_EV, ev));
+    }
+
+    private static String brightnessLabelText(float ev) {
+        return String.format(Locale.US, "Brightness %+.1f EV", ev);
     }
 
     private void scheduleHeartbeat() {

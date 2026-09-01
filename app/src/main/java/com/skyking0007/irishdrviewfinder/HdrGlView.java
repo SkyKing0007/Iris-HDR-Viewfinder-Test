@@ -78,6 +78,11 @@ final class HdrGlView extends GLSurfaceView {
         requestRender();
     }
 
+    void setDisplayBrightnessEv(float ev) {
+        renderer.displayBrightnessEv = Math.max(-1.0f, Math.min(1.0f, ev));
+        requestRender();
+    }
+
     void setProducerOwnedOrientationDegrees(int degrees) {
         int normalized = ((degrees % 360) + 360) % 360;
         // SurfaceTexture.getTransformMatrix() is consumed in the OES pass and the
@@ -120,6 +125,7 @@ final class HdrGlView extends GLSurfaceView {
         private final PendingFrame[] pendingFrames = new PendingFrame[PENDING_SLOTS];
 
         volatile Mode mode = Mode.HDR;
+        volatile float displayBrightnessEv = 0.0f;
         volatile int rotationQuarterTurns = 0;
         volatile boolean producerAxisSwap;
         volatile long droppedFrames = 0;
@@ -445,6 +451,9 @@ final class HdrGlView extends GLSurfaceView {
                 ratio = (float) Math.max(1.0, Math.min(65_536.0, r));
             }
             GLES30.glUniform1f(GLES30.glGetUniformLocation(displayProgram, "exposureRatio"), ratio);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "displayBrightnessEv"),
+                    displayBrightnessEv);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 

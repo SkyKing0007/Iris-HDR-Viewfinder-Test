@@ -1,6 +1,5 @@
 #version 300 es
 precision highp float;
-const float HDR_CLIP_END = 0.995;
 in vec2 vUv;
 layout(location=0) out vec4 outColor;
 uniform sampler2D normalTex;
@@ -12,6 +11,7 @@ uniform int haveNormal;
 uniform int haveShort;
 uniform int haveLong;
 uniform float exposureRatio;
+uniform float displayBrightnessEv;
 uniform vec2 fullFitScale;
 uniform vec2 splitFitScale;
 
@@ -78,12 +78,12 @@ float adaptiveClipStart(float bracketStops) {
 vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
     // LONG owns shadows/midtones unchanged. Recovered scene values above the
     // display range are compressed by bracket width while preserving RGB ratios.
-    const float knee = 0.78;
+    const float knee = 0.70;
     float scenePeak = max3(sceneLinear);
     if (scenePeak <= knee || scenePeak <= 0.000001) return sceneLinear;
 
-    float whiteAnchor = clamp(0.95 - 0.015 * (bracketStops - 1.0), 0.88, 0.95);
-    float displayCeiling = clamp(whiteAnchor + 0.065, 0.965, 0.995);
+    float whiteAnchor = clamp(0.82 - 0.04 * (bracketStops - 1.0), 0.68, 0.82);
+    float displayCeiling = clamp(whiteAnchor + 0.14, 0.84, 0.96);
     float mappedPeak;
 
     if (scenePeak <= 1.0) {
@@ -98,64 +98,54 @@ vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
     return sceneLinear * (mappedPeak / scenePeak);
 }
 
-vec3 adaptiveAppearanceLift(vec3 displayLinear) {
-    // V1.4.10 keeps the lift pointwise and RGB-ratio preserving, but replaces the
-    // narrow V1.4.8 Gaussian bump with an analytically monotonic broad lift. The
-    // perceptual mapping derivative stays positive, so neighboring tones cannot
-    // collapse or reverse and no spatial/cross-edge operator is introduced.
-    float linearY = dot(displayLinear, vec3(0.2126, 0.7152, 0.0722));
-    if (linearY <= 0.000001) return displayLinear;
-    float perceptualY = linearToSrgbChannel(clamp(linearY, 0.0, 1.0));
-    float oneMinusY = 1.0 - perceptualY;
-    float oneMinusY2 = oneMinusY * oneMinusY;
-    float targetY = perceptualY
-            + 1.50 * perceptualY * perceptualY * oneMinusY2 * oneMinusY2;
-    targetY = clamp(targetY, 0.0, 1.0);
-    float targetLinearY = srgbToLinearChannel(targetY);
-    float scale = targetLinearY / linearY;
-    float peak = max3(displayLinear);
-    if (peak > 0.000001) scale = min(scale, 0.98 / peak);
-    return displayLinear * scale;
-}
-
-float encodedLuma(vec3 rgb) {
+float linearLuma(vec3 rgb) {
     return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
 }
 
-vec3 highlightColorFromSources(
-        vec3 fusedRgb, vec3 shortRgb, vec3 longRgb,
-        float longEncodedPeak, float clipStart) {
-    // HDR luminance always evaluates SHORT + LONG. Color ownership changes only in
-    // the highlight handoff: LONG remains untouched elsewhere, while unscaled SHORT
-    // chromaticity takes over as LONG loses headroom. No semantic/device classifier.
-    float targetY = encodedLuma(fusedRgb);
-    float shortPeak = max3(shortRgb);
-    float shortColorSignal = smoothstep(0.025, 0.10, shortPeak);
-    float colorStart = max(0.78, clipStart - 0.15);
-    float colorNeed = smoothstep(colorStart, HDR_CLIP_END, longEncodedPeak) * shortColorSignal;
-    if (colorNeed <= 0.0005) return fusedRgb;
+float secondLargest3(vec3 rgb) {
+    float maximum = max3(rgb);
+    float minimum = min(rgb.r, min(rgb.g, rgb.b));
+    return rgb.r + rgb.g + rgb.b - maximum - minimum;
+}
 
-    vec3 sourceRgb = mix(longRgb, shortRgb, colorNeed);
-    float sourceY = encodedLuma(sourceRgb);
-    if (sourceY <= 0.0001) return fusedRgb;
+float gamutScaleForComponent(float currentScale, float targetY, float chroma) {
+    if (chroma > 0.000001) return min(currentScale, (1.0 - targetY) / chroma);
+    if (chroma < -0.000001) return min(currentScale, targetY / (-chroma));
+    return currentScale;
+}
 
-    vec3 sourceChroma = sourceRgb - vec3(sourceY);
-    float chromaSq = dot(sourceChroma, sourceChroma);
-    float strongColor = smoothstep(0.0144, 0.0576, chromaSq);
-    float displayGain = max(targetY / sourceY, 1.0);
-    float chromaGain = 1.0 + (displayGain - 1.0) * strongColor;
-    vec3 chroma = sourceChroma * chromaGain;
+vec3 highlightColorOwnership(
+        vec3 targetDisplayLinear,
+        vec3 longScene,
+        vec3 shortScene,
+        vec3 longRgb,
+        vec3 shortRgb,
+        float highlightWeight) {
+    float targetY = linearLuma(targetDisplayLinear);
+    float longY = linearLuma(longScene);
+    if (targetY <= 0.000001 || longY <= 0.000001) return targetDisplayLinear;
 
-    float gamutScale = 1.0;
-    for (int channel = 0; channel < 3; ++channel) {
-        float component = chroma[channel];
-        if (component > 0.000001) {
-            gamutScale = min(gamutScale, (1.0 - targetY) / component);
-        } else if (component < -0.000001) {
-            gamutScale = min(gamutScale, targetY / (-component));
-        }
+    vec3 owned = longScene * (targetY / longY);
+
+    // A single high red/orange channel does not surrender color ownership to SHORT.
+    // SHORT chromaticity participates only after at least two LONG channels are
+    // genuinely near clipping and SHORT itself has useful signal.
+    float multiChannelClip = smoothstep(0.985, 0.998, secondLargest3(longRgb));
+    float shortSignal = smoothstep(0.025, 0.10, max3(shortRgb));
+    float shortColorNeed = clamp(highlightWeight * multiChannelClip * shortSignal, 0.0, 1.0);
+    float shortY = linearLuma(shortScene);
+    if (shortColorNeed > 0.0005 && shortY > 0.000001) {
+        vec3 shortOwned = shortScene * (targetY / shortY);
+        owned = mix(owned, shortOwned, shortColorNeed);
     }
-    return vec3(targetY) + chroma * clamp(gamutScale, 0.0, 1.0);
+
+    float ownedY = linearLuma(owned);
+    vec3 chroma = owned - vec3(ownedY);
+    float gamutScale = 1.0;
+    gamutScale = gamutScaleForComponent(gamutScale, targetY, chroma.r);
+    gamutScale = gamutScaleForComponent(gamutScale, targetY, chroma.g);
+    gamutScale = gamutScaleForComponent(gamutScale, targetY, chroma.b);
+    return clamp(vec3(targetY) + chroma * clamp(gamutScale, 0.0, 1.0), 0.0, 1.0);
 }
 
 void main() {
@@ -206,20 +196,24 @@ void main() {
     float longScenePeak = max(max3(longScene), 0.000001);
     float shortScenePeak = max3(shortScene);
     float shortConfidence = smoothstep(0.35, 0.65, shortScenePeak / longScenePeak);
-    float clipStart = adaptiveClipStart(bracketStops);
     float highlightWeight = smoothstep(
-        clipStart,
-        HDR_CLIP_END,
+        adaptiveClipStart(bracketStops),
+        0.995,
         longEncodedPeak) * shortConfidence;
 
-    // Full-RGB handoff avoids per-channel clipping seams and preserves highlight hue.
+    // HDR reconstruction completes before display brightness is applied. The slider
+    // cannot change capture, bracket width, SHORT admission, or fusion ownership.
     vec3 mergedScene = mix(longScene, shortScene, highlightWeight);
-    vec3 displayLinear = adaptiveHdrToneMap(mergedScene, ratio, bracketStops);
-    displayLinear = adaptiveAppearanceLift(displayLinear);
-    vec3 displayRgb = linearToSrgb(displayLinear);
+    float brightnessGain = exp2(clamp(displayBrightnessEv, -1.0, 1.0));
+    vec3 displayLinear = adaptiveHdrToneMap(mergedScene * brightnessGain, ratio, bracketStops);
+
+    // Preserve the recovered HDR luminance but keep LONG chroma through the handoff.
+    // SHORT color is admitted only for true multi-channel LONG clipping. No spatial
+    // operator is used, preserving foliage/sky and thin-edge boundaries.
     if (highlightWeight > 0.0005) {
-        displayRgb = highlightColorFromSources(
-                displayRgb, shortRgb, longRgb, longEncodedPeak, clipStart);
+        displayLinear = highlightColorOwnership(
+                displayLinear, longScene, shortScene, longRgb, shortRgb, highlightWeight);
     }
+    vec3 displayRgb = linearToSrgb(displayLinear);
     outColor = vec4(clamp(displayRgb, 0.0, 1.0), 1.0);
 }

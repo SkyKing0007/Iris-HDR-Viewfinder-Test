@@ -11,14 +11,17 @@ import java.io.ByteArrayOutputStream;
 final class JpegFusion {
     private static final float[] SRGB_TO_LINEAR = buildLinearLut();
     private static final int[] LINEAR_TO_SRGB = buildEncodeLut();
-    private static final float[] APPEARANCE_TARGET_LINEAR = buildAppearanceTargetLinearLut();
     private static final double LOG_2 = Math.log(2.0);
-    private static final float HDR_KNEE = 0.78f;
+    private static final float HDR_KNEE = 0.70f;
     private static final float HDR_CLIP_END = 0.995f;
 
     private JpegFusion() {}
 
-    static byte[] fuse(byte[] shortJpeg, byte[] longJpeg, double exposureRatio) throws Exception {
+    static byte[] fuse(
+            byte[] shortJpeg,
+            byte[] longJpeg,
+            double exposureRatio,
+            float displayBrightnessEv) throws Exception {
         Bitmap shortBitmap = decodeUpright(shortJpeg);
         Bitmap longBitmap = decodeUpright(longJpeg);
         if (shortBitmap == null || longBitmap == null) {
@@ -40,13 +43,15 @@ final class JpegFusion {
         int[] shortPixels = new int[width * rowsPerStrip];
         int[] longPixels = new int[width * rowsPerStrip];
         int[] outPixels = new int[width * rowsPerStrip];
-        float[] highlightColor = new float[3];
+        float[] colorOwned = new float[3];
 
+        float clampedBrightnessEv = clamp(displayBrightnessEv, -1.0f, 1.0f);
+        float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
         float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 1.0f, 6.0f);
         float clipStart = clamp(0.90f + 0.01f * (bracketStops - 1.0f), 0.90f, 0.95f);
-        float whiteAnchor = clamp(0.95f - 0.015f * (bracketStops - 1.0f), 0.88f, 0.95f);
-        float displayCeiling = clamp(whiteAnchor + 0.065f, 0.965f, 0.995f);
+        float whiteAnchor = clamp(0.82f - 0.04f * (bracketStops - 1.0f), 0.68f, 0.82f);
+        float displayCeiling = clamp(whiteAnchor + 0.14f, 0.84f, 0.96f);
         float headroomLog2 = Math.max(log2(Math.max(ratio, 1.0001f)), 0.0001f);
 
         for (int y = 0; y < height; y += rowsPerStrip) {
@@ -92,44 +97,48 @@ final class JpegFusion {
                 float mb = lb + (sb - lb) * highlightWeight;
 
                 float scenePeak = Math.max(mr, Math.max(mg, mb));
-                float mappedPeak = scenePeak;
-                if (scenePeak > HDR_KNEE) {
-                    if (scenePeak <= 1.0f) {
-                        float t = clamp((scenePeak - HDR_KNEE) / (1.0f - HDR_KNEE), 0.0f, 1.0f);
+
+                // Brightness is a presentation exposure applied only after SHORT/LONG
+                // fusion has finished. It cannot change capture, exposure ratio, or
+                // highlight admission. V1.4.7 HDR mapping then spends only the
+                // highlight headroom needed to keep that requested lift displayable.
+                float boostedPeak = scenePeak * brightnessGain;
+                float mappedPeak = boostedPeak;
+                if (boostedPeak > HDR_KNEE) {
+                    if (boostedPeak <= 1.0f) {
+                        float t = clamp((boostedPeak - HDR_KNEE) / (1.0f - HDR_KNEE), 0.0f, 1.0f);
                         mappedPeak = HDR_KNEE + (whiteAnchor - HDR_KNEE) * t;
                     } else {
-                        float t = clamp(log2(scenePeak) / headroomLog2, 0.0f, 1.0f);
+                        float t = clamp(log2(boostedPeak) / headroomLog2, 0.0f, 1.0f);
                         mappedPeak = whiteAnchor + (displayCeiling - whiteAnchor) * t;
                     }
                 }
 
-                // One scale for all channels preserves recovered highlight hue.
-                float toneScale = scenePeak > 0.000001f ? mappedPeak / scenePeak : 1.0f;
-                float tr = mr * toneScale;
-                float tg = mg * toneScale;
-                float tb = mb * toneScale;
-                float appearanceScale = appearanceLiftScale(tr, tg, tb);
-                float fusedR = encode(tr * appearanceScale) / 255.0f;
-                float fusedG = encode(tg * appearanceScale) / 255.0f;
-                float fusedB = encode(tb * appearanceScale) / 255.0f;
-                // Color ownership follows the same HDR reliability decision. SHORT is
-                // evaluated for every pixel, but ordinary LONG-owned shadows/midtones
-                // remain on the proven fused path. Only where normalized SHORT actually
-                // participates in highlight recovery do we transition toward unscaled
-                // source chromaticity.
+                float toneScale = boostedPeak > 0.000001f ? mappedPeak / boostedPeak : 1.0f;
+                float tr = mr * brightnessGain * toneScale;
+                float tg = mg * brightnessGain * toneScale;
+                float tb = mb * brightnessGain * toneScale;
+
+                // Preserve V1.4.7 HDR luminance while preventing normalized SHORT JPEG
+                // chroma errors from creating red/orange/pink speckles. LONG owns color
+                // throughout the handoff unless LONG has lost at least two highlight
+                // channels and SHORT has usable signal. This is strictly pixel-local.
                 if (highlightWeight > 0.0005f) {
-                    highlightColorFromSources(
-                            fusedR, fusedG, fusedB,
-                            sr8 / 255.0f, sg8 / 255.0f, sb8 / 255.0f,
+                    applyHighlightColorOwnership(
+                            tr, tg, tb,
+                            lr, lg, lb,
+                            sr, sg, sb,
                             lr8 / 255.0f, lg8 / 255.0f, lb8 / 255.0f,
-                            longEncodedPeak, clipStart, highlightColor);
-                    fusedR = highlightColor[0];
-                    fusedG = highlightColor[1];
-                    fusedB = highlightColor[2];
+                            sr8 / 255.0f, sg8 / 255.0f, sb8 / 255.0f,
+                            highlightWeight, colorOwned);
+                    tr = colorOwned[0];
+                    tg = colorOwned[1];
+                    tb = colorOwned[2];
                 }
-                int ro = encodeSrgb(fusedR);
-                int go = encodeSrgb(fusedG);
-                int bo = encodeSrgb(fusedB);
+
+                int ro = encode(tr);
+                int go = encode(tg);
+                int bo = encode(tb);
                 outPixels[i] = 0xFF000000 | (ro << 16) | (go << 8) | bo;
             }
             output.setPixels(outPixels, 0, width, 0, y, width, rows);
@@ -186,126 +195,71 @@ final class JpegFusion {
         return upright;
     }
 
-    private static float appearanceLiftScale(float r, float g, float b) {
-        // V1.4.10 uses the same bounded monotonic appearance curve as the live shader.
-        // sRGB transfer pow remains precomputed so full-resolution fusion only interpolates a LUT.
-        float linearY = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-        if (linearY <= 0.000001f) return 1.0f;
-        float position = clamp(linearY, 0.0f, 1.0f) * (APPEARANCE_TARGET_LINEAR.length - 1);
-        int lower = Math.max(0, Math.min(APPEARANCE_TARGET_LINEAR.length - 1, (int) position));
-        int upper = Math.min(APPEARANCE_TARGET_LINEAR.length - 1, lower + 1);
-        float fraction = position - lower;
-        float targetLinearY = APPEARANCE_TARGET_LINEAR[lower]
-                + (APPEARANCE_TARGET_LINEAR[upper] - APPEARANCE_TARGET_LINEAR[lower]) * fraction;
-        float scale = targetLinearY / linearY;
-        float peak = Math.max(r, Math.max(g, b));
-        if (peak > 0.000001f) scale = Math.min(scale, 0.98f / peak);
-        return scale;
-    }
-
-    private static float encodedLuma(float r, float g, float b) {
-        return 0.2126f * r + 0.7152f * g + 0.0722f * b;
-    }
-
-    private static void highlightColorFromSources(
-            float fusedR, float fusedG, float fusedB,
-            float shortR, float shortG, float shortB,
-            float longR, float longG, float longB,
-            float longEncodedPeak,
-            float clipStart,
+    private static void applyHighlightColorOwnership(
+            float targetR, float targetG, float targetB,
+            float longSceneR, float longSceneG, float longSceneB,
+            float shortSceneR, float shortSceneG, float shortSceneB,
+            float longEncodedR, float longEncodedG, float longEncodedB,
+            float shortEncodedR, float shortEncodedG, float shortEncodedB,
+            float highlightWeight,
             float[] out) {
-        // HDR luminance has already been solved from both exposures. LONG retains its
-        // proven color outside the highlight handoff. As LONG approaches saturation,
-        // unscaled SHORT source RGB becomes the color authority before normalized RGB
-        // can magnify tiny ISP chroma errors into orange/pink/green specks.
-        float targetY = encodedLuma(fusedR, fusedG, fusedB);
-        float shortPeak = Math.max(shortR, Math.max(shortG, shortB));
-        float shortColorSignal = smoothstep(0.025f, 0.10f, shortPeak);
-        float colorStart = Math.max(0.78f, clipStart - 0.15f);
-        float colorNeed = smoothstep(colorStart, HDR_CLIP_END, longEncodedPeak)
-                * shortColorSignal;
-        if (colorNeed <= 0.0005f) {
-            out[0] = fusedR; out[1] = fusedG; out[2] = fusedB;
+        float targetY = linearLuma(targetR, targetG, targetB);
+        float longY = linearLuma(longSceneR, longSceneG, longSceneB);
+        if (targetY <= 0.000001f || longY <= 0.000001f) {
+            out[0] = targetR; out[1] = targetG; out[2] = targetB;
             return;
         }
 
-        float sourceR = longR + (shortR - longR) * colorNeed;
-        float sourceG = longG + (shortG - longG) * colorNeed;
-        float sourceB = longB + (shortB - longB) * colorNeed;
-        float sourceY = encodedLuma(sourceR, sourceG, sourceB);
-        if (sourceY <= 0.0001f) {
-            out[0] = fusedR; out[1] = fusedG; out[2] = fusedB;
-            return;
+        float longScale = targetY / longY;
+        float ownedR = longSceneR * longScale;
+        float ownedG = longSceneG * longScale;
+        float ownedB = longSceneB * longScale;
+
+        float secondLong = secondLargest3(longEncodedR, longEncodedG, longEncodedB);
+        float multiChannelClip = smoothstep(0.985f, 0.998f, secondLong);
+        float shortPeak = Math.max(shortEncodedR, Math.max(shortEncodedG, shortEncodedB));
+        float shortSignal = smoothstep(0.025f, 0.10f, shortPeak);
+        float shortColorNeed = clamp(highlightWeight * multiChannelClip * shortSignal, 0.0f, 1.0f);
+
+        float shortY = linearLuma(shortSceneR, shortSceneG, shortSceneB);
+        if (shortColorNeed > 0.0005f && shortY > 0.000001f) {
+            float shortScale = targetY / shortY;
+            float shortR = shortSceneR * shortScale;
+            float shortG = shortSceneG * shortScale;
+            float shortB = shortSceneB * shortScale;
+            ownedR += (shortR - ownedR) * shortColorNeed;
+            ownedG += (shortG - ownedG) * shortColorNeed;
+            ownedB += (shortB - ownedB) * shortColorNeed;
         }
 
-        float sourceCr = sourceR - sourceY;
-        float sourceCg = sourceG - sourceY;
-        float sourceCb = sourceB - sourceY;
-        float chromaSq = sourceCr * sourceCr + sourceCg * sourceCg + sourceCb * sourceCb;
-        // Low/moderate source chroma stays at its actual encoded amplitude rather than
-        // being multiplied by display gain. Strong genuine source color progressively
-        // receives the full gain so vivid saturation is not globally suppressed.
-        float strongColor = smoothstep(0.0144f, 0.0576f, chromaSq);
-        float displayGain = Math.max(targetY / sourceY, 1.0f);
-        float chromaGain = 1.0f + (displayGain - 1.0f) * strongColor;
-        float chromaR = sourceCr * chromaGain;
-        float chromaG = sourceCg * chromaGain;
-        float chromaB = sourceCb * chromaGain;
-
+        float ownedY = linearLuma(ownedR, ownedG, ownedB);
+        float chromaR = ownedR - ownedY;
+        float chromaG = ownedG - ownedY;
+        float chromaB = ownedB - ownedY;
         float gamutScale = 1.0f;
         gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaR);
         gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaG);
         gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaB);
         gamutScale = clamp(gamutScale, 0.0f, 1.0f);
-
         out[0] = clamp(targetY + chromaR * gamutScale, 0.0f, 1.0f);
         out[1] = clamp(targetY + chromaG * gamutScale, 0.0f, 1.0f);
         out[2] = clamp(targetY + chromaB * gamutScale, 0.0f, 1.0f);
     }
 
+    private static float linearLuma(float r, float g, float b) {
+        return 0.2126f * r + 0.7152f * g + 0.0722f * b;
+    }
+
+    private static float secondLargest3(float r, float g, float b) {
+        float maximum = Math.max(r, Math.max(g, b));
+        float minimum = Math.min(r, Math.min(g, b));
+        return r + g + b - maximum - minimum;
+    }
+
     private static float gamutScaleForChannel(float current, float targetY, float chroma) {
-        if (chroma > 0.000001f) {
-            return Math.min(current, (1.0f - targetY) / chroma);
-        }
-        if (chroma < -0.000001f) {
-            return Math.min(current, targetY / (-chroma));
-        }
+        if (chroma > 0.000001f) return Math.min(current, (1.0f - targetY) / chroma);
+        if (chroma < -0.000001f) return Math.min(current, targetY / (-chroma));
         return current;
-    }
-
-    private static float length3(float r, float g, float b) {
-        return (float) Math.sqrt(r * r + g * g + b * b);
-    }
-
-    private static int encodeSrgb(float encoded) {
-        return Math.round(255.0f * clamp(encoded, 0.0f, 1.0f));
-    }
-
-    private static float[] buildAppearanceTargetLinearLut() {
-        float[] lut = new float[4096];
-        for (int i = 0; i < lut.length; i++) {
-            float linearY = i / (float) (lut.length - 1);
-            float perceptualY = linearToSrgbFloat(linearY);
-            float oneMinusY = 1.0f - perceptualY;
-            float oneMinusY2 = oneMinusY * oneMinusY;
-            float targetY = perceptualY
-                    + 1.50f * perceptualY * perceptualY * oneMinusY2 * oneMinusY2;
-            lut[i] = srgbToLinearFloat(clamp(targetY, 0.0f, 1.0f));
-        }
-        return lut;
-    }
-
-    private static float srgbToLinearFloat(float encoded) {
-        return encoded <= 0.04045f
-                ? encoded / 12.92f
-                : (float) Math.pow((encoded + 0.055f) / 1.055f, 2.4);
-    }
-
-    private static float linearToSrgbFloat(float linear) {
-        float value = Math.max(0.0f, linear);
-        return value <= 0.0031308f
-                ? 12.92f * value
-                : 1.055f * (float) Math.pow(value, 1.0 / 2.4) - 0.055f;
     }
 
     private static int encode(float linear) {
