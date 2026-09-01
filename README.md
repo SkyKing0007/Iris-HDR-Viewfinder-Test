@@ -1,47 +1,52 @@
-# Iris HDR Viewfinder Test V1.4.16
+# Iris HDR Viewfinder Test V1.4.17
 
-V1.4.16 is a live two-exposure HDR stability/appearance correction built from the exact successful V1.4.15 GitHub Actions compiled candidate. The HDR image is still exactly **one current SHORT + one current LONG**; previous pairs are used only for controller/reliability hysteresis, never image stacking.
+V1.4.17 keeps the successful V1.4.16 anti-pink/temporal foundation but changes the HDR ownership model in two focused ways: **LONG learns scene-body appearance adaptively**, and **SHORT is a masked highlight-recovery layer rather than a broad blend partner**.
 
-## LONG represents the scene
+## LONG is the master image
 
-Clean HAL AE remains the bootstrap seed, but V1.4.16 no longer lets a highlight-protecting initial exposure permanently define a dark room as correct `0 EV` appearance.
+System/HAL AE is bootstrap-only. After startup, AUTO LONG is driven by matched-pair scene statistics rather than by highlight-protecting AE or a fixed office-derived brightness correction.
 
-The live 32x24 statistics now include the LONG median and p98 highlight tail. LONG targets the main scene body, while bright windows/lights are allowed to clip into SHORT ownership. A strong HDR tail raises the `0 EV` scene-body floor to `0.045` linear. LONG convergence is limited to `0.20 EV` per live update so scene adaptation remains smooth.
+The controller measures the robust P25/P35/P50 scene body and uses P90/P50 plus P98/P50 histogram shape to estimate whether a meaningful bright tail exists. Broad windows/lights are therefore treated as SHORT's responsibility instead of forcing the whole LONG exposure darker. The target also adapts downward for genuinely high-demand low-light scenes, so the office correction is not a global +EV lock.
 
-Brightness stays `-5.0 EV` to `+2.0 EV` in 0.1-EV steps and continues to bias LONG appearance. It does not directly widen the HDR bracket.
+LONG changes require consecutive evidence and are limited to 0.18 EV per update. The user Brightness control remains -5.0..+2.0 EV and biases this learned LONG appearance target.
 
-## SHORT is highlight insurance, not a second appearance image
+## SHORT is a masked highlight layer
 
-SHORT adapts only to recover meaningful highlight loss from LONG. Bracket widening requires two consecutive stable clipping samples; release requires three, so one noisy threshold crossing cannot make successive fused pairs alternate.
+The fused image begins as LONG. SHORT has no authority outside regions where LONG's highlight shoulder/clip genuinely needs recovery.
 
-Every live exposure configuration has an immutable generation ID. Only SHORT and LONG from the exact same generation can become a displayed pair, and statistics from an older generation are discarded after new settings are issued.
+Inside that mask, SHORT is evaluated locally for:
 
-## No pink/white/pink pulsation
+- usable signal and unclipped highlight information;
+- normalized radiance evidence beyond LONG;
+- temporal luminance stability;
+- temporal chroma stability;
+- processed-RGB channel agreement;
+- neutral-highlight color safety.
 
-V1.4.16 treats SHORT reliability as part of HDR fusion:
+The live 32x24 reliability map stores luminance/detail trust separately from chroma trust. This means a stable window can recover even if a different ceiling lamp is unstable, and a SHORT frame can contribute highlight structure without being allowed to import pink/orange tint.
 
-- two consecutive 32x24 samples must show stable normalized SHORT highlight brightness/chroma before live SHORT gains highlight authority;
-- if LONG stays stable while SHORT varies, the viewfinder falls back to LONG until SHORT stabilizes again;
-- overlap calibration is one scalar exposure/luma correction, never independent R/G/B gains;
-- if any SHORT channel is near the processed ceiling, SHORT is rejected for that highlight;
-- neutral multi-channel LONG clips suppress weak/moderate SHORT ISP tint;
-- highlight recovery is coherent RGB rather than independent per-channel fill-in.
+Neutral LONG highlights retain LONG chromaticity unless SHORT color is genuinely trustworthy. A locally unreliable SHORT region simply stays LONG/clean clipped.
 
-The intended failure mode is therefore a **stable neutral white clip**, not a pink/orange/green/pulsating recovered highlight.
-
-## Flicker/PWM safety
-
-Known 50/60-Hz illumination keeps the full `10 ms` / `8.333333 ms` safe integration boundary instead of shortening SHORT simply to chase the last highlight stop. Unknown/PWM preserves the clean-AE LONG integration and uses ISO separation for SHORT before accepting residual clipping.
-
-This is deliberately conservative: clean stable clipping is preferred to revealing illumination modulation on ceiling lights, white surfaces, reflections or other bright areas.
+Recovered highlights use a wider masked-only tone range so useful SHORT structure is visible rather than compressed almost entirely into near-white. LONG shadows/midtones are not globally tone-mapped by this recovery curve.
 
 ## Still capture
 
-Pressing HDR Capture Set still freezes exactly one SHORT and one LONG exposure/ISO pair. Saved JPEG fusion uses the same LONG-first philosophy, scalar SHORT calibration, clipped-SHORT veto and neutral-highlight protection. RAW/DNG, JPEG orientation, FOV, cadence, sRGB and capture-session ownership are unchanged.
+HDR Capture Set still freezes exactly one SHORT and one LONG exposure/ISO pair. Saved JPEG fusion uses the same LONG-base masked philosophy with separate brightness/detail versus color trust. Previous preview pairs are never accumulated into the still image.
+
+## Preserved V1.4.16 protections
+
+- exact exposure-generation SHORT/LONG matching;
+- anti-pink/anti-pulsation temporal reliability;
+- scalar SHORT-to-LONG overlap calibration;
+- known 50/60-Hz and unknown/PWM safety policy;
+- adaptive AUTO and MANUAL SAFE SHORT headroom;
+- frozen still controls;
+- FOV/cadence, orientation/DNG and explicit sRGB protections;
+- stable GitHub Actions signing identity.
 
 ## Stable APK updates
 
-V1.4.16 reuses the stable V1.4.15 GitHub Actions signing identity. Do not regenerate `IRIS_TEST_SIGNING_KEY_B64`.
+V1.4.17 reuses the existing `IRIS_TEST_SIGNING_KEY_B64` repository secret. Do not regenerate the signing key.
 
 Signing certificate SHA-256:
 

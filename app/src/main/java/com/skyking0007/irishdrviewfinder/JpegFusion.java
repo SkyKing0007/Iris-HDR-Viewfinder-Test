@@ -13,13 +13,9 @@ final class JpegFusion {
     private static final float[] SRGB_TO_LINEAR = buildLinearLut();
     private static final int[] LINEAR_TO_SRGB = buildEncodeLut();
     private static final double LOG_2 = Math.log(2.0);
-    private static final float LONG_CLIP_START = 0.985f;
-    private static final float LONG_CLIP_END = 0.999f;
-    private static final float SHORT_CLIP_START = 0.985f;
-    private static final float SHORT_CLIP_END = 0.999f;
-    private static final float HDR_KNEE = 0.90f;
-    private static final float HDR_WHITE_ANCHOR = 0.965f;
-    private static final float HDR_DISPLAY_CEILING = 0.995f;
+    private static final float RECOVERY_KNEE = 0.72f;
+    private static final float RECOVERY_WHITE_ANCHOR = 0.90f;
+    private static final float RECOVERY_DISPLAY_CEILING = 0.995f;
 
     private JpegFusion() {}
 
@@ -83,43 +79,62 @@ final class JpegFusion {
                 float shortLuma = 0.2126f * sr + 0.7152f * sg + 0.0722f * sb;
                 float longSecond = secondLargest(longEncodedR, longEncodedG, longEncodedB);
                 float longPeak = Math.max(longEncodedR, Math.max(longEncodedG, longEncodedB));
-                float longHighlight = Math.max(
-                        smoothstep(0.965f, 0.992f, longSecond),
-                        smoothstep(0.62f, 0.78f, longLuma)
-                                * smoothstep(0.985f, 0.998f, longPeak));
+                float multiChannelNeed = smoothstep(0.925f, 0.985f, longSecond);
+                float brightSingleNeed = smoothstep(0.970f, 0.997f, longPeak)
+                        * smoothstep(0.55f, 0.82f, longLuma);
+                float highlightNeed = Math.max(multiChannelNeed, brightSingleNeed);
+
+                float shortSecond = secondLargest(shortEncodedR, shortEncodedG, shortEncodedB);
                 float shortPeak = Math.max(shortEncodedR, Math.max(shortEncodedG, shortEncodedB));
-                float shortSafe = 1.0f - smoothstep(0.965f, 0.985f, shortPeak);
+                float shortEncodedLuma = 0.2126f * shortEncodedR
+                        + 0.7152f * shortEncodedG + 0.0722f * shortEncodedB;
+                float lumaSafe = 1.0f - smoothstep(0.975f, 0.997f, shortSecond);
+                float signalSafe = smoothstep(0.008f, 0.025f, shortEncodedLuma);
                 float shortScenePeak = Math.max(sr, Math.max(sg, sb));
                 float longScenePeak = Math.max(lr, Math.max(lg, lb));
                 float radianceEvidence = smoothstep(
-                        1.04f, 1.14f, shortScenePeak / Math.max(longScenePeak, 0.0005f));
+                        1.01f, 1.10f, shortScenePeak / Math.max(longScenePeak, 0.0005f));
+                float rawMask = highlightNeed * lumaSafe * signalSafe * radianceEvidence;
+                float recoveryMask = smoothstep(0.04f, 0.58f, rawMask);
+
+                // Luminance/detail and chroma have separate trust. A questionable
+                // SHORT hue cannot block useful highlight structure or recolor white.
+                float rgbSafe = 1.0f - smoothstep(0.955f, 0.985f, shortPeak);
                 float agreement = validChannelAgreement(
                         longEncodedR, longEncodedG, longEncodedB,
                         lr, lg, lb, sr, sg, sb);
-                float weight = clamp(
-                        longHighlight * shortSafe * radianceEvidence * agreement, 0.0f, 1.0f);
+                float colorTrust = clamp(rgbSafe * agreement, 0.0f, 1.0f);
 
                 float longSpread = Math.max(longEncodedR, Math.max(longEncodedG, longEncodedB))
                         - Math.min(longEncodedR, Math.min(longEncodedG, longEncodedB));
                 float shortSpread = Math.max(shortEncodedR, Math.max(shortEncodedG, shortEncodedB))
                         - Math.min(shortEncodedR, Math.min(shortEncodedG, shortEncodedB));
                 float neutralLongClip = (1.0f - smoothstep(0.015f, 0.060f, longSpread))
-                        * smoothstep(0.985f, 0.999f, longSecond);
+                        * smoothstep(0.975f, 0.998f, longSecond);
                 float mildShortTint = 1.0f - smoothstep(0.10f, 0.25f, shortSpread);
-                float neutralLock = neutralLongClip * mildShortTint;
-                float trustedSr = sr + (shortLuma - sr) * neutralLock;
-                float trustedSg = sg + (shortLuma - sg) * neutralLock;
-                float trustedSb = sb + (shortLuma - sb) * neutralLock;
-                float mr = lr + (trustedSr - lr) * weight;
-                float mg = lg + (trustedSg - lg) * weight;
-                float mb = lb + (trustedSb - lb) * weight;
+                colorTrust *= 1.0f - neutralLongClip * mildShortTint;
 
-                float scenePeak = Math.max(mr, Math.max(mg, mb));
-                float mappedPeak = mappedPeak(scenePeak, ratio);
-                float toneScale = scenePeak > 0.000001f ? mappedPeak / scenePeak : 1.0f;
-                int ro = encode(mr * toneScale);
-                int go = encode(mg * toneScale);
-                int bo = encode(mb * toneScale);
+                float chromaScale = shortLuma / Math.max(longLuma, 0.0005f);
+                float longHueR = lr * chromaScale;
+                float longHueG = lg * chromaScale;
+                float longHueB = lb * chromaScale;
+                float trustedSr = longHueR + (sr - longHueR) * colorTrust;
+                float trustedSg = longHueG + (sg - longHueG) * colorTrust;
+                float trustedSb = longHueB + (sb - longHueB) * colorTrust;
+
+                float trustedPeak = Math.max(trustedSr, Math.max(trustedSg, trustedSb));
+                float mappedPeak = mappedRecoveryPeak(trustedPeak, ratio);
+                float toneScale = trustedPeak > 0.000001f ? mappedPeak / trustedPeak : 1.0f;
+                float mappedSr = trustedSr * toneScale;
+                float mappedSg = trustedSg * toneScale;
+                float mappedSb = trustedSb * toneScale;
+
+                float mr = lr + (mappedSr - lr) * recoveryMask;
+                float mg = lg + (mappedSg - lg) * recoveryMask;
+                float mb = lb + (mappedSb - lb) * recoveryMask;
+                int ro = encode(mr);
+                int go = encode(mg);
+                int bo = encode(mb);
                 outPixels[i] = 0xFF000000 | (ro << 16) | (go << 8) | bo;
             }
             output.setPixels(outPixels, 0, width, 0, y, width, rows);
@@ -208,15 +223,16 @@ final class JpegFusion {
         return a + b + c - Math.min(a, Math.min(b, c)) - Math.max(a, Math.max(b, c));
     }
 
-    private static float mappedPeak(float scenePeak, float ratio) {
-        if (scenePeak <= HDR_KNEE || scenePeak <= 0.000001f) return scenePeak;
+    private static float mappedRecoveryPeak(float scenePeak, float ratio) {
+        if (scenePeak <= RECOVERY_KNEE || scenePeak <= 0.000001f) return scenePeak;
         if (scenePeak <= 1.0f) {
-            float t = clamp((scenePeak - HDR_KNEE) / (1.0f - HDR_KNEE), 0.0f, 1.0f);
-            return HDR_KNEE + (HDR_WHITE_ANCHOR - HDR_KNEE) * t;
+            float t = clamp((scenePeak - RECOVERY_KNEE) / (1.0f - RECOVERY_KNEE), 0.0f, 1.0f);
+            return RECOVERY_KNEE + (RECOVERY_WHITE_ANCHOR - RECOVERY_KNEE) * t;
         }
         float headroomLog2 = Math.max(log2(Math.max(ratio, 1.0001f)), 0.0001f);
         float t = clamp(log2(scenePeak) / headroomLog2, 0.0f, 1.0f);
-        return HDR_WHITE_ANCHOR + (HDR_DISPLAY_CEILING - HDR_WHITE_ANCHOR) * t;
+        return RECOVERY_WHITE_ANCHOR
+                + (RECOVERY_DISPLAY_CEILING - RECOVERY_WHITE_ANCHOR) * t;
     }
 
     private static Bitmap decodeUpright(byte[] jpeg) throws Exception {

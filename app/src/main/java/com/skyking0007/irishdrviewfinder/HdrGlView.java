@@ -40,6 +40,8 @@ final class HdrGlView extends GLSurfaceView {
         final double longExposureProduct;
         final double exposureRatio;
         final long exposureGeneration;
+        final float longP25Linear;
+        final float longP35Linear;
         final float longMedianLinear;
         final float longP90Linear;
         final float longP98Linear;
@@ -59,6 +61,8 @@ final class HdrGlView extends GLSurfaceView {
                 double longExposureProduct,
                 double exposureRatio,
                 long exposureGeneration,
+                float longP25Linear,
+                float longP35Linear,
                 float longMedianLinear,
                 float longP90Linear,
                 float longP98Linear,
@@ -76,6 +80,8 @@ final class HdrGlView extends GLSurfaceView {
             this.longExposureProduct = longExposureProduct;
             this.exposureRatio = exposureRatio;
             this.exposureGeneration = exposureGeneration;
+            this.longP25Linear = longP25Linear;
+            this.longP35Linear = longP35Linear;
             this.longMedianLinear = longMedianLinear;
             this.longP90Linear = longP90Linear;
             this.longP98Linear = longP98Linear;
@@ -209,17 +215,20 @@ final class HdrGlView extends GLSurfaceView {
         private int stagingShortTexture;
         private int stagingLongTexture;
         private int statsTexture;
+        private int shortReliabilityTexture;
         private int framebuffer;
         private SurfaceTexture surfaceTexture;
         private final ByteBuffer longStatsBuffer = ByteBuffer.allocateDirect(STATS_PIXELS * 4)
                 .order(ByteOrder.nativeOrder());
         private final ByteBuffer shortStatsBuffer = ByteBuffer.allocateDirect(STATS_PIXELS * 4)
                 .order(ByteOrder.nativeOrder());
+        private final ByteBuffer shortReliabilityBuffer = ByteBuffer.allocateDirect(STATS_PIXELS * 2)
+                .order(ByteOrder.nativeOrder());
         private long lastStatsNs;
         private float shortCalibration = 1.0f;
-        private float shortTemporalReliability;
-        private int shortTemporalStableSamples;
         private boolean havePreviousStats;
+        private final int[] shortLumaStableCounts = new int[STATS_PIXELS];
+        private final int[] shortChromaStableCounts = new int[STATS_PIXELS];
         private final float[] previousLongLuma = new float[STATS_PIXELS];
         private final float[] previousShortSceneR = new float[STATS_PIXELS];
         private final float[] previousShortSceneG = new float[STATS_PIXELS];
@@ -283,6 +292,8 @@ final class HdrGlView extends GLSurfaceView {
             stagingLongTexture = createTexture2d();
             statsTexture = createTexture2d();
             allocateRgbTexture(statsTexture, STATS_WIDTH, STATS_HEIGHT);
+            shortReliabilityTexture = createTexture2d();
+            allocateReliabilityTexture(shortReliabilityTexture);
             for (PendingFrame pending : pendingFrames) {
                 pending.texture = createTexture2d();
                 pending.occupied = false;
@@ -314,8 +325,7 @@ final class HdrGlView extends GLSurfaceView {
             lastLongMeta = null;
             lastStatsNs = 0L;
             shortCalibration = 1.0f;
-            shortTemporalReliability = 0.0f;
-            shortTemporalStableSamples = 0;
+            resetShortReliabilityHistory();
             havePreviousStats = false;
             highestExposureGenerationSeen = 0L;
             fpsWindowStartNs = System.nanoTime();
@@ -374,8 +384,7 @@ final class HdrGlView extends GLSurfaceView {
             lastLongMeta = null;
             lastStatsNs = 0L;
             shortCalibration = 1.0f;
-            shortTemporalReliability = 0.0f;
-            shortTemporalStableSamples = 0;
+            resetShortReliabilityHistory();
             havePreviousStats = false;
             highestExposureGenerationSeen = 0L;
             metaByTimestamp.clear();
@@ -562,9 +571,7 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "shortCalibration"),
                     shortCalibration);
-            GLES30.glUniform1f(
-                    GLES30.glGetUniformLocation(displayProgram, "shortTemporalReliability"),
-                    shortTemporalReliability);
+            bindSampler2d(displayProgram, "shortReliabilityTex", shortReliabilityTexture, 3);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 
@@ -585,7 +592,7 @@ final class HdrGlView extends GLSurfaceView {
                     longStatsBuffer, shortStatsBuffer, ratio,
                     lastShortMeta, lastLongMeta);
             shortCalibration = stats.calibration;
-            shortTemporalReliability = stats.shortTemporalReliable ? 1.0f : 0.0f;
+            uploadShortReliabilityTexture();
             listener.onSceneStats(stats);
         }
 
@@ -662,6 +669,8 @@ final class HdrGlView extends GLSurfaceView {
             }
 
             Arrays.sort(longLumas);
+            float p25 = percentileSorted(longLumas, 0.25f);
+            float p35 = percentileSorted(longLumas, 0.35f);
             float median = percentileSorted(longLumas, 0.50f);
             float p90 = percentileSorted(longLumas, 0.90f);
             float p98 = percentileSorted(longLumas, 0.98f);
@@ -671,6 +680,7 @@ final class HdrGlView extends GLSurfaceView {
             int errorCount = 0;
             int temporalHighlightCells = 0;
             int unstableHighlightCells = 0;
+            shortReliabilityBuffer.clear();
             for (int i = 0; i < STATS_PIXELS; i++) {
                 int o = i * 4;
                 float lr8 = (longPixels.get(o) & 0xFF) / 255.0f;
@@ -698,30 +708,47 @@ final class HdrGlView extends GLSurfaceView {
                 }
 
                 float longMax = Math.max(lr8, Math.max(lg8, lb8));
-                boolean highlight = longMax >= 0.97f || ll >= 0.55f;
-                if (havePreviousStats && highlight && ll > 0.01f && sl > 0.01f) {
+                boolean highlight = longMax >= 0.94f || ll >= 0.45f;
+                boolean lumaStable = !highlight;
+                boolean chromaStable = !highlight;
+                if (highlight) {
                     temporalHighlightCells++;
-                    float previousLl = previousLongLuma[i];
-                    float previousSl = 0.2126f * previousShortSceneR[i]
-                            + 0.7152f * previousShortSceneG[i]
-                            + 0.0722f * previousShortSceneB[i];
-                    boolean longStable = previousLl > 0.01f
-                            && Math.abs(Math.log(ll / previousLl) / Math.log(2.0)) <= 0.15;
-                    if (longStable && previousSl > 0.01f) {
-                        float shortDeltaEv = (float) Math.abs(
-                                Math.log(sl / previousSl) / Math.log(2.0));
-                        float invSl = 1.0f / Math.max(sl, 0.0005f);
-                        float invPrevSl = 1.0f / Math.max(previousSl, 0.0005f);
-                        float chromaDelta = Math.max(
-                                Math.abs(sr * invSl - previousShortSceneR[i] * invPrevSl),
-                                Math.max(
-                                        Math.abs(sg * invSl - previousShortSceneG[i] * invPrevSl),
-                                        Math.abs(sb * invSl - previousShortSceneB[i] * invPrevSl)));
-                        if (shortDeltaEv > 0.20f || chromaDelta > 0.08f) {
-                            unstableHighlightCells++;
+                    if (havePreviousStats && ll > 0.01f && sl > 0.01f) {
+                        float previousLl = previousLongLuma[i];
+                        float previousSl = 0.2126f * previousShortSceneR[i]
+                                + 0.7152f * previousShortSceneG[i]
+                                + 0.0722f * previousShortSceneB[i];
+                        boolean longStable = previousLl > 0.01f
+                                && Math.abs(Math.log(ll / previousLl) / Math.log(2.0)) <= 0.18;
+                        if (longStable && previousSl > 0.01f) {
+                            float shortDeltaEv = (float) Math.abs(
+                                    Math.log(sl / previousSl) / Math.log(2.0));
+                            float invSl = 1.0f / Math.max(sl, 0.0005f);
+                            float invPrevSl = 1.0f / Math.max(previousSl, 0.0005f);
+                            float chromaDelta = Math.max(
+                                    Math.abs(sr * invSl - previousShortSceneR[i] * invPrevSl),
+                                    Math.max(
+                                            Math.abs(sg * invSl - previousShortSceneG[i] * invPrevSl),
+                                            Math.abs(sb * invSl - previousShortSceneB[i] * invPrevSl)));
+                            lumaStable = shortDeltaEv <= 0.18f;
+                            chromaStable = lumaStable && chromaDelta <= 0.06f;
                         }
                     }
+
+                    shortLumaStableCounts[i] = lumaStable
+                            ? Math.min(3, shortLumaStableCounts[i] + 1) : 0;
+                    shortChromaStableCounts[i] = chromaStable
+                            ? Math.min(3, shortChromaStableCounts[i] + 1) : 0;
+                    if (!lumaStable) unstableHighlightCells++;
+                } else {
+                    shortLumaStableCounts[i] = 3;
+                    shortChromaStableCounts[i] = 3;
                 }
+
+                int lumaReliability = shortLumaStableCounts[i] >= 2 ? 255 : 0;
+                int chromaReliability = shortChromaStableCounts[i] >= 2 ? 255 : 0;
+                shortReliabilityBuffer.put((byte) lumaReliability);
+                shortReliabilityBuffer.put((byte) chromaReliability);
                 previousLongLuma[i] = ll;
                 previousShortSceneR[i] = sr;
                 previousShortSceneG[i] = sg;
@@ -732,15 +759,17 @@ final class HdrGlView extends GLSurfaceView {
             float overlapError = medianPrefix(errors, errorCount, 0.0f);
             float unstableFraction = temporalHighlightCells == 0 ? 0.0f
                     : unstableHighlightCells / (float) temporalHighlightCells;
-            boolean temporalCandidateReliable = unstableHighlightCells == 0;
-            if (temporalCandidateReliable) shortTemporalStableSamples++;
-            else shortTemporalStableSamples = 0;
-            boolean shortTemporalReliable = shortTemporalStableSamples >= 2;
+            shortReliabilityBuffer.flip();
+            // Bracket adaptation only asks whether instability is widespread. The
+            // renderer consumes the local R/G reliability texture, so one bad lamp
+            // cannot disable a stable window or other recoverable highlight.
+            boolean shortTemporalReliable = temporalHighlightCells == 0
+                    || unstableFraction <= 0.25f;
 
             return new SceneStats(
                     shortMeta.frameNumber, longMeta.frameNumber,
                     shortMeta.exposureProduct(), longMeta.exposureProduct(), ratio,
-                    longMeta.exposureGeneration, median, p90, p98,
+                    longMeta.exposureGeneration, p25, p35, median, p90, p98,
                     longClipped / (float) STATS_PIXELS,
                     shortClipped / (float) STATS_PIXELS,
                     shortDark / (float) STATS_PIXELS,
@@ -810,6 +839,36 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + unit);
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(program, name), unit);
+        }
+
+        private void resetShortReliabilityHistory() {
+            Arrays.fill(shortLumaStableCounts, 0);
+            Arrays.fill(shortChromaStableCounts, 0);
+            shortReliabilityBuffer.clear();
+            for (int i = 0; i < STATS_PIXELS; i++) {
+                shortReliabilityBuffer.put((byte) 0);
+                shortReliabilityBuffer.put((byte) 0);
+            }
+            shortReliabilityBuffer.flip();
+            if (shortReliabilityTexture != 0) uploadShortReliabilityTexture();
+        }
+
+        private void uploadShortReliabilityTexture() {
+            if (shortReliabilityTexture == 0 || shortReliabilityBuffer.remaining() == 0) return;
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shortReliabilityTexture);
+            GLES30.glTexSubImage2D(
+                    GLES30.GL_TEXTURE_2D, 0, 0, 0, STATS_WIDTH, STATS_HEIGHT,
+                    GLES30.GL_RG, GLES30.GL_UNSIGNED_BYTE, shortReliabilityBuffer);
+            shortReliabilityBuffer.rewind();
+        }
+
+        private static void allocateReliabilityTexture(int texture) {
+            if (texture == 0) return;
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
+            GLES30.glTexImage2D(
+                    GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RG8,
+                    STATS_WIDTH, STATS_HEIGHT, 0,
+                    GLES30.GL_RG, GLES30.GL_UNSIGNED_BYTE, null);
         }
 
         private static void allocateRgbTexture(int texture, int width, int height) {

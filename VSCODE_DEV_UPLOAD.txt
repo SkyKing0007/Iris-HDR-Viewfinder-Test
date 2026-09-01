@@ -1,34 +1,34 @@
-Iris HDR Viewfinder Test V1.4.16 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.17 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 Base requirement:
-main must point exactly to successful V1.4.15 commit 947824b8f3bb7a9fd08aee4a79a013fbd54ea22c before the V1.4.16 upload/commit.
+main must point exactly to successful V1.4.16 commit ef7accc0b3824bc5d1cb0d61132b98cfd7242722 before the V1.4.17 upload/commit.
 
 Backup:
-No new V1.4.16 backup is required.
+No new V1.4.17 backup is required.
 Existing architectural backup remains:
 backup-v1.4.14-pre-adaptive-hdr -> 93c43a08e32eed5a0ccb146b81dd3907b2474b39
 
 Signing:
-Reuse the existing repository secret IRIS_TEST_SIGNING_KEY_B64 created for V1.4.15.
+Reuse the existing repository secret IRIS_TEST_SIGNING_KEY_B64.
 Do NOT regenerate the signing key and do NOT upload any private key file.
-If V1.4.15 is already installed with the stable signer, V1.4.16 versionCode 21 should install as a normal update after Actions succeeds.
+V1.4.17 versionCode 22 should install normally over successful stable-signed V1.4.16.
 
 IMPORTANT:
 Upload ALL CONTENTS of the extracted FULL-UPLOAD ZIP into the repository root from a fresh vscode.dev workspace based on current remote main.
-Do not upload only app/ or only the five runtime files.
+Do not upload only app/ or only the four runtime files.
 
 Before committing, confirm BUILD_WORKFLOW_COPY.yml begins exactly with:
-name: Build Iris HDR Viewfinder Test V1.4.16
+name: Build Iris HDR Viewfinder Test V1.4.17
 and contains no commit-message text before that line.
 
 Suggested commit message:
-V1.4.16 stable two-frame HDR + natural LONG
+V1.4.17 adaptive LONG + masked SHORT recovery
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.16.
-Do not call V1.4.16 build-proven until the workflow succeeds and its compiled artifact/signing certificate are verified.
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.17.
+Do not call V1.4.17 build-proven until the workflow succeeds and its compiled artifact/signing certificate are verified.
 
 Runtime logs after installation:
 Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt

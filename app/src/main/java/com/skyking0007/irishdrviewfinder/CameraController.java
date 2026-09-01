@@ -105,15 +105,20 @@ final class CameraController {
     private static final double BRACKET_STEP_DOWN_EV = 0.15;
     private static final int BRACKET_CONFIRM_UP_SAMPLES = 2;
     private static final int BRACKET_CONFIRM_DOWN_SAMPLES = 3;
-    private static final double AUTO_MID_HYSTERESIS_EV = 0.08;
-    private static final double AUTO_MID_MAX_STEP_EV = 0.20;
-    // Processed sRGB median target for the scene body at Brightness 0 EV. Clean AE
-    // remains the seed, but a highlight-protecting seed may not permanently define a
-    // dark room as the correct appearance. A strong p98 highlight tail raises the
-    // minimum target so LONG exposes the room and SHORT owns the clipped tail.
-    private static final double AUTO_BASE_BODY_TARGET_LINEAR = 0.030;
-    private static final double AUTO_HDR_BODY_TARGET_LINEAR = 0.045;
-    private static final double AUTO_HDR_BRIGHT_TAIL_LINEAR = 0.20;
+    private static final double AUTO_BODY_HYSTERESIS_EV = 0.10;
+    private static final double AUTO_BODY_MAX_STEP_EV = 0.18;
+    private static final int AUTO_BODY_CONFIRM_SAMPLES = 2;
+    // LONG is a scene-appearance exposure, not a highlight-protecting AE exposure.
+    // Meter the robust P25-P50 scene body. Broad/high histogram tails raise the
+    // appearance target because SHORT owns them; genuinely low-light scenes lower
+    // it using clean AE only as a one-time scene-key cue, never as brightness authority.
+    private static final double AUTO_BODY_TARGET_NORMAL_LINEAR = 0.070;
+    private static final double AUTO_BODY_TARGET_HDR_LINEAR = 0.115;
+    private static final double AUTO_BODY_TARGET_MIN_LINEAR = 0.040;
+    private static final double AUTO_BODY_TARGET_MAX_LINEAR = 0.135;
+    private static final double AUTO_BODY_LOW_LIGHT_START_EV = 5.0;
+    private static final double AUTO_BODY_LOW_LIGHT_FULL_EV = 8.0;
+    private static final double AUTO_BODY_REFERENCE_PRODUCT = (ONE_SECOND_NS / 60.0) * 100.0;
     private static final long ADAPTIVE_PAIR_UPDATE_MIN_NS = 200_000_000L;
     private static final int DEFAULT_POST_RAW_BOOST = 100;
     private static final int MAX_SRGB_CURVE_POINTS = 64;
@@ -175,7 +180,7 @@ final class CameraController {
     private double autoMeterLastProduct = -1.0;
     private long lastAutoAnchorNs;
     private double autoSceneBaseLongProduct = -1.0;
-    private double autoTargetBaseMidLuma = -1.0;
+    private double autoAdaptiveBodyTargetLinear = -1.0;
     private double autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
     private double manualAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
     private double manualBracketFloorEv = AUTO_BRACKET_MIN_EV;
@@ -183,6 +188,8 @@ final class CameraController {
     private long lastAdaptivePairUpdateNs;
     private int bracketIncreaseEvidence;
     private int bracketDecreaseEvidence;
+    private int bodyRaiseEvidence;
+    private int bodyLowerEvidence;
     private long previewExposureGeneration;
     private volatile int jpegOrientationDegrees;
     private long lastAeExposureNs = ONE_SECOND_NS / 60;
@@ -337,8 +344,10 @@ final class CameraController {
             lastAdaptivePairUpdateNs = 0L;
             bracketIncreaseEvidence = 0;
             bracketDecreaseEvidence = 0;
+            bodyRaiseEvidence = 0;
+            bodyLowerEvidence = 0;
             if (enabled) {
-                autoTargetBaseMidLuma = -1.0;
+                autoAdaptiveBodyTargetLinear = -1.0;
                 if (haveAeSample && autoSceneBaseLongProduct <= 0.0) {
                     autoSceneBaseLongProduct = Math.max(1.0, (double) lastAeExposureNs * lastAeIso);
                 }
@@ -443,7 +452,9 @@ final class CameraController {
             autoMeterLastProduct = -1.0;
             lastAutoAnchorNs = 0L;
             autoSceneBaseLongProduct = -1.0;
-            autoTargetBaseMidLuma = -1.0;
+            autoAdaptiveBodyTargetLinear = -1.0;
+            bodyRaiseEvidence = 0;
+            bodyLowerEvidence = 0;
             autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
             lastAdaptiveStatsFrame = -1L;
             lastAdaptivePairUpdateNs = 0L;
@@ -1218,7 +1229,9 @@ final class CameraController {
         haveAeSample = false;
         lastAutoAnchorNs = 0L;
         autoSceneBaseLongProduct = -1.0;
-        autoTargetBaseMidLuma = -1.0;
+        autoAdaptiveBodyTargetLinear = -1.0;
+        bodyRaiseEvidence = 0;
+        bodyLowerEvidence = 0;
         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
         lastAdaptiveStatsFrame = -1L;
         lastAdaptivePairUpdateNs = 0L;
@@ -1257,7 +1270,9 @@ final class CameraController {
         haveAeSample = false;
         lastAutoAnchorNs = 0L;
         autoSceneBaseLongProduct = -1.0;
-        autoTargetBaseMidLuma = -1.0;
+        autoAdaptiveBodyTargetLinear = -1.0;
+        bodyRaiseEvidence = 0;
+        bodyLowerEvidence = 0;
         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
         lastAdaptiveStatsFrame = -1L;
         lastAdaptivePairUpdateNs = 0L;
@@ -1337,7 +1352,9 @@ final class CameraController {
                         haveAeSample = false;
                         lastAutoAnchorNs = 0L;
                         autoSceneBaseLongProduct = -1.0;
-                        autoTargetBaseMidLuma = -1.0;
+                        autoAdaptiveBodyTargetLinear = -1.0;
+                        bodyRaiseEvidence = 0;
+                        bodyLowerEvidence = 0;
                         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
                         lastAdaptiveStatsFrame = -1L;
                         lastAdaptivePairUpdateNs = 0L;
@@ -1423,7 +1440,9 @@ final class CameraController {
         haveAeSample = true;
         lastAutoAnchorNs = System.nanoTime();
         autoSceneBaseLongProduct = Math.max(1.0, (double) lastAeExposureNs * lastAeIso);
-        autoTargetBaseMidLuma = -1.0;
+        autoAdaptiveBodyTargetLinear = -1.0;
+        bodyRaiseEvidence = 0;
+        bodyLowerEvidence = 0;
         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
         bracketIncreaseEvidence = 0;
         bracketDecreaseEvidence = 0;
@@ -1457,31 +1476,45 @@ final class CameraController {
         if (autoHdrExposure) {
             if (!haveAeSample) return;
             double brightnessGain = Math.pow(2.0, clampBrightnessEv(displayBrightnessEv));
-            if (autoTargetBaseMidLuma <= 0.0 && stats.longMedianLinear > 0.003f) {
-                double observedBaseMid = stats.longMedianLinear / Math.max(0.03125, brightnessGain);
-                boolean hdrTail = stats.longP98Linear >= AUTO_HDR_BRIGHT_TAIL_LINEAR
-                        || stats.longMeaningfulClipFraction >= 0.001f;
-                double bodyFloor = hdrTail
-                        ? AUTO_HDR_BODY_TARGET_LINEAR : AUTO_BASE_BODY_TARGET_LINEAR;
-                autoTargetBaseMidLuma = clampDouble(
-                        Math.max(observedBaseMid, bodyFloor), 0.015, 0.18);
+            double bodyMid = robustSceneBodyMid(stats);
+            if (bodyMid > 0.002) {
+                double baseBodyTarget = adaptiveSceneBodyTargetLocked(stats);
+                autoAdaptiveBodyTargetLinear = baseBodyTarget;
+                double desiredBody = clampDouble(baseBodyTarget * brightnessGain, 0.018, 0.70);
+                double errorEv = Math.log(desiredBody / bodyMid) / Math.log(2.0);
+
+                if (errorEv > AUTO_BODY_HYSTERESIS_EV) {
+                    bodyRaiseEvidence++;
+                    bodyLowerEvidence = 0;
+                    if (bodyRaiseEvidence >= AUTO_BODY_CONFIRM_SAMPLES) {
+                        bodyRaiseEvidence = 0;
+                        double stepEv = Math.min(AUTO_BODY_MAX_STEP_EV, errorEv);
+                        autoSceneBaseLongProduct = Math.max(1.0,
+                                autoSceneBaseLongProduct * Math.pow(2.0, stepEv));
+                        pairNeedsUpdate = true;
+                    }
+                } else if (errorEv < -AUTO_BODY_HYSTERESIS_EV) {
+                    bodyLowerEvidence++;
+                    bodyRaiseEvidence = 0;
+                    if (bodyLowerEvidence >= AUTO_BODY_CONFIRM_SAMPLES) {
+                        bodyLowerEvidence = 0;
+                        double stepEv = Math.max(-AUTO_BODY_MAX_STEP_EV, errorEv);
+                        autoSceneBaseLongProduct = Math.max(1.0,
+                                autoSceneBaseLongProduct * Math.pow(2.0, stepEv));
+                        pairNeedsUpdate = true;
+                    }
+                } else {
+                    bodyRaiseEvidence = 0;
+                    bodyLowerEvidence = 0;
+                }
+
                 RuntimeLogger.event(
-                        "AUTO_LIVE_TARGET",
+                        "AUTO_BODY_METER",
                         String.format(
                                 Locale.US,
-                                "baseMid=%.4f observed=%.4f p98=%.4f hdrTail=%s brightness=%+.1fEV",
-                                autoTargetBaseMidLuma, observedBaseMid, stats.longP98Linear,
-                                hdrTail, displayBrightnessEv));
-            } else if (autoTargetBaseMidLuma > 0.0 && stats.longMedianLinear > 0.002f) {
-                double desiredMid = clampDouble(autoTargetBaseMidLuma * brightnessGain, 0.012, 0.80);
-                double errorEv = Math.log(desiredMid / stats.longMedianLinear) / Math.log(2.0);
-                if (Math.abs(errorEv) > AUTO_MID_HYSTERESIS_EV) {
-                    double stepEv = clampDouble(
-                            errorEv, -AUTO_MID_MAX_STEP_EV, AUTO_MID_MAX_STEP_EV);
-                    autoSceneBaseLongProduct = Math.max(1.0,
-                            autoSceneBaseLongProduct * Math.pow(2.0, stepEv));
-                    pairNeedsUpdate = true;
-                }
+                                "body=%.4f target=%.4f p25=%.4f p50=%.4f p90=%.4f p98=%.4f err=%+.2fEV brightness=%+.1fEV",
+                                bodyMid, desiredBody, stats.longP25Linear, stats.longMedianLinear,
+                                stats.longP90Linear, stats.longP98Linear, errorEv, displayBrightnessEv));
             }
 
             double nextBracket = adaptBracketEvLocked(
@@ -1520,6 +1553,55 @@ final class CameraController {
                 }
             }
         }
+    }
+
+    private double robustSceneBodyMid(HdrGlView.SceneStats stats) {
+        double p25 = Math.max(0.0005, stats.longP25Linear);
+        double p35 = Math.max(0.0005, stats.longP35Linear);
+        double p50 = Math.max(0.0005, stats.longMedianLinear);
+        return Math.exp((Math.log(p25) + Math.log(p35) + Math.log(p50)) / 3.0);
+    }
+
+    private double adaptiveSceneBodyTargetLocked(HdrGlView.SceneStats stats) {
+        double p25 = Math.max(0.0005, stats.longP25Linear);
+        double p50 = Math.max(0.0005, stats.longMedianLinear);
+        double p90 = Math.max(p50, stats.longP90Linear);
+        double p98 = Math.max(p90, stats.longP98Linear);
+
+        // Percentile ratios are exposure-invariant until clipping. A broad p90 tail
+        // means a meaningful area is brighter than the body; p98 adds only limited
+        // sensitivity to smaller highlights. SHORT owns that tail, not LONG metering.
+        double tail90Ev = Math.log(p90 / p50) / Math.log(2.0);
+        double tail98Ev = Math.log(p98 / p50) / Math.log(2.0);
+        double broadTail = smoothstepDouble(0.60, 1.60, tail90Ev);
+        double extremeTail = smoothstepDouble(1.50, 3.50, tail98Ev);
+        double hdrStrength = clampDouble(0.70 * broadTail + 0.30 * extremeTail, 0.0, 1.0);
+        double target = AUTO_BODY_TARGET_NORMAL_LINEAR
+                + (AUTO_BODY_TARGET_HDR_LINEAR - AUTO_BODY_TARGET_NORMAL_LINEAR) * hdrStrength;
+
+        // Scene key comes from our own matched LONG measurement, not the bootstrap AE
+        // product. current exposure * target/bodyMid estimates the exposure product
+        // this scene would require to place its robust body at the candidate target;
+        // that estimate is approximately invariant as our LONG exposure changes.
+        double bodyMid = robustSceneBodyMid(stats);
+        double requiredProduct = Math.max(1.0,
+                stats.longExposureProduct * target / Math.max(bodyMid, 0.0005));
+        double sceneDemandEv = Math.log(requiredProduct / AUTO_BODY_REFERENCE_PRODUCT) / Math.log(2.0);
+        double lowLight = smoothstepDouble(
+                AUTO_BODY_LOW_LIGHT_START_EV, AUTO_BODY_LOW_LIGHT_FULL_EV, sceneDemandEv);
+        target *= 1.0 - 0.38 * lowLight;
+
+        // Preserve intentionally low-key scenes without using their highlights as the
+        // brightness authority. This term depends on lower-body contrast, not p98.
+        double bodySpreadEv = Math.log(p50 / p25) / Math.log(2.0);
+        double lowKeyStructure = smoothstepDouble(2.2, 4.0, bodySpreadEv);
+        target *= 1.0 - 0.10 * lowKeyStructure;
+        return clampDouble(target, AUTO_BODY_TARGET_MIN_LINEAR, AUTO_BODY_TARGET_MAX_LINEAR);
+    }
+
+    private static double smoothstepDouble(double edge0, double edge1, double value) {
+        double t = clampDouble((value - edge0) / (edge1 - edge0), 0.0, 1.0);
+        return t * t * (3.0 - 2.0 * t);
     }
 
     private double adaptBracketEvLocked(

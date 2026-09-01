@@ -18,7 +18,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.16 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.17 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -187,8 +187,8 @@ require('if (haveAeSample) {' in bootstrap and 'Bootstrap only' in bootstrap,
         "bootstrap meter must refuse to replace an already-live HDR pair")
 require(camera.count('buildMeterPreviewRequest(), previewCaptureCallback') == 1,
         "clean AE repeating request may exist only for initial bootstrap")
-require('autoSceneBaseLongProduct' in camera and 'autoTargetBaseMidLuma' in camera,
-        "continuous LONG appearance state missing")
+require('autoSceneBaseLongProduct' in camera and 'autoAdaptiveBodyTargetLinear' in camera,
+        "continuous adaptive LONG scene-body state missing")
 require('deriveAdaptiveAutoPairLocked' in camera and 'adaptBracketEvLocked' in camera,
         "adaptive LONG/SHORT exposure solver missing")
 require('Math.pow(2.0, clampBrightnessEv(displayBrightnessEv))' in camera,
@@ -201,14 +201,26 @@ require('baseShortProduct * requestedGain' not in camera
 require('shortDarkFraction > 0.94f' in camera and 'overlapErrorEv > 0.50f' in camera
         and '!stats.shortTemporalReliable' in camera,
         "SHORT quality/overlap/temporal guard missing")
-require('AUTO_BASE_BODY_TARGET_LINEAR = 0.030' in camera
-        and 'AUTO_HDR_BODY_TARGET_LINEAR = 0.045' in camera
-        and 'AUTO_HDR_BRIGHT_TAIL_LINEAR = 0.20' in camera,
-        "natural-scene LONG body target missing")
-require('longP98Linear' in camera and 'longP98Linear' in gl,
-        "LONG highlight-tail evidence must reach the appearance controller")
-require('AUTO_MID_MAX_STEP_EV = 0.20' in camera,
-        "LONG adaptation must remain smooth and bounded to 0.20EV/update")
+require('robustSceneBodyMid' in camera and 'adaptiveSceneBodyTargetLocked' in camera,
+        "adaptive LONG scene-body meter missing")
+require('longP25Linear' in camera and 'longP35Linear' in camera
+        and 'longP25Linear' in gl and 'longP35Linear' in gl and 'longP98Linear' in gl,
+        "P25/P35/P50 body plus highlight-tail evidence must reach the appearance controller")
+require('AUTO_BODY_TARGET_NORMAL_LINEAR = 0.070' in camera
+        and 'AUTO_BODY_TARGET_HDR_LINEAR = 0.115' in camera
+        and 'AUTO_BODY_TARGET_MIN_LINEAR = 0.040' in camera
+        and 'AUTO_BODY_TARGET_MAX_LINEAR = 0.135' in camera,
+        "adaptive LONG scene-body target range missing")
+require('stats.longExposureProduct * target / Math.max(bodyMid, 0.0005)' in camera,
+        "scene key must be estimated from our measured LONG body and known exposure product")
+scene_target = camera[camera.index('private double adaptiveSceneBodyTargetLocked'):camera.index('private static double smoothstepDouble')]
+require('lastAeExposureNs' not in scene_target and 'lastAeIso' not in scene_target,
+        "bootstrap system AE must have no continuing vote in LONG reality target")
+require('AUTO_BODY_MAX_STEP_EV = 0.18' in camera and 'AUTO_BODY_CONFIRM_SAMPLES = 2' in camera,
+        "LONG adaptation must remain smooth and require consecutive scene-body evidence")
+require(camera.count('bodyRaiseEvidence = 0;') >= 8
+        and camera.count('bodyLowerEvidence = 0;') >= 8,
+        "LONG scene-body evidence must reset across camera/FPS/re-anchor transitions")
 require('BRACKET_CONFIRM_UP_SAMPLES = 2' in camera
         and 'BRACKET_CONFIRM_DOWN_SAMPLES = 3' in camera,
         "adaptive bracket hysteresis evidence counters missing")
@@ -225,24 +237,36 @@ require('uniform float shortCalibration;' in hdr_shader
 require('calibrateShortToLong' in fusion and 'float calibration = calibrateShortToLong' in fusion
         and 'private static final class Calibration' not in fusion,
         "saved fusion must use scalar, not per-channel, exposure calibration")
-require('recoverStableHighlight' in hdr_shader and 'shortSafe' in hdr_shader
-        and 'shortSafe' in fusion,
-        "coherent all-RGB reliable highlight recovery missing")
-require('shortTemporalReliability' in hdr_shader and 'shortTemporalReliable' in gl,
-        "live SHORT temporal reliability gate missing")
+require('uniform sampler2D shortReliabilityTex;' in hdr_shader
+        and 'shortReliabilityTexture' in gl and 'GL_RG8' in gl,
+        "local two-channel SHORT reliability map missing")
+require('shortLumaStableCounts' in gl and 'shortChromaStableCounts' in gl
+        and 'shortLumaStableCounts[i] >= 2' in gl
+        and 'shortChromaStableCounts[i] >= 2' in gl,
+        "separate local luminance/chroma temporal confidence missing")
+require('unstableFraction <= 0.25f' in gl and 'shortTemporalReliable' in gl,
+        "widespread SHORT instability must still block bracket widening")
+require('longHighlightMask' in hdr_shader and 'maskedHighlightRecovery' in hdr_shader
+        and 'highlightNeed' in fusion and 'recoveryMask' in fusion,
+        "LONG-base masked highlight compositor missing")
+require('temporalTrust.r' in hdr_shader and 'temporalTrust.g' in hdr_shader
+        and 'colorTrust' in hdr_shader and 'colorTrust' in fusion,
+        "SHORT luminance/detail trust must remain separate from color trust")
+require('longChromaticityAtShortLuma' in hdr_shader
+        and 'longHueR' in fusion and 'longHueG' in fusion and 'longHueB' in fusion,
+        "questionable SHORT color must recover luma/detail with LONG chromaticity")
 require('neutralLongClip' in hdr_shader and 'neutralLongClip' in fusion,
         "neutral clipped-highlight color lock missing")
-require('longSecond' in hdr_shader and 'secondLargest' in fusion,
-        "second-channel highlight evidence missing")
 require('validChannelAgreement' in hdr_shader and 'validChannelAgreement' in fusion,
-        "SHORT/LONG agreement guard missing")
+        "SHORT/LONG color-agreement guard missing")
+require('mapRecoveredHighlight' in hdr_shader and 'mappedRecoveryPeak' in fusion,
+        "recovered SHORT highlight-only display mapping missing")
+require('mix(longScene, mappedShort, recoveryMask)' in hdr_shader
+        and 'float mr = lr + (mappedSr - lr) * recoveryMask;' in fusion,
+        "SHORT must enter only through the local highlight recovery mask")
 require('recoverOnlyLostChannels' not in hdr_shader and 'recoverChannel(' not in fusion
         and 'mix(longScene, shortScene, highlightWeight)' not in hdr_shader,
-        "retired per-channel/threshold-pulsing highlight handoff returned")
-require('highlightOnlyToneMap' in hdr_shader and 'HDR_KNEE = 0.90f' in fusion,
-        "LONG-appearance-preserving highlight tone owner missing")
-require('HDR_WHITE_ANCHOR = 0.965f' in fusion and 'HDR_DISPLAY_CEILING = 0.995f' in fusion,
-        "fixed high-highlight display mapping missing")
+        "retired broad/per-channel/threshold-pulsing highlight handoff returned")
 require('displayBrightnessEv' not in hdr_shader and 'brightnessGain' not in hdr_shader
         and 'displayBrightnessEv' not in fusion and 'brightnessGain' not in fusion,
         "Brightness must remain entirely outside fusion/tone")
@@ -524,15 +548,37 @@ require(math.isclose(adapt_bracket_sequence(3.0,[(0.02,0.01,False),(0.02,0.01,Fa
 require(adapt_bracket_sequence(3.25,[(0.02,0.01,True),(0.02,0.01,True)],manual=True,floor=3.0)>3.25,
         "MANUAL must adapt like AUTO with extra headroom")
 
-# Exact office sample from the V1.4.15 failure set: the bright p98 tail must stop the
-# initial highlight-protecting AE seed from defining 0EV as a 0.0146-linear dark room.
-office_median=0.01461964100599289
-office_p98=0.32845258712768555
-office_target=max(office_median,0.045 if office_p98>=0.20 else 0.030)
-require(math.isclose(office_target,0.045,rel_tol=0,abs_tol=1e-12),
-        f"office natural-LONG target regression: {office_target}")
-require(1.5 < math.log2(office_target/office_median) < 1.8,
-        "office LONG correction must recognize roughly 1.6EV underexposure at 0EV")
+# V1.4.16 office data is regression evidence, not a universal +EV calibration.
+# The robust body + scene-shape controller should autonomously demand a large correction
+# there, while a truly low-light scene gets a lower body target.
+def scene_ss(edge0, edge1, value):
+    t=max(0.0,min(1.0,(value-edge0)/(edge1-edge0)))
+    return t*t*(3.0-2.0*t)
+
+def scene_body_target(p25,p35,p50,p90,p98,long_product,ref_product=(1e9/60.0)*100.0):
+    body=(max(p25,0.0005)*max(p35,0.0005)*max(p50,0.0005))**(1.0/3.0)
+    tail90=math.log(max(p90,0.0005)/max(p50,0.0005),2)
+    tail98=math.log(max(p98,0.0005)/max(p50,0.0005),2)
+    broad=scene_ss(0.60,1.60,tail90)
+    extreme=scene_ss(1.50,3.50,tail98)
+    strength=max(0.0,min(1.0,0.70*broad+0.30*extreme))
+    target=0.070+(0.115-0.070)*strength
+    required=max(1.0,long_product*target/max(body,0.0005))
+    demand=math.log(required/ref_product,2)
+    low=scene_ss(5.0,8.0,demand)
+    target*=1.0-0.38*low
+    spread=math.log(max(p50,0.0005)/max(p25,0.0005),2)
+    target*=1.0-0.10*scene_ss(2.2,4.0,spread)
+    return max(0.040,min(0.135,target)),body
+
+office_target,office_body=scene_body_target(
+    0.01933,0.02640,0.04384,0.09615,0.39291,(1e9/120.0)*384.0)
+office_error=math.log(office_target/office_body,2)
+require(1.4 < office_error < 2.2,
+        f"office body should request a substantial learned correction, got {office_error}EV")
+low_target,_=scene_body_target(0.01,0.015,0.025,0.04,0.08,(1e9/15.0)*1600.0)
+require(low_target < office_target,
+        f"low-key scene must not be locked to office brightness: low={low_target} office={office_target}")
 
 # Color-admission math: one bright channel is insufficient, SHORT clipping vetoes
 # recovery, and a neutral multi-channel LONG clip suppresses weak processed-ISP tint.
@@ -561,11 +607,11 @@ require(short_safe((247/255,1.0,1.0)) < 0.01,
         "V1.4.15 white-car failure: a SHORT with clipped G/B must not create a red-only fill")
 
 # 056 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.15' in workflow
-        and 'run-id: 33528646507' in workflow,
-        "workflow must download the exact successful V1.4.15 Actions authority")
-require('947824b8f3bb7a9fd08aee4a79a013fbd54ea22c' in workflow,
-        "V1.4.15 authority commit pin missing")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.16' in workflow
+        and 'run-id: 33545839700' in workflow,
+        "workflow must download the exact successful V1.4.16 Actions authority")
+require('ef7accc0b3824bc5d1cb0d61132b98cfd7242722' in workflow,
+        "V1.4.16 authority commit pin missing")
 require('backup-v1.4.14-pre-adaptive-hdr' in workflow,
         "architectural backup branch proof missing")
 
@@ -592,8 +638,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 21' in gradle and 'versionName = "1.0-v1.4.16"' in gradle,
-        "V1.4.16 version/build pin missing")
+require('versionCode = 22' in gradle and 'versionName = "1.0-v1.4.17"' in gradle,
+        "V1.4.17 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -634,9 +680,10 @@ require('clampedBrightnessEv' not in fusion and 'brightnessGain' not in fusion,
         "saved fusion must not contain Brightness gain")
 require('calibrateShortToLong' in fusion and 'medianPrefix' in fusion,
         "saved fusion must calibrate SHORT from valid overlap")
-require('longHighlight' in fusion and 'shortSafe' in fusion
-        and 'neutralLongClip' in fusion and 'validChannelAgreement' in fusion,
-        "saved fusion must require coherent, unclipped, color-safe SHORT recovery")
+require('highlightNeed' in fusion and 'lumaSafe' in fusion and 'signalSafe' in fusion
+        and 'recoveryMask' in fusion and 'neutralLongClip' in fusion
+        and 'validChannelAgreement' in fusion and 'colorTrust' in fusion,
+        "saved fusion must require masked, signal-safe, color-safe SHORT recovery")
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
     rotated_w = frame_h if axis_swap else frame_w
@@ -697,4 +744,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.16 REGRESSION PASS: natural-scene LONG, exact exposure-generation pairs, temporally reliable SHORT, scalar color-safe highlight recovery, stable-white flicker policy, adaptive AUTO+MANUAL HDR, LONG-owned Brightness -5..+2EV, stable signing, frozen capture pair, orientation/FOV/cadence/sRGB protections")
+print("V1.4.17 REGRESSION PASS: adaptive scene-body LONG independent of bootstrap AE, LONG-base masked SHORT recovery, local luminance/chroma trust, neutral anti-pink protection, exact exposure-generation pairs, adaptive AUTO+MANUAL HDR, LONG-owned Brightness -5..+2EV, stable signing, frozen capture pair, orientation/FOV/cadence/sRGB protections")

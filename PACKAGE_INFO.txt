@@ -1,35 +1,35 @@
-Iris HDR Viewfinder Test V1.4.16
+Iris HDR Viewfinder Test V1.4.17
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.4.15 GitHub Actions compiled candidate/artifact
-- Commit: 947824b8f3bb7a9fd08aee4a79a013fbd54ea22c
-- Tree: 4a0a05ae34735f3d924cd62963511fc162d3796b
-- Actions run: 33528646507 (successful attempt 2)
-- Artifact ID: 9809011771
-- Artifact digest: sha256:e4f07e53b295a3c100212d7d0107fe3ca487831126297e3e63b4b1359a258def
-- APK SHA-256: a607126da05b87da994f9ac53e66a90a463e4b89c19329ae8f6b0b45fdce3491
-- Source-candidate TAR SHA-256: 4c76326bf2a89a382e51d8799345aee68f4fd1634c9ccb61c017f2dec92e55f6
-- Runtime manifest SHA-256: 9edafd4c1a59369434a9d792022c7124b1633bf1b4e2230912cf13ab18e31db0
-- Repository manifest SHA-256: 9459459d12600756063d26fd862e9333026dc281221dbcd51b8a2155e0900e3c
-- Regressions SHA-256: 1152e9214c5e4e4df933192ae128ee6c30e6f6080b33cfaacb44edf6a1fab2be
+- Exact successful V1.4.16 GitHub Actions compiled candidate/artifact
+- Commit: ef7accc0b3824bc5d1cb0d61132b98cfd7242722
+- Tree: efd62a9e36915000339f540f96b23b0d81c49199
+- Actions run: 33545839700
+- Artifact ID: 9815483773
+- Artifact digest: sha256:cba01ba366b452c69a46074dad3ad4fdc701a0c2b2ba3d3303ea21763d58e6b0
+- APK SHA-256: d5a461a268e95be17217aea1a941d7eb2efeea81d5d167297925ec2d6bb386b5
+- Source-candidate TAR SHA-256: 34e324d013e854e266f745cb0197462e526241b732c4668e18addbdfc1a7ef46
+- Runtime manifest SHA-256: 6f58dfff288e9f1cb14711c79efaa664a68d1f20d664e37ec3f474dc9c62dfba
+- Repository manifest SHA-256: dd021337629fa0fda0b60327a9b2b387e1dcdd7adf2ee7e62d79bbdd104689d8
+- Regressions SHA-256: ce11b7f049168e5acfcdf5774137f86395bc23be23a15831b0312c7b6848add5
 
 Verification-mechanics authority:
-- Exact successful V1.4.15 Actions sequence/order.
-- V1.4.16 adds no workflow step and changes no compiler/build/invariance ordering.
-- Infrastructure delta is authority/version/hash/regression pins only; stable-signing mechanics remain byte-semantically identical.
+- Exact successful V1.4.16 Actions sequence/order.
+- V1.4.17 adds no workflow step and changes no compiler/build/invariance ordering.
+- Stable-signing mechanics remain unchanged.
+- Infrastructure changes are authority/version/hash/regression pins only.
 - Real GLSL/Java/full assemble proof remains GitHub Actions authority.
 
 Backup policy:
-- No new backup for V1.4.16, per user request and localized forward/rollback proof.
+- No new backup for V1.4.17, per user request.
 - Existing architectural backup remains:
   backup-v1.4.14-pre-adaptive-hdr -> 93c43a08e32eed5a0ccb146b81dd3907b2474b39
 
-V1.4.16 runtime changed-file allowlist: exactly five files:
+V1.4.17 runtime changed-file allowlist: exactly four files:
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 
@@ -45,25 +45,25 @@ Documentation/hash pins:
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-V1.4.16 architecture:
-- Live HDR remains exactly one current SHORT + one current LONG. Prior pairs may influence control/reliability hysteresis only; they never contribute image pixels.
-- Clean HAL AE remains bootstrap-only, but no longer defines a highlight-protected dark LONG as permanent 0EV reality.
-- LONG is the scene-appearance owner. A robust scene-body target uses median + p98 highlight-tail evidence; a strong HDR tail raises the 0EV body floor to 0.045 linear. The supplied V1.4.15 office failure measured 0.01462 linear median / 0.32845 p98 and therefore receives roughly +1.6EV correction at 0EV.
-- LONG adapts in at most 0.20EV live steps. Brightness remains -5.0..+2.0EV and biases LONG appearance, not bracket size.
-- SHORT independently owns highlight insurance. Bracket widening needs two consecutive stable meaningful-clipping samples; release needs three samples, preventing threshold chatter.
-- Every live SHORT/LONG request set carries an immutable exposure-generation ID. HdrGlView publishes only exact same-generation pairs, and CameraController rejects statistics from retired generations.
-- Live SHORT authority requires two consecutive temporally stable 32x24 samples. If normalized SHORT highlight brightness/chroma changes while LONG remains stable, fusion falls back to LONG until stability returns.
-- Known 50/60-Hz lighting never deliberately crosses below the safe 10ms/8.333333ms integration period merely for more HDR headroom. Unknown/PWM preserves clean-AE LONG integration and keeps SHORT on LONG integration while using ISO headroom first.
-- SHORT-to-LONG overlap calibration is one scalar luminance/exposure calibration, not independent R/G/B gains. This prevents exposure calibration from manufacturing hue shifts.
-- Highlight fusion is coherent RGB, not independent per-channel recovery. If any SHORT channel approaches the processed ceiling, SHORT is rejected for that highlight.
-- A neutral multi-channel clipped LONG suppresses weak/moderate SHORT ISP tint, so a white car reflection/ceiling light cannot become pink/orange merely because SHORT and LONG differ.
-- LONG remains full RGB owner everywhere outside genuinely lost highlights. A clean stable white clip is intentionally preferred to pink/orange/PWM/blotchy recovery.
-- Saved JPEG fusion mirrors scalar calibration, coherent SHORT safety, neutral-highlight protection and LONG-first tone ownership.
-- AUTO and MANUAL SAFE retain the same adaptive SHORT intelligence; MANUAL keeps user LONG intent with its existing extra headroom policy.
-- Orientation, FOV, cadence, DNG, sRGB, noise/edge ownership, frozen still pair, stable signing and capture protections are inherited unchanged.
+V1.4.17 architecture:
+- HDR image fusion remains exactly one current SHORT + one current LONG. Prior pairs provide only controller/reliability hysteresis; they never contribute image pixels.
+- LONG remains the master/base image and owns all shadows, midtones, normal color and every pixel outside the highlight-recovery mask.
+- System/HAL AE remains bootstrap-only. It is not the live brightness authority and no fixed office-derived +EV correction exists.
+- AUTO LONG now meters the robust P25/P35/P50 scene body. Exposure-invariant P90/P50 and P98/P50 shape estimates whether a meaningful bright tail exists; that tail is assigned to SHORT rather than allowed to darken LONG.
+- The scene-body target varies with histogram shape and inferred scene demand. High-demand genuine low-light scenes lower the target, while a broad bright-tail scene raises it. This prevents the V1.4.16 fixed 0.045-linear office target from becoming a global brightness lock.
+- LONG convergence requires two agreeing samples and is bounded to 0.18EV per update. Brightness remains -5.0..+2.0EV and biases the learned LONG appearance target rather than directly changing bracket width.
+- SHORT remains independent highlight insurance. Bracket widening still requires stable meaningful clipping evidence and is blocked when SHORT is broadly unreliable.
+- Live fusion is now masked highlight recovery: SHORT has no authority outside LONG's highlight-need mask.
+- The live 32x24 reliability field is spatial. R stores SHORT luminance/detail trust; G stores SHORT chroma trust. It is bilinear filtered, so one unstable lamp cannot globally disable a stable recoverable window.
+- Luminance and color trust are separate. SHORT may contribute useful highlight brightness/detail while questionable SHORT chroma is rejected and LONG chromaticity is retained.
+- Neutral clipped LONG regions have an additional anti-pink color lock. A white lamp/reflection may recover highlight structure without importing pink/orange processed-ISP tint.
+- A clipped/low-signal/unstable SHORT region falls back locally to LONG. Clean stable clipping remains preferable to corrupted recovery.
+- Recovered SHORT highlights receive a wider useful display range (recovery knee 0.72, white anchor 0.90, ceiling 0.995) only inside the mask, so SHORT detail is not squeezed into near-white while ordinary LONG mids remain untouched.
+- Saved JPEG fusion mirrors the LONG-base mask and separates luminance/detail trust from chroma trust. It does not apply global Brightness gain.
+- Exposure-generation matching, temporal anti-pulsation, known/unknown flicker guards, AUTO/MANUAL adaptive SHORT policy, frozen still pair, FOV/cadence, orientation/DNG, sRGB, edge/noise ownership and stable signing are inherited from successful V1.4.16.
 
 Stable updates:
-- Reuses the V1.4.15 stable signing secret IRIS_TEST_SIGNING_KEY_B64; do not regenerate it.
+- Reuses repository secret IRIS_TEST_SIGNING_KEY_B64; do not regenerate it.
 - Stable keystore SHA-256: 2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e
 - Signing certificate SHA-256: 53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8
-- If V1.4.15 is installed with this signer, V1.4.16 versionCode 21 should install as a normal update after successful Actions proof.
+- V1.4.17 versionCode 22 should install as a normal update over a V1.4.16 APK signed by this identity after successful Actions proof.
