@@ -1,25 +1,33 @@
-Iris HDR Viewfinder Test V1.4.14
+Iris HDR Viewfinder Test V1.4.15
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
-Runtime authority: exact successful V1.4.13 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.13
-Authority commit: 0ad3fcfaf4ea72cffdec11522364e9a53576b7c9
-Authority tree: 1d001b6ed15365f0a13004870ac58a09512a330e
-Authority Actions run: 33469025028
-Authority job: 99734783813
-Authority artifact ID: 9785884888
-Authority artifact digest: sha256:95cfeab064cf578020e8615dacc42d87bc3db7fcd8ef63fe6149c58e9e893a64
-Authority V1.4.13 source TAR SHA-256: 7e2cf8ecc252171322bdd4a55f15789b6ffe194cec48518af6cec2fa32545435
-Authority V1.4.13 runtime manifest SHA-256: fea510668dc67680bbf7ffc5293884bdecad5b7081f125b17824287c5fc9cc16
-Authority V1.4.13 repository manifest SHA-256: eda2f9874fecfdf399ced1a9dc4a4c58c478af0cead59957b873976ccc48fe4e
-Authority V1.4.13 regressions SHA-256: 23ed819c3ec8334e94d529ab7c01cc4314cdd1c3ec8d297b0c38742feb360de2
-Authority V1.4.13 APK SHA-256: 18c005d6bb4b0210a6c1d13494b1df244a1a2e8916cc865521951c04e5572dc2
-Existing architectural rollback backup: backup-v1.4.7-pre-adaptive-exposure-headroom -> cb91702446d18b963b25f9ae2d8e84a0651be2ff
-New backup for V1.4.14: NONE by explicit request; exact V1.4.13 hashes and deterministic forward/rollback patches are immediate rollback authority.
 
-V1.4.14 runtime changed-file allowlist: exactly five files:
+Runtime authority:
+- Exact successful V1.4.14 Actions compiled candidate
+- Commit: 93c43a08e32eed5a0ccb146b81dd3907b2474b39
+- Tree: c0cf1f2f513a89ad883e3f349decff6e034fef5a
+- Actions run: 33507939111
+- Artifact ID: 9800417423
+- Artifact digest: sha256:2b3d22d996c3f840b46587e4a0109830b76e9522a45a5a1ef83cf0ae908d14a1
+- APK SHA-256: cbdf715c516767b1e806e055dcb317a645d2d5b8674a727c00963bf1404d8107
+- Source-candidate TAR SHA-256: b3752fa393c498ee1879e358f96f16705abf6fe8a21a9fb2cd14a8622712ffb2
+- Runtime manifest SHA-256: b8be504ae0047eb7124a25c2dcbda3e64a47be8d63e2c0c31863d6b555523b6b
+- Repository manifest SHA-256: 375a6ef7aef7ab108c235c5d58c757c4b68997bac9ae29bc0d35f11b2e421ede
+- Regressions SHA-256: febf1c4a24c0e71ba6c6888384e1ce7e8158f0fcdda2e75132f678b1047c84ca
+
+Verification-mechanics authority:
+- Exact successful V1.4.14 Actions sequence/order.
+- Infrastructure delta is intentionally limited to V1.4.15 authority/version/hash/regression pins plus one stable-signing materialization step before compiler gates.
+- Real GLSL/Java/full assemble proof remains GitHub Actions authority.
+
+Architectural backup:
+backup-v1.4.14-pre-adaptive-hdr -> 93c43a08e32eed5a0ccb146b81dd3907b2474b39
+
+V1.4.15 runtime changed-file allowlist: exactly six files:
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
@@ -27,29 +35,32 @@ Infrastructure changed-file list:
 - .github/workflows/build.yml
 - BUILD_WORKFLOW_COPY.yml
 - scripts/verify_orientation.py
-Plus candidate documentation/version/hash pins:
+- app/build.gradle.kts (version + stable test signing config)
+
+Documentation/hash pins:
 - PACKAGE_INFO.txt
 - PACKAGE_MANIFEST_SHA256.txt
 - README.md
 - VSCODE_DEV_UPLOAD.txt
-- app/build.gradle.kts
 
-Infrastructure mechanics: inherited in the same order from successful V1.4.13. No build/gate redesign. Changes are authority/version/hash/allowlist/regression pins only; verify_shaders.py is unchanged.
+V1.4.15 architecture:
+- Initial clean AE is bootstrap-only. After first anchor, periodic 5-second AE takeover/remeter is removed.
+- Live SHORT/LONG burst remains active continuously; 32x24 displayed-pair scene statistics are sampled at low duty to update exposure without replacing the repeating HDR request.
+- LONG owns natural scene appearance and user Brightness intent (-5.0..+2.0 EV).
+- AUTO SHORT independently adapts only as dark as needed for meaningful highlight recovery, normally 3 EV and bounded to 5 EV.
+- Tiny clipped areas below the meaningful-area budget are allowed to remain clipped rather than forcing excessively dark/noisy SHORT.
+- MANUAL SAFE retains user LONG/brightness intent but uses the same adaptive SHORT logic, with slightly more headroom and a 6 EV ceiling.
+- SHORT quality guard uses dark-pixel fraction, overlap sample count, and overlap error to avoid blotchy over-normalization.
+- Capture metadata reports the new LONG_APPEARANCE_SHORT_ADAPTIVE ownership instead of the retired whole-pair label.
+- Live and saved fusion derive per-channel SHORT-to-LONG overlap calibration before recovery.
+- LONG remains complete RGB/color owner wherever valid. SHORT only recovers genuinely clipped channels when normalized SHORT proves extra radiance and valid channels agree.
+- V1.4.7 full-RGB one-bright-channel handoff is removed to address peach/orange skin and colored-white reflective contamination without global desaturation/chroma filtering.
+- Highlight tone mapping preserves LONG mids/appearance and compresses only the upper/recovered range.
+- 50/60-Hz, unknown/PWM, forced-60 cadence, FOV, orientation, DNG, frozen capture-set and logging protections remain.
 
-V1.4.14 correction:
-- Restore live hdr_display.frag byte-exact to successful V1.4.7 IQ authority.
-- Restore saved JpegFusion.java byte-exact to successful V1.4.7 IQ authority.
-- At 0.0 EV reconstruct the exact V1.4.7 zero-Brightness pair before any Brightness shift.
-- Brightness -5.0..+2.0 EV moves SHORT and LONG exposure products together; LONG follows achieved SHORT gain so baseline HDR separation remains stable.
-- Preserve the existing 50/60-Hz and unknown/PWM anti-banding timing ownership; forced 60 fps retains the 16.666666 ms live integration ceiling.
-- Keep Brightness active in HDR AUTO and HDR MANUAL SAFE.
-- Remove V1.4.12/V1.4.13 LONG-only widening-bracket Brightness behavior.
-- Remove V1.4.13 true-multi-channel clipped-highlight/edge-disagreement IQ experiment by exact V1.4.7 restoration.
-- The known V1.4.7 red/orange highlight-color defect is intentionally not claimed fixed in this root-cause build.
-- Fix the recorded 5-second vertical viewfinder bounce by making status/debug text one-line fixed 20dp geometry; remeter cadence itself remains unchanged.
-- Retain compact navigation-safe controls and Android bottom system inset.
-
-Preserved byte-for-byte runtime from successful V1.4.13:
-AndroidManifest.xml, copy_2d.frag, fullscreen.vert, oes_to_rgb.frag, FrameMeta.java, HdrGlView.java, MediaStoreWriter.java.
-
-Toolchain/build mechanics: inherited unchanged from successful V1.4.13 (AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2).
+Stable updates:
+- GitHub Actions secret required once: IRIS_TEST_SIGNING_KEY_B64.
+- Stable keystore SHA-256: 2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e
+- Signing certificate SHA-256: 53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8
+- The private key is NOT in the repository or upload ZIP.
+- V1.4.15 may require one final uninstall because V1.4.14 was signed with a different ephemeral debug certificate. Later builds using the same secret + higher versionCode should install directly as updates.

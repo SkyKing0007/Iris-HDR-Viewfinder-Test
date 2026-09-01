@@ -86,16 +86,26 @@ final class CameraController {
     private static final long ONE_SECOND_NS = 1_000_000_000L;
     private static final long SIXTY_FPS_DURATION_NS = 16_666_666L;
     private static final long THIRTY_FPS_DURATION_NS = 33_333_333L;
-    private static final double HDR_BRACKET_RATIO = 8.0;
     private static final float DISPLAY_BRIGHTNESS_MIN_EV = -5.0f;
     private static final float DISPLAY_BRIGHTNESS_MAX_EV = 2.0f;
     private static final int AUTO_METER_MIN_FRAMES = 4;
     private static final int AUTO_METER_MAX_FRAMES = 12;
     private static final int AUTO_METER_STABLE_FRAMES = 3;
     private static final double AUTO_METER_STABLE_EV = 0.18;
-    private static final long AUTO_REMETER_INTERVAL_MS = 5_000L;
-    private static final long AUTO_ANCHOR_FRESH_NS = 2_500_000_000L;
-    private static final long NORMAL_ANCHOR_UPDATE_MIN_NS = 500_000_000L;
+    private static final double AUTO_BRACKET_DEFAULT_EV = 3.0;
+    private static final double AUTO_BRACKET_MIN_EV = 2.0;
+    private static final double AUTO_BRACKET_MAX_EV = 5.0;
+    private static final double MANUAL_BRACKET_MAX_EV = 6.0;
+    private static final double MANUAL_EXTRA_HEADROOM_EV = 0.25;
+    private static final double LONG_CLIP_TRIGGER_FRACTION = 0.005;
+    private static final double AUTO_SHORT_CLIP_TARGET = 0.0025;
+    private static final double MANUAL_SHORT_CLIP_TARGET = 0.0015;
+    private static final double SHORT_CLIP_RELEASE_FRACTION = 0.0005;
+    private static final double BRACKET_STEP_UP_EV = 0.35;
+    private static final double BRACKET_STEP_DOWN_EV = 0.15;
+    private static final double AUTO_MID_HYSTERESIS_EV = 0.10;
+    private static final double AUTO_MID_MAX_STEP_EV = 0.30;
+    private static final long ADAPTIVE_PAIR_UPDATE_MIN_NS = 180_000_000L;
     private static final int DEFAULT_POST_RAW_BOOST = 100;
     private static final int MAX_SRGB_CURVE_POINTS = 64;
     private static final double FOV_MAX_REPORTED_SCALE = 1.03;
@@ -123,8 +133,8 @@ final class CameraController {
     private boolean capturing;
     private boolean stillSessionActive;
     private boolean previewSurfaceConfigured;
-    // Immutable per-shutter still controls. AUTO remetering may continue after the
-    // still inputs are acquired, but it must never mutate an in-flight HDR set.
+    // Immutable per-shutter still controls. Live adaptive scene statistics may continue
+    // after the still inputs are acquired, but they must never mutate an in-flight HDR set.
     private long captureShortExposureNs;
     private long captureLongExposureNs;
     private int captureShortIso;
@@ -155,6 +165,13 @@ final class CameraController {
     private int autoMeterStableFrames;
     private double autoMeterLastProduct = -1.0;
     private long lastAutoAnchorNs;
+    private double autoSceneBaseLongProduct = -1.0;
+    private double autoTargetBaseMidLuma = -1.0;
+    private double autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
+    private double manualAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
+    private double manualBracketFloorEv = AUTO_BRACKET_MIN_EV;
+    private long lastAdaptiveStatsFrame = -1L;
+    private long lastAdaptivePairUpdateNs;
     private volatile int jpegOrientationDegrees;
     private long lastAeExposureNs = ONE_SECOND_NS / 60;
     private int lastAeIso = 400;
@@ -189,7 +206,6 @@ final class CameraController {
     private String lastPhysicalActiveArrayId;
     private Float lastReportedZoomRatio;
     private String lastActivePhysicalId;
-    private final Runnable autoRemeterRunnable = this::startAutoMeteringLocked;
 
     CameraController(Context context, Listener listener) {
         this.context = context.getApplicationContext();
@@ -265,8 +281,7 @@ final class CameraController {
         previewMode = mode;
         cameraHandler.post(() -> {
             RuntimeLogger.event("PREVIEW_MODE", String.valueOf(previewMode));
-            cameraHandler.removeCallbacks(autoRemeterRunnable);
-            if (previewMode != PreviewMode.NORMAL && autoHdrExposure && !hasFreshAutoAnchorLocked()) {
+            if (previewMode != PreviewMode.NORMAL && autoHdrExposure && !haveAeSample) {
                 startAutoMeteringLocked();
             } else {
                 applyPreviewRepeatingLocked();
@@ -282,16 +297,16 @@ final class CameraController {
                     "BRIGHTNESS_EV",
                     String.format(
                             Locale.US,
-                            "%+.1fEV owner=WHOLE_HDR_PAIR_EXPOSURE_BIAS mode=%s",
+                            "%+.1fEV owner=LONG_APPEARANCE_SHORT_ADAPTIVE mode=%s",
                             displayBrightnessEv,
                             autoHdrExposure ? "AUTO" : "MANUAL_SAFE"));
             if (characteristics == null) return;
             if (autoHdrExposure) {
                 if (!haveAeSample) return;
-                deriveAutoPairFromAnchorLocked();
+                deriveAdaptiveAutoPairLocked();
                 publishAutoHdrSettingsLocked("BRIGHTNESS_UPDATE", true);
             } else {
-                recomputeManualFlickerSafetyLocked();
+                recomputeManualAdaptivePairLocked();
                 RuntimeLogger.event("MANUAL_BRIGHTNESS_UPDATE", manualSafetySummaryLocked());
                 listener.onStatus(manualSafetySummaryLocked());
             }
@@ -305,18 +320,23 @@ final class CameraController {
     void setAutoHdrExposure(boolean enabled) {
         cameraHandler.post(() -> {
             autoHdrExposure = enabled;
-            cameraHandler.removeCallbacks(autoRemeterRunnable);
             autoMetering = false;
-            if (!enabled) {
-                recomputeManualFlickerSafetyLocked();
+            lastAdaptiveStatsFrame = -1L;
+            lastAdaptivePairUpdateNs = 0L;
+            if (enabled) {
+                autoTargetBaseMidLuma = -1.0;
+                if (haveAeSample && autoSceneBaseLongProduct <= 0.0) {
+                    autoSceneBaseLongProduct = Math.max(1.0, (double) lastAeExposureNs * lastAeIso);
+                }
+            } else {
+                resetManualAdaptiveBracketLocked();
+                recomputeManualAdaptivePairLocked();
                 listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
             }
-            RuntimeLogger.event("HDR_MODE", enabled ? "AUTO_ANCHORED" : manualSafetySummaryLocked());
+            RuntimeLogger.event("HDR_MODE", enabled ? "AUTO_ADAPTIVE_HDR" : manualSafetySummaryLocked());
             if (previewMode != PreviewMode.NORMAL) {
-                if (enabled && !hasFreshAutoAnchorLocked()) startAutoMeteringLocked();
-                else {
-                    applyPreviewRepeatingLocked();
-                }
+                if (enabled && !haveAeSample) startAutoMeteringLocked();
+                else applyPreviewRepeatingLocked();
             }
         });
     }
@@ -342,13 +362,19 @@ final class CameraController {
                 longExposureNs = tmp;
             }
             manualIso = clampIso(iso);
-            recomputeManualFlickerSafetyLocked();
+            resetManualAdaptiveBracketLocked();
+            recomputeManualAdaptivePairLocked();
             if (!autoHdrExposure) {
                 listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
                 RuntimeLogger.event("MANUAL_SETTINGS", manualSafetySummaryLocked());
                 applyPreviewRepeatingLocked();
             }
         });
+    }
+
+    void onHdrSceneStats(HdrGlView.SceneStats stats) {
+        if (stats == null) return;
+        cameraHandler.post(() -> processHdrSceneStatsLocked(stats));
     }
 
     void captureHdrSet() {
@@ -402,9 +428,15 @@ final class CameraController {
             autoMeterStableFrames = 0;
             autoMeterLastProduct = -1.0;
             lastAutoAnchorNs = 0L;
+            autoSceneBaseLongProduct = -1.0;
+            autoTargetBaseMidLuma = -1.0;
+            autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
+            lastAdaptiveStatsFrame = -1L;
+            lastAdaptivePairUpdateNs = 0L;
             autoPostRawBoost = DEFAULT_POST_RAW_BOOST;
             sceneFlicker = FLICKER_UNKNOWN;
-            recomputeManualFlickerSafetyLocked();
+            resetManualAdaptiveBracketLocked();
+            recomputeManualAdaptivePairLocked();
             opening = true;
             RuntimeLogger.event(
                     "CAMERA_OPEN",
@@ -541,7 +573,7 @@ final class CameraController {
                                             + " edgeOff=" + edgeOffSupported
                                             + " sRgbContrast=" + srgbTonemapSupported);
                             if (autoHdrExposure && previewMode != PreviewMode.NORMAL
-                                    && !hasFreshAutoAnchorLocked()) {
+                                    && !haveAeSample) {
                                 startAutoMeteringLocked();
                             } else {
                                 applyPreviewRepeatingLocked();
@@ -622,7 +654,7 @@ final class CameraController {
                 captureSession.setRepeatingRequest(builder.build(), previewCaptureCallback, cameraHandler);
                 listener.onStatus("NORMAL AE preview  target=" + rangeText(aeFpsRange) + " fps");
             } else {
-                if (autoHdrExposure && (!hasFreshAutoAnchorLocked() || autoMetering)) {
+                if (autoHdrExposure && (!haveAeSample || autoMetering)) {
                     startAutoMeteringLocked();
                     return;
                 }
@@ -802,7 +834,7 @@ final class CameraController {
                                     || observedFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ)
                             && observedFlicker != sceneFlicker) {
                         sceneFlicker = observedFlicker;
-                        if (recomputeManualFlickerSafetyLocked()) {
+                        if (recomputeManualAdaptivePairLocked()) {
                             RuntimeLogger.event("MANUAL_FLICKER", manualSafetySummaryLocked());
                             applyPreviewRepeatingLocked();
                         }
@@ -818,12 +850,6 @@ final class CameraController {
 
                     FrameMeta meta = new FrameMeta(kind, result.getFrameNumber(), timestamp, exposure, iso);
                     listener.onPreviewMeta(meta);
-                    if (FrameMeta.LONG.equals(kind)
-                            && autoHdrExposure
-                            && previewMode != PreviewMode.NORMAL
-                            && !autoMetering) {
-                        scheduleAutoRemeterLocked();
-                    }
                     previewResultCount++;
                     Long frameDuration = result.get(CaptureResult.SENSOR_FRAME_DURATION);
                     if (previewResultCount % 300 == 0) {
@@ -862,11 +888,10 @@ final class CameraController {
             return;
         }
         capturing = true;
-        // Freeze the exact pair before closing the preview session. A pending clean-AE
-        // remeter result can arrive while the temporary RAW/JPEG session is being
-        // configured; from this point forward it is ignored for this capture.
-        cameraHandler.removeCallbacks(autoRemeterRunnable);
-        autoMetering = false;
+        // Freeze the exact adaptive pair before closing the preview session. Live scene
+        // statistics may continue to arrive while the still session is configured, but
+        // from this point forward they cannot mutate this in-flight HDR set.
+                autoMetering = false;
         captureShortExposureNs = activeShortExposureNs();
         captureLongExposureNs = activeLongExposureNs();
         captureShortIso = activeShortIso();
@@ -1000,8 +1025,7 @@ final class CameraController {
     }
 
     private void closeDeviceLocked() {
-        cameraHandler.removeCallbacks(autoRemeterRunnable);
-        autoMetering = false;
+                autoMetering = false;
         capturing = false;
         stillSessionActive = false;
         if (captureSaver != null) captureSaver.abort("Camera closed");
@@ -1169,8 +1193,14 @@ final class CameraController {
         aeFpsRange = chooseAeFpsRange(ranges, 30);
         haveAeSample = false;
         lastAutoAnchorNs = 0L;
+        autoSceneBaseLongProduct = -1.0;
+        autoTargetBaseMidLuma = -1.0;
+        autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
+        lastAdaptiveStatsFrame = -1L;
+        lastAdaptivePairUpdateNs = 0L;
         autoMetering = false;
-        recomputeManualFlickerSafetyLocked();
+        resetManualAdaptiveBracketLocked();
+        recomputeManualAdaptivePairLocked();
         RuntimeLogger.event("FOV_FALLBACK", reason + "; recreating preview session at 30fps");
         listener.onStatus("60fps FOV parity unavailable/cropped; switching to full-FOV 30fps");
         if (captureSession != null && !stillSessionActive) {
@@ -1202,9 +1232,14 @@ final class CameraController {
         }
         haveAeSample = false;
         lastAutoAnchorNs = 0L;
+        autoSceneBaseLongProduct = -1.0;
+        autoTargetBaseMidLuma = -1.0;
+        autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
+        lastAdaptiveStatsFrame = -1L;
+        lastAdaptivePairUpdateNs = 0L;
         autoMetering = false;
-        cameraHandler.removeCallbacks(autoRemeterRunnable);
-        recomputeManualFlickerSafetyLocked();
+        resetManualAdaptiveBracketLocked();
+        recomputeManualAdaptivePairLocked();
         RuntimeLogger.event(
                 "FPS_POLICY",
                 (allowCropped60Fps ? "ALLOW_CROPPED_60" : "FOV_SAFE")
@@ -1277,8 +1312,14 @@ final class CameraController {
                         sixtyFpsUnderDeliveryWindows = 0;
                         haveAeSample = false;
                         lastAutoAnchorNs = 0L;
+                        autoSceneBaseLongProduct = -1.0;
+                        autoTargetBaseMidLuma = -1.0;
+                        autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
+                        lastAdaptiveStatsFrame = -1L;
+                        lastAdaptivePairUpdateNs = 0L;
                         autoMetering = false;
-                        recomputeManualFlickerSafetyLocked();
+                        resetManualAdaptiveBracketLocked();
+                        recomputeManualAdaptivePairLocked();
                         listener.onStatus(
                                 "60 fps capability under-delivered at "
                                         + String.format(Locale.US, "%.1f", captureResultFps)
@@ -1293,26 +1334,18 @@ final class CameraController {
         }
     }
 
-    private boolean hasFreshAutoAnchorLocked() {
-        return haveAeSample && lastAutoAnchorNs > 0L
-                && System.nanoTime() - lastAutoAnchorNs <= AUTO_ANCHOR_FRESH_NS;
-    }
-
-    private void scheduleAutoRemeterLocked() {
-        if (!autoHdrExposure || previewMode == PreviewMode.NORMAL || stillSessionActive
-                || captureSession == null || autoMetering
-                || cameraHandler.hasCallbacks(autoRemeterRunnable)) return;
-        cameraHandler.postDelayed(autoRemeterRunnable, AUTO_REMETER_INTERVAL_MS);
-    }
-
     private void startAutoMeteringLocked() {
-        cameraHandler.removeCallbacks(autoRemeterRunnable);
         if (!autoHdrExposure || previewMode == PreviewMode.NORMAL || stillSessionActive
                 || cameraDevice == null || captureSession == null || previewSurface == null) return;
+        if (haveAeSample) {
+            applyPreviewRepeatingLocked();
+            return;
+        }
         try {
             autoMetering = true;
-            // Metering temporarily replaces the pair request. Start a fresh cadence
-            // window so that this bounded hidden phase cannot look like 60-fps failure.
+            // Bootstrap only. Once one clean AE anchor is established, the HDR repeating
+            // burst stays live continuously and scene adaptation comes from the displayed
+            // SHORT/LONG pair statistics instead of periodic AE request takeovers.
             resetCaptureResultFpsLocked();
             autoMeterFrames = 0;
             autoMeterStableFrames = 0;
@@ -1320,14 +1353,13 @@ final class CameraController {
             captureSession.setRepeatingRequest(
                     buildMeterPreviewRequest(), previewCaptureCallback, cameraHandler);
             RuntimeLogger.event(
-                    "AUTO_METER_BEGIN",
-                    "clean AE phase target=" + targetPreviewFps + " fps=" + rangeText(aeFpsRange));
-            listener.onStatus("AUTO HDR metering scene brightness…");
+                    "AUTO_METER_BOOTSTRAP",
+                    "initial clean AE only target=" + targetPreviewFps + " fps=" + rangeText(aeFpsRange));
+            listener.onStatus("AUTO HDR initial scene meter…");
         } catch (Throwable t) {
             autoMetering = false;
             RuntimeLogger.error("AUTO_METER_START_FAIL", t);
             listener.onStatus("AUTO meter failed: " + t.getMessage());
-            if (haveAeSample) applyPreviewRepeatingLocked();
         }
     }
 
@@ -1359,144 +1391,205 @@ final class CameraController {
 
     private void commitAutoAnchorFromResultLocked(
             TotalCaptureResult result, long exposureNs, int iso, int flicker, boolean finishMeter) {
-        long now = System.nanoTime();
-        if (!finishMeter && haveAeSample && lastAutoAnchorNs > 0L
-                && now - lastAutoAnchorNs < NORMAL_ANCHOR_UPDATE_MIN_NS) return;
         boolean firstAnchor = !haveAeSample;
         lastAeExposureNs = clampExposure(exposureNs);
         lastAeIso = clampIso(iso);
         autoPostRawBoost = resultPostRawBoost(result);
         sceneFlicker = flicker;
         haveAeSample = true;
-        lastAutoAnchorNs = now;
-        deriveAutoPairFromAnchorLocked();
+        lastAutoAnchorNs = System.nanoTime();
+        autoSceneBaseLongProduct = Math.max(1.0, (double) lastAeExposureNs * lastAeIso);
+        autoTargetBaseMidLuma = -1.0;
+        autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
+        deriveAdaptiveAutoPairLocked();
         publishAutoHdrSettingsLocked("AUTO_ANCHOR", finishMeter || firstAnchor);
 
         if (finishMeter) {
             autoMetering = false;
-            // The next FPS window must contain only steady SHORT/LONG results.
             resetCaptureResultFpsLocked();
             applyPreviewRepeatingLocked();
         }
     }
 
-    private void deriveAutoPairFromAnchorLocked() {
-        Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
-        if (isoRange == null) return;
-        int minIso = isoRange.getLower();
-        long baseLongExposure = clampExposure(lastAeExposureNs);
-        int baseLongIso = clampIso(lastAeIso);
+    private void processHdrSceneStatsLocked(HdrGlView.SceneStats stats) {
+        if (previewMode == PreviewMode.NORMAL || stillSessionActive || autoMetering
+                || characteristics == null || captureSession == null) return;
+        if (stats.longFrameNumber <= lastAdaptiveStatsFrame) return;
+        lastAdaptiveStatsFrame = stats.longFrameNumber;
 
-        // Reconstruct the exact clean-AE/V1.4.7 baseline pair first. Brightness is a
-        // separate whole-pair exposure intent and may not alter HDR fusion ownership.
-        if (targetPreviewFps >= 60 && baseLongExposure > SIXTY_FPS_DURATION_NS) {
-            double sensorProduct = (double) baseLongExposure * baseLongIso;
-            baseLongExposure = clampExposure(SIXTY_FPS_DURATION_NS);
-            baseLongIso = solveIsoForProduct(sensorProduct, baseLongExposure);
-        }
+        double expectedLongProduct = Math.max(1.0,
+                (double) activeLongExposureNs() * activeLongIso());
+        double staleEv = Math.abs(Math.log(
+                Math.max(1.0, stats.longExposureProduct) / expectedLongProduct) / Math.log(2.0));
+        if (staleEv > 0.20) return;
 
-        long baseShortExposure;
-        int baseShortIso = minIso;
-        double baseLongProduct = Math.max(1.0, (double) baseLongExposure * baseLongIso);
-        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
-            double targetShortProduct = Math.max(1.0, baseLongProduct / HDR_BRACKET_RATIO);
-            long desiredShort = Math.round(targetShortProduct / Math.max(1, minIso));
-            baseShortExposure = Math.min(baseLongExposure, clampExposure(desiredShort));
+        long now = System.nanoTime();
+        boolean pairNeedsUpdate = false;
+        if (autoHdrExposure) {
+            if (!haveAeSample) return;
+            double brightnessGain = Math.pow(2.0, clampBrightnessEv(displayBrightnessEv));
+            if (autoTargetBaseMidLuma <= 0.0 && stats.longMedianLinear > 0.003f) {
+                autoTargetBaseMidLuma = clampDouble(
+                        stats.longMedianLinear / Math.max(0.03125, brightnessGain),
+                        0.015, 0.45);
+                RuntimeLogger.event(
+                        "AUTO_LIVE_TARGET",
+                        String.format(
+                                Locale.US,
+                                "baseMid=%.4f currentMid=%.4f brightness=%+.1fEV",
+                                autoTargetBaseMidLuma, stats.longMedianLinear, displayBrightnessEv));
+            } else if (autoTargetBaseMidLuma > 0.0 && stats.longMedianLinear > 0.002f) {
+                double desiredMid = clampDouble(autoTargetBaseMidLuma * brightnessGain, 0.012, 0.80);
+                double errorEv = Math.log(desiredMid / stats.longMedianLinear) / Math.log(2.0);
+                if (Math.abs(errorEv) > AUTO_MID_HYSTERESIS_EV) {
+                    double stepEv = clampDouble(
+                            errorEv, -AUTO_MID_MAX_STEP_EV, AUTO_MID_MAX_STEP_EV);
+                    autoSceneBaseLongProduct = Math.max(1.0,
+                            autoSceneBaseLongProduct * Math.pow(2.0, stepEv));
+                    pairNeedsUpdate = true;
+                }
+            }
+
+            double nextBracket = adaptBracketEvLocked(
+                    autoAdaptiveBracketEv, stats, false);
+            if (Math.abs(nextBracket - autoAdaptiveBracketEv) >= 0.05) {
+                autoAdaptiveBracketEv = nextBracket;
+                pairNeedsUpdate = true;
+            }
+
+            if (pairNeedsUpdate && (lastAdaptivePairUpdateNs == 0L
+                    || now - lastAdaptivePairUpdateNs >= ADAPTIVE_PAIR_UPDATE_MIN_NS)) {
+                long oldShortNs = autoShortExposureNs;
+                long oldLongNs = autoLongExposureNs;
+                int oldShortIso = autoShortIso;
+                int oldLongIso = autoLongIso;
+                deriveAdaptiveAutoPairLocked();
+                if (oldShortNs != autoShortExposureNs || oldLongNs != autoLongExposureNs
+                        || oldShortIso != autoShortIso || oldLongIso != autoLongIso) {
+                    lastAdaptivePairUpdateNs = now;
+                    publishAutoHdrSettingsLocked("AUTO_LIVE_ADAPT", true);
+                    applyPreviewRepeatingLocked();
+                }
+            }
         } else {
-            // Exact V1.4.7 anti-banding baseline: 50/60-Hz and unknown/PWM use the
-            // same integration window for SHORT and LONG, with SHORT at sensor minimum.
-            baseShortExposure = baseLongExposure;
-        }
-
-        if (Math.abs(displayBrightnessEv) < 0.0001f) {
-            // 0 EV is deliberately the exact V1.4.7 capture relationship.
-            autoShortExposureNs = baseShortExposure;
-            autoShortIso = baseShortIso;
-            autoLongExposureNs = baseLongExposure;
-            autoLongIso = baseLongIso;
-            return;
-        }
-
-        double requestedGain = Math.pow(2.0, clampBrightnessEv(displayBrightnessEv));
-        double baseShortProduct = Math.max(1.0, (double) baseShortExposure * baseShortIso);
-        double targetShortProduct = Math.max(1.0, baseShortProduct * requestedGain);
-        long maxAllowedNs = targetPreviewFps >= 60
-                ? SIXTY_FPS_DURATION_NS
-                : Math.max(manualFrameDurationNs, baseLongExposure);
-
-        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
-            long desiredShortExposure = clampExposure(Math.round(baseShortExposure * requestedGain));
-            desiredShortExposure = Math.min(desiredShortExposure, maxAllowedNs);
-            autoShortExposureNs = desiredShortExposure;
-            autoShortIso = solveIsoForProduct(targetShortProduct, autoShortExposureNs);
-
-            // If sensor limits prevent the exact requested SHORT shift, LONG follows the
-            // achieved SHORT shift so the proven V1.4.7 HDR ratio remains unchanged.
-            double achievedShortProduct = Math.max(
-                    1.0, (double) autoShortExposureNs * autoShortIso);
-            double achievedPairGain = achievedShortProduct / baseShortProduct;
-            double targetLongProduct = Math.max(1.0, baseLongProduct * achievedPairGain);
-            long desiredLongExposure = clampExposure(Math.round(baseLongExposure * achievedPairGain));
-            desiredLongExposure = Math.min(desiredLongExposure, maxAllowedNs);
-            autoLongExposureNs = desiredLongExposure;
-            autoLongIso = solveIsoForProduct(targetLongProduct, autoLongExposureNs);
-        } else {
-            // Flicker-safe whole-pair shift: SHORT and LONG keep one common integration
-            // window. Shutter time moves first only on the existing 50/60-Hz safe grid;
-            // ISO supplies residual gain to BOTH frames. Unknown/PWM keeps the proven
-            // baseline shutter rather than inventing a banding-prone integration time.
-            long desiredCommonExposure = clampExposure(Math.round(baseLongExposure * requestedGain));
-            desiredCommonExposure = Math.min(desiredCommonExposure, maxAllowedNs);
-            long commonExposure = chooseWholePairBrightnessExposureLocked(
-                    baseLongExposure,
-                    desiredCommonExposure,
-                    targetShortProduct,
-                    minIso,
-                    sceneFlicker,
-                    maxAllowedNs);
-            autoShortExposureNs = commonExposure;
-            autoShortIso = solveIsoForProduct(targetShortProduct, commonExposure);
-
-            double achievedShortProduct = Math.max(
-                    1.0, (double) autoShortExposureNs * autoShortIso);
-            double achievedPairGain = achievedShortProduct / baseShortProduct;
-            double targetLongProduct = Math.max(1.0, baseLongProduct * achievedPairGain);
-            autoLongExposureNs = commonExposure;
-            autoLongIso = solveIsoForProduct(targetLongProduct, commonExposure);
+            double nextBracket = adaptBracketEvLocked(
+                    manualAdaptiveBracketEv, stats, true);
+            nextBracket = Math.max(manualBracketFloorEv, nextBracket);
+            if (Math.abs(nextBracket - manualAdaptiveBracketEv) >= 0.05
+                    && (lastAdaptivePairUpdateNs == 0L
+                            || now - lastAdaptivePairUpdateNs >= ADAPTIVE_PAIR_UPDATE_MIN_NS)) {
+                manualAdaptiveBracketEv = nextBracket;
+                if (recomputeManualAdaptivePairLocked()) {
+                    lastAdaptivePairUpdateNs = now;
+                    RuntimeLogger.event("MANUAL_LIVE_ADAPT", manualSafetySummaryLocked());
+                    applyPreviewRepeatingLocked();
+                }
+            }
         }
     }
 
-    private long chooseWholePairBrightnessExposureLocked(
-            long baseExposureNs,
-            long desiredExposureNs,
-            double targetShortProduct,
-            int minIso,
-            int flicker,
-            long maxAllowedNs) {
-        long base = Math.min(clampExposure(baseExposureNs), maxAllowedNs);
-        long desired = Math.min(clampExposure(desiredExposureNs), maxAllowedNs);
-        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) return desired;
-        if (flicker != CaptureResult.STATISTICS_SCENE_FLICKER_50HZ
-                && flicker != CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) {
-            return base;
+    private double adaptBracketEvLocked(
+            double currentEv, HdrGlView.SceneStats stats, boolean manual) {
+        double minEv = manual
+                ? Math.max(manualBracketFloorEv, AUTO_BRACKET_DEFAULT_EV + MANUAL_EXTRA_HEADROOM_EV)
+                : AUTO_BRACKET_DEFAULT_EV;
+        double maxEv = manual ? MANUAL_BRACKET_MAX_EV : AUTO_BRACKET_MAX_EV;
+        double shortTarget = manual ? MANUAL_SHORT_CLIP_TARGET : AUTO_SHORT_CLIP_TARGET;
+        boolean meaningfulLongClip = stats.longMeaningfulClipFraction >= LONG_CLIP_TRIGGER_FRACTION;
+        boolean shortFragile = stats.shortDarkFraction > 0.94f
+                || stats.overlapSamples < 12
+                || stats.overlapErrorEv > 0.50f;
+
+        double next = currentEv;
+        if (meaningfulLongClip && stats.shortMeaningfulClipFraction > shortTarget) {
+            double qualityMax = shortFragile && stats.longMeaningfulClipFraction < 0.02f
+                    ? Math.min(maxEv, 4.5) : maxEv;
+            next = Math.min(qualityMax, currentEv + BRACKET_STEP_UP_EV);
+        } else if (!meaningfulLongClip
+                && stats.shortMeaningfulClipFraction <= SHORT_CLIP_RELEASE_FRACTION
+                && currentEv > minEv) {
+            next = Math.max(minEv, currentEv - BRACKET_STEP_DOWN_EV);
+        }
+        return clampDouble(next, minEv, maxEv);
+    }
+
+    private void deriveAdaptiveAutoPairLocked() {
+        if (characteristics == null || !haveAeSample) return;
+        double anchorProduct = Math.max(1.0, (double) lastAeExposureNs * lastAeIso);
+        if (autoSceneBaseLongProduct <= 0.0) autoSceneBaseLongProduct = anchorProduct;
+        double targetLongProduct = Math.max(1.0,
+                autoSceneBaseLongProduct * Math.pow(2.0, clampBrightnessEv(displayBrightnessEv)));
+        ExposureSetting longSetting = solveLongSettingForProductLocked(
+                targetLongProduct, lastAeExposureNs, anchorProduct);
+        autoLongExposureNs = longSetting.exposureNs;
+        autoLongIso = longSetting.iso;
+
+        double achievedLongProduct = Math.max(1.0,
+                (double) autoLongExposureNs * autoLongIso);
+        double targetShortProduct = Math.max(1.0,
+                achievedLongProduct / Math.pow(2.0, autoAdaptiveBracketEv));
+        ExposureSetting shortSetting = solveShortSettingForProductLocked(
+                targetShortProduct, autoLongExposureNs);
+        autoShortExposureNs = shortSetting.exposureNs;
+        autoShortIso = shortSetting.iso;
+    }
+
+    private ExposureSetting solveLongSettingForProductLocked(
+            double targetProduct, long preferredExposureNs, double preferredProduct) {
+        long preferred = clampExposure(preferredExposureNs);
+        long maxAllowed = targetPreviewFps >= 60
+                ? SIXTY_FPS_DURATION_NS
+                : Math.max(manualFrameDurationNs, preferred);
+        double gain = targetProduct / Math.max(1.0, preferredProduct);
+        long desired = clampExposure(Math.round(preferred * gain));
+        desired = Math.min(desired, maxAllowed);
+
+        long period = flickerPeriodNs(sceneFlicker);
+        if (period > 0L && desired >= period) {
+            long periods = Math.max(1L, Math.round(desired / (double) period));
+            desired = Math.min(maxAllowed, clampExposure(periods * period));
+        } else if (sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE
+                && period == 0L && gain >= 1.0) {
+            // Unknown/PWM: preserve the clean-AE integration and use gain rather than
+            // inventing a new potentially banding-prone shutter.
+            desired = Math.min(maxAllowed, preferred);
+        }
+        int iso = solveIsoForProduct(targetProduct, desired);
+        return new ExposureSetting(desired, iso);
+    }
+
+    private ExposureSetting solveShortSettingForProductLocked(
+            double targetProduct, long longExposureNs) {
+        int minIso = sensorMinIsoLocked();
+        long maxAllowed = Math.min(
+                clampExposure(longExposureNs),
+                targetPreviewFps >= 60 ? SIXTY_FPS_DURATION_NS : Long.MAX_VALUE);
+        maxAllowed = clampExposure(maxAllowed);
+
+        if (targetProduct >= (double) maxAllowed * minIso) {
+            return new ExposureSetting(
+                    maxAllowed, solveIsoForProduct(targetProduct, maxAllowed));
         }
 
-        long periodNs = flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ
-                ? 10_000_000L : 8_333_333L;
-        long maxByShortMinimumIso = (long) Math.floor(
-                targetShortProduct / Math.max(1.0, minIso));
-        long shutterCeiling = Math.min(maxAllowedNs, maxByShortMinimumIso);
-        long preferredCeiling = Math.min(desired, shutterCeiling);
-        long periods = preferredCeiling / periodNs;
-        if (periods < 1L) {
-            // A shorter value would violate the existing anti-banding guard. Keep the
-            // V1.4.7 baseline shutter; the achieved pair gain is then limited by SHORT
-            // sensor-minimum ISO and LONG follows that achieved gain exactly.
-            return base;
+        long desired = clampExposure(Math.round(targetProduct / Math.max(1, minIso)));
+        desired = Math.min(desired, maxAllowed);
+        long period = flickerPeriodNs(sceneFlicker);
+        if (period > 0L && desired >= period) {
+            long periods = Math.max(1L, desired / period);
+            long safe = clampExposure(periods * period);
+            safe = Math.min(safe, maxAllowed);
+            return new ExposureSetting(safe, solveIsoForProduct(targetProduct, safe));
         }
-        long candidate = clampExposure(periods * periodNs);
-        if (candidate < base && desired >= base) return base;
-        return Math.min(candidate, maxAllowedNs);
+        // If the scene genuinely needs more headroom than one full anti-banding period
+        // at sensor-minimum ISO can provide, use the required shorter SHORT exposure.
+        // Only clipped LONG highlight channels can consume this frame during fusion.
+        return new ExposureSetting(desired, minIso);
+    }
+
+    private static long flickerPeriodNs(int flicker) {
+        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ) return 10_000_000L;
+        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) return 8_333_333L;
+        return 0L;
     }
 
     private void publishAutoHdrSettingsLocked(String event, boolean logEvent) {
@@ -1511,18 +1604,25 @@ final class CameraController {
         if (logEvent) {
             RuntimeLogger.event(
                     event,
-                    "meter=" + exposureText(lastAeExposureNs) + " ISO" + lastAeIso
+                    "bootstrap=" + exposureText(lastAeExposureNs) + " ISO" + lastAeIso
                             + " boost=" + autoPostRawBoost + "%"
-                            + String.format(Locale.US, " requestedBrightness=%+.1fEV achievedBrightness=%+.2fEV", displayBrightnessEv, achievedBrightnessEv)
+                            + String.format(
+                                    Locale.US,
+                                    " requestedBrightness=%+.1fEV achievedFromBootstrap=%+.2fEV adaptiveTarget=%.2fEV",
+                                    displayBrightnessEv, achievedBrightnessEv, autoAdaptiveBracketEv)
                             + " -> short=" + exposureText(autoShortExposureNs) + " ISO" + autoShortIso
                             + " long=" + exposureText(autoLongExposureNs) + " ISO" + autoLongIso
-                            + String.format(Locale.US, " bracket=%.2fEV", bracketEv)
+                            + String.format(Locale.US, " actualBracket=%.2fEV", bracketEv)
                             + " flicker=" + flickerLabel(sceneFlicker));
         }
     }
 
     private static float clampBrightnessEv(float ev) {
         return Math.max(DISPLAY_BRIGHTNESS_MIN_EV, Math.min(DISPLAY_BRIGHTNESS_MAX_EV, ev));
+    }
+
+    private static double clampDouble(double value, double low, double high) {
+        return Math.max(low, Math.min(high, value));
     }
 
     private int resultPostRawBoost(TotalCaptureResult result) {
@@ -1534,7 +1634,20 @@ final class CameraController {
         return clampIso((int) Math.round(exposureProduct / Math.max(1.0, exposureNs)));
     }
 
-    private boolean recomputeManualFlickerSafetyLocked() {
+    private void resetManualAdaptiveBracketLocked() {
+        if (characteristics == null) return;
+        int minIso = sensorMinIsoLocked();
+        double requestedLongProduct = Math.max(1.0, (double) longExposureNs * manualIso);
+        double requestedShortProduct = Math.max(1.0, (double) shortExposureNs * minIso);
+        double requestedBracket = Math.log(requestedLongProduct / requestedShortProduct) / Math.log(2.0);
+        manualBracketFloorEv = clampDouble(
+                requestedBracket, AUTO_BRACKET_MIN_EV, MANUAL_BRACKET_MAX_EV);
+        manualAdaptiveBracketEv = clampDouble(
+                Math.max(manualBracketFloorEv, AUTO_BRACKET_DEFAULT_EV + MANUAL_EXTRA_HEADROOM_EV),
+                AUTO_BRACKET_MIN_EV, MANUAL_BRACKET_MAX_EV);
+    }
+
+    private boolean recomputeManualAdaptivePairLocked() {
         long oldShortExposure = manualEffectiveShortExposureNs;
         long oldLongExposure = manualEffectiveLongExposureNs;
         int oldShortIso = manualEffectiveShortIso;
@@ -1543,123 +1656,43 @@ final class CameraController {
 
         int minIso = sensorMinIsoLocked();
         double requestedBaseLongProduct = Math.max(1.0, (double) longExposureNs * manualIso);
-        boolean safeTiming = sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE;
-        if (!safeTiming) {
-            manualEffectiveShortExposureNs = shortExposureNs;
-            manualEffectiveLongExposureNs = longExposureNs;
-            manualEffectiveShortIso = minIso;
-            manualEffectiveLongIso = manualIso;
-            manualFlickerSafetyApplied = false;
-        } else {
-            long commonExposure = chooseManualFlickerSafeExposureLocked(longExposureNs, sceneFlicker);
-            manualEffectiveShortExposureNs = commonExposure;
-            manualEffectiveLongExposureNs = commonExposure;
-            manualEffectiveShortIso = minIso;
-            manualEffectiveLongIso = solveIsoForProduct(requestedBaseLongProduct, commonExposure);
-            manualFlickerSafetyApplied = true;
-        }
+        double targetLongProduct = Math.max(1.0,
+                requestedBaseLongProduct * Math.pow(2.0, clampBrightnessEv(displayBrightnessEv)));
+        ExposureSetting longSetting = solveLongSettingForProductLocked(
+                targetLongProduct, longExposureNs, requestedBaseLongProduct);
+        manualEffectiveLongExposureNs = longSetting.exposureNs;
+        manualEffectiveLongIso = longSetting.iso;
 
-        if (targetPreviewFps >= 60) {
-            long cappedShort = Math.min(manualEffectiveShortExposureNs, SIXTY_FPS_DURATION_NS);
-            long cappedLong = Math.min(manualEffectiveLongExposureNs, SIXTY_FPS_DURATION_NS);
-            if (cappedShort != manualEffectiveShortExposureNs || cappedLong != manualEffectiveLongExposureNs) {
-                manualFlickerSafetyApplied = true;
-            }
-            manualEffectiveShortExposureNs = clampExposure(cappedShort);
-            manualEffectiveLongExposureNs = clampExposure(cappedLong);
-            manualEffectiveShortIso = minIso;
-            manualEffectiveLongIso = solveIsoForProduct(
-                    requestedBaseLongProduct, manualEffectiveLongExposureNs);
-        }
+        double achievedLongProduct = Math.max(1.0,
+                (double) manualEffectiveLongExposureNs * manualEffectiveLongIso);
+        double targetShortProduct = Math.max(1.0,
+                achievedLongProduct / Math.pow(2.0, manualAdaptiveBracketEv));
+        ExposureSetting shortSetting = solveShortSettingForProductLocked(
+                targetShortProduct, manualEffectiveLongExposureNs);
 
-        // MANUAL SAFE uses the same whole-pair Brightness contract as AUTO. The
-        // selected/flicker-safe manual pair is the unbiased base; Brightness moves SHORT
-        // and LONG together so their HDR exposure relationship does not change.
-        long baseShortExposure = manualEffectiveShortExposureNs;
-        int baseShortIso = manualEffectiveShortIso;
-        long baseLongExposure = manualEffectiveLongExposureNs;
-        int baseLongIso = manualEffectiveLongIso;
-        double baseShortProduct = Math.max(1.0, (double) baseShortExposure * baseShortIso);
-        double baseLongProduct = Math.max(1.0, (double) baseLongExposure * baseLongIso);
-
-        if (Math.abs(displayBrightnessEv) >= 0.0001f) {
-            double requestedGain = Math.pow(2.0, clampBrightnessEv(displayBrightnessEv));
-            double targetShortProduct = Math.max(1.0, baseShortProduct * requestedGain);
-            long maxAllowedNs = targetPreviewFps >= 60
-                    ? SIXTY_FPS_DURATION_NS
-                    : Math.max(manualFrameDurationNs, baseLongExposure);
-
-            if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
-                long desiredShortExposure = clampExposure(Math.round(baseShortExposure * requestedGain));
-                desiredShortExposure = Math.min(desiredShortExposure, maxAllowedNs);
-                manualEffectiveShortExposureNs = desiredShortExposure;
-                manualEffectiveShortIso = solveIsoForProduct(
-                        targetShortProduct, manualEffectiveShortExposureNs);
-
-                double achievedShortProduct = Math.max(
-                        1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
-                double achievedPairGain = achievedShortProduct / baseShortProduct;
-                double targetLongProduct = Math.max(1.0, baseLongProduct * achievedPairGain);
-                long desiredLongExposure = clampExposure(Math.round(baseLongExposure * achievedPairGain));
-                desiredLongExposure = Math.min(desiredLongExposure, maxAllowedNs);
-                manualEffectiveLongExposureNs = desiredLongExposure;
-                manualEffectiveLongIso = solveIsoForProduct(
-                        targetLongProduct, manualEffectiveLongExposureNs);
-            } else {
-                long desiredCommonExposure = clampExposure(Math.round(baseLongExposure * requestedGain));
-                desiredCommonExposure = Math.min(desiredCommonExposure, maxAllowedNs);
-                long commonExposure = chooseWholePairBrightnessExposureLocked(
-                        baseLongExposure,
-                        desiredCommonExposure,
-                        targetShortProduct,
-                        minIso,
-                        sceneFlicker,
-                        maxAllowedNs);
-                manualEffectiveShortExposureNs = commonExposure;
-                manualEffectiveShortIso = solveIsoForProduct(targetShortProduct, commonExposure);
-
-                double achievedShortProduct = Math.max(
-                        1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
-                double achievedPairGain = achievedShortProduct / baseShortProduct;
-                double targetLongProduct = Math.max(1.0, baseLongProduct * achievedPairGain);
-                manualEffectiveLongExposureNs = commonExposure;
-                manualEffectiveLongIso = solveIsoForProduct(targetLongProduct, commonExposure);
-            }
-        }
+        // In MANUAL SAFE the Short slider is a headroom ceiling, not a lock. The
+        // adaptive engine may go darker/shorter when highlights require it, but never
+        // make SHORT longer than the user's requested integration.
+        long shortExposure = Math.min(shortSetting.exposureNs, clampExposure(shortExposureNs));
+        int shortIso = solveIsoForProduct(targetShortProduct, shortExposure);
+        if (shortIso < minIso) shortIso = minIso;
+        manualEffectiveShortExposureNs = shortExposure;
+        manualEffectiveShortIso = shortIso;
 
         double longProduct = Math.max(
                 1.0, (double) manualEffectiveLongExposureNs * manualEffectiveLongIso);
         double shortProduct = Math.max(
                 1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
         manualEffectiveBracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);
-        manualAchievedBrightnessEv = Math.log(shortProduct / baseShortProduct) / Math.log(2.0);
+        manualAchievedBrightnessEv = Math.log(longProduct / requestedBaseLongProduct) / Math.log(2.0);
+        manualFlickerSafetyApplied = sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE
+                || targetPreviewFps >= 60;
 
         return oldShortExposure != manualEffectiveShortExposureNs
                 || oldLongExposure != manualEffectiveLongExposureNs
                 || oldShortIso != manualEffectiveShortIso
                 || oldLongIso != manualEffectiveLongIso
                 || oldSafety != manualFlickerSafetyApplied;
-    }
-
-    private long chooseManualFlickerSafeExposureLocked(long requestedLongNs, int flicker) {
-        long requested = clampExposure(requestedLongNs);
-        long maxAllowed = targetPreviewFps >= 60
-                ? SIXTY_FPS_DURATION_NS : Math.max(manualFrameDurationNs, requested);
-        requested = Math.min(requested, maxAllowed);
-        long period = 0L;
-        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ) {
-            period = 10_000_000L;
-        } else if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) {
-            period = 8_333_333L;
-        }
-        if (period == 0L) {
-            return clampExposure(requested);
-        }
-
-        long maxPeriods = Math.max(1L, maxAllowed / period);
-        long desiredPeriods = Math.max(1L, Math.round(requested / (double) period));
-        long periods = Math.min(maxPeriods, desiredPeriods);
-        return clampExposure(periods * period);
     }
 
     private int sensorMinIsoLocked() {
@@ -1899,6 +1932,16 @@ final class CameraController {
         return range.getLower().equals(range.getUpper())
                 ? range.getUpper().toString()
                 : range.getLower() + "-" + range.getUpper();
+    }
+
+    private static final class ExposureSetting {
+        final long exposureNs;
+        final int iso;
+
+        ExposureSetting(long exposureNs, int iso) {
+            this.exposureNs = exposureNs;
+            this.iso = iso;
+        }
     }
 
     static String exposureText(long ns) {

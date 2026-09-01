@@ -140,6 +140,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         buildUi();
         controller = new CameraController(this, this);
         glView.setInputSurfaceListener(controller::setPreviewSurface);
+        glView.setSceneStatsListener(controller::onHdrSceneStats);
         controller.setDisplayBrightnessEv(displayBrightnessEv);
         controller.setAllowCropped60Fps(allowCropped60Fps);
         controller.setAutoHdrExposure(autoHdrEnabled);
@@ -345,8 +346,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
             Toast.makeText(
                     this,
                     autoHdrEnabled
-                            ? "AUTO HDR continuously meters the scene; Brightness moves the complete HDR pair"
-                            : "MANUAL SAFE: exposure sliders set the base bracket; Brightness moves the complete HDR pair",
+                            ? "AUTO HDR continuously adapts LONG appearance while SHORT adds only needed highlight headroom"
+                            : "MANUAL SAFE: you own LONG appearance; SHORT remains adaptive with extra highlight headroom",
                     Toast.LENGTH_SHORT).show();
         });
 

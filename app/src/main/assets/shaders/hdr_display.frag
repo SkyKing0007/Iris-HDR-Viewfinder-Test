@@ -11,6 +11,7 @@ uniform int haveNormal;
 uniform int haveShort;
 uniform int haveLong;
 uniform float exposureRatio;
+uniform vec3 shortCalibration;
 uniform vec2 fullFitScale;
 uniform vec2 splitFitScale;
 
@@ -68,23 +69,50 @@ float max3(vec3 value) {
     return max(value.r, max(value.g, value.b));
 }
 
-float adaptiveClipStart(float bracketStops) {
-    // Wider brackets carry a noisier/darker SHORT frame, so admit SHORT only
-    // closer to LONG saturation. This depends on exposure relationship, not device.
-    return clamp(0.90 + 0.01 * (bracketStops - 1.0), 0.90, 0.95);
+float validChannelAgreement(vec3 longRgb, vec3 longScene, vec3 shortScene) {
+    vec3 valid = vec3(1.0) - smoothstep(vec3(0.94), vec3(0.985), longRgb);
+    float count = valid.r + valid.g + valid.b;
+    if (count < 0.5) return 1.0;
+    vec3 ratio = max(shortScene, vec3(0.000001)) / max(longScene, vec3(0.000001));
+    vec3 deltaEv = abs(log2(max(ratio, vec3(0.000001))));
+    float disagreement = dot(deltaEv, valid) / count;
+    return 1.0 - smoothstep(0.16, 0.55, disagreement);
 }
 
-vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
-    // LONG owns shadows/midtones unchanged. Recovered scene values above the
-    // display range are compressed by bracket width while preserving RGB ratios.
-    const float knee = 0.70;
+vec3 recoverOnlyLostChannels(
+        vec3 longRgb, vec3 shortRgb, vec3 longScene, vec3 shortScene) {
+    // LONG owns every channel until that channel is genuinely at the processed-JPEG
+    // ceiling and calibrated SHORT proves that more radiance exists. A saturated
+    // single chroma channel (especially skin red) is not enough by itself: recovery
+    // also requires a bright-luma highlight or a second near-clipped LONG channel.
+    vec3 longClip = smoothstep(vec3(0.985), vec3(0.999), longRgb);
+    vec3 shortUnclipped = vec3(1.0) - smoothstep(vec3(0.985), vec3(0.999), shortRgb);
+    vec3 radianceEvidence = smoothstep(
+        vec3(1.04), vec3(1.14),
+        shortScene / max(longScene, vec3(0.0005)));
+    float longLuma = dot(longScene, vec3(0.2126, 0.7152, 0.0722));
+    float longSecond = longRgb.r + longRgb.g + longRgb.b
+        - min(longRgb.r, min(longRgb.g, longRgb.b))
+        - max(longRgb.r, max(longRgb.g, longRgb.b));
+    float highlightEligibility = max(
+        smoothstep(0.62, 0.72, longLuma),
+        smoothstep(0.94, 0.985, longSecond));
+    float agreement = validChannelAgreement(longRgb, longScene, shortScene);
+    vec3 weight = longClip * shortUnclipped * radianceEvidence
+        * agreement * highlightEligibility;
+    return mix(longScene, shortScene, clamp(weight, vec3(0.0), vec3(1.0)));
+}
+
+vec3 highlightOnlyToneMap(vec3 sceneLinear, float ratio) {
+    // Keep the requested LONG appearance intact through normal mids. Only the top
+    // display decade and recovered values above LONG white are compressed.
+    const float knee = 0.90;
+    const float whiteAnchor = 0.965;
+    const float displayCeiling = 0.995;
     float scenePeak = max3(sceneLinear);
     if (scenePeak <= knee || scenePeak <= 0.000001) return sceneLinear;
 
-    float whiteAnchor = clamp(0.82 - 0.04 * (bracketStops - 1.0), 0.68, 0.82);
-    float displayCeiling = clamp(whiteAnchor + 0.14, 0.84, 0.96);
     float mappedPeak;
-
     if (scenePeak <= 1.0) {
         float t = clamp((scenePeak - knee) / (1.0 - knee), 0.0, 1.0);
         mappedPeak = mix(knee, whiteAnchor, t);
@@ -93,7 +121,6 @@ vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
         float t = clamp(log2(scenePeak) / headroomLog2, 0.0, 1.0);
         mappedPeak = mix(whiteAnchor, displayCeiling, t);
     }
-
     return sceneLinear * (mappedPeak / scenePeak);
 }
 
@@ -135,24 +162,13 @@ void main() {
     }
 
     float ratio = clamp(exposureRatio, 1.0, 65536.0);
-    float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
     vec3 shortRgb = texture(shortTex, uv).rgb;
     vec3 longRgb = texture(longTex, uv).rgb;
-    vec3 shortScene = srgbToLinear(shortRgb) * ratio;
+    vec3 shortScene = srgbToLinear(shortRgb) * ratio * shortCalibration;
     vec3 longScene = srgbToLinear(longRgb);
 
-    float longEncodedPeak = max3(longRgb);
-    float longScenePeak = max(max3(longScene), 0.000001);
-    float shortScenePeak = max3(shortScene);
-    float shortConfidence = smoothstep(0.35, 0.65, shortScenePeak / longScenePeak);
-    float highlightWeight = smoothstep(
-        adaptiveClipStart(bracketStops),
-        0.995,
-        longEncodedPeak) * shortConfidence;
-
-    // Full-RGB handoff avoids per-channel clipping seams and preserves highlight hue.
-    vec3 mergedScene = mix(longScene, shortScene, highlightWeight);
-    vec3 displayLinear = adaptiveHdrToneMap(mergedScene, ratio, bracketStops);
+    vec3 mergedScene = recoverOnlyLostChannels(longRgb, shortRgb, longScene, shortScene);
+    vec3 displayLinear = highlightOnlyToneMap(mergedScene, ratio);
     vec3 displayRgb = linearToSrgb(displayLinear);
     outColor = vec4(clamp(displayRgb, 0.0, 1.0), 1.0);
 }

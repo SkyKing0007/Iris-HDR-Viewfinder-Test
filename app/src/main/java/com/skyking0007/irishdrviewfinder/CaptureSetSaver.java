@@ -247,12 +247,12 @@ final class CaptureSetSaver {
                 JSONObject root = new JSONObject();
                 root.put("captureId", captureId);
                 root.put("cameraId", cameraId);
-                root.put("fusion", "V1.4 sRGB-linearized highlight-aware JPEG-domain exposure fusion");
+                root.put("fusion", "V1.4.15 overlap-calibrated per-channel clipped-highlight JPEG-domain exposure fusion");
                 root.put("short", resultJson(shortResult));
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));
                 root.put("brightnessEv", displayBrightnessEv);
-                root.put("brightnessOwner", "WHOLE_HDR_PAIR_EXPOSURE_BIAS");
+                root.put("brightnessOwner", "LONG_APPEARANCE_SHORT_ADAPTIVE");
                 Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
                 if (sensorOrientation != null) root.put("sensorOrientation", sensorOrientation);
                 JSONArray physicalIds = new JSONArray();

@@ -1,48 +1,55 @@
-# Iris HDR Viewfinder Test V1.4.14
+# Iris HDR Viewfinder Test V1.4.15
 
-V1.4.14 is a root-cause reset built from the exact successful V1.4.13 Actions compiled candidate. It intentionally restores the successful V1.4.7 HDR image algorithm byte-for-byte while keeping the later proven capture-freeze, anti-banding, Manual Safe, cadence/FOV, orientation, logging and build-verification mechanics.
+V1.4.15 is an architectural HDR correction built from the exact successful V1.4.14 GitHub Actions compiled candidate. It preserves the successful V1.4.14 build/compiler/invariance mechanics, orientation/FOV/cadence/DNG protections, compact navigation-safe UI, and Brightness range while replacing the periodic metering takeover and fixed whole-pair HDR exposure policy.
 
-## Exact V1.4.7 HDR IQ reset
+## Continuous live AUTO metering
 
-The live `hdr_display.frag` and saved `JpegFusion.java` are byte-exact copies of the successful V1.4.7 Actions candidate.
+Clean HAL AE is now used only once as the initial natural-scene bootstrap. After that first anchor, the live HDR preview remains a continuous repeating SHORT/LONG burst; the old periodic five-second AE request takeover is removed.
 
-That deliberately removes the V1.4.8-V1.4.13 experimental HDR/tone changes from the image algorithm, including adaptive aperture-driven bracket widening, post-fusion Brightness, global appearance/color compensation, V1.4.13 true-multi-channel clipping reconstruction and the edge-disagreement recovery path.
+`HdrGlView` samples a small 32x24 representation of the already displayed SHORT/LONG pair every 200 ms. Those statistics are passed directly to `CameraController`, so scene changes can update exposure without replacing the repeating HDR stream or freezing the displayed pair.
 
-At **Brightness 0.0 EV**, the HDR pair is reconstructed using the V1.4.7 zero-Brightness capture relationship and then processed by the exact V1.4.7 live/saved HDR algorithm.
+AUTO LONG exposure is adjusted in bounded steps of at most 0.30 EV per live update. This is intended to respond much faster than the old five-second remeter while avoiding abrupt multi-stop jumps.
 
-The known V1.4.7 red/orange highlight-color defect is **not claimed fixed in this build**. V1.4.14 is intentionally isolating overall exposure/brightness from HDR algorithm changes so that defect is not mixed with another broad color experiment.
+## LONG appearance and adaptive SHORT are separate owners
 
-## Brightness moves the complete HDR pair
+Brightness remains `-5.0 EV` through `+2.0 EV` in 0.1 EV steps. It now expresses desired LONG/scene appearance, not HDR bracket size.
 
-**Brightness** remains `-5.0 EV` through `+2.0 EV` in `0.1 EV` steps and remains available in HDR AUTO and HDR MANUAL SAFE.
+AUTO begins near 3 EV of SHORT headroom, then uses measured highlight evidence to choose more headroom only when needed. AUTO is bounded to 5 EV. MANUAL SAFE uses the same adaptive engine, retains the user's LONG/Brightness intent and requested SHORT headroom floor, adds 0.25 EV of safety margin, and can reach 6 EV when justified.
 
-Unlike V1.4.12/V1.4.13, Brightness no longer holds SHORT fixed while moving LONG farther away. It applies one exposure-product gain to the entire baseline HDR set:
+The policy deliberately targets a clean ~95% HDR result rather than forcing every tiny specular to recover. A meaningful clipped region must occupy at least about 0.5% of the sampled image before it can force SHORT darker. AUTO targets roughly 0.25% residual clipped SHORT area; MANUAL targets roughly 0.15%. Tiny isolated highlights may remain clipped instead of forcing SHORT into a noisy/quantized regime.
 
-`requested gain = 2 ^ BrightnessEV`
+SHORT quality is also guarded by dark-pixel fraction, usable SHORT/LONG overlap count, and overlap radiometric error. Extreme headroom is not preferred when SHORT no longer contains trustworthy information.
 
-SHORT is solved first. LONG then follows the **actually achieved SHORT gain**, so sensor/ISO/timing limits do not deliberately widen or narrow the baseline HDR separation.
+## Color-safe fusion
 
-For a representative 60-Hz baseline of approximately `SHORT 1/120 ISO50 / LONG 1/120 ISO245`:
+V1.4.7's full-RGB handoff is removed. LONG remains the complete RGB/color owner wherever its data is still valid.
 
-- `+0.5 EV` remains near the same HDR separation at approximately `SHORT 1/120 ISO71 / LONG 1/120 ISO348` because the next longer anti-banding period would overshoot SHORT minimum-ISO headroom.
-- `+1.0 EV` can move both members to approximately `1/60` at their baseline ISOs, gaining real integration time while preserving the same HDR separation.
+SHORT is first exposure-normalized, then calibrated back to LONG from pixels where both exposures are valid. Calibration is per channel and bounded. A SHORT channel can replace a LONG channel only when:
 
-Known 50 Hz uses the existing 10 ms period family; known 60 Hz uses the existing 8.333333 ms family. Unknown/PWM retains baseline integration rather than inventing a banding-prone shutter. Forced 60 fps still caps live integration at 16.666666 ms. If a requested negative EV cannot be achieved without violating the anti-banding/minimum-ISO contract, the achieved shift may be limited rather than breaking the guard.
+- that LONG channel is genuinely at the processed-JPEG ceiling;
+- calibrated SHORT proves additional radiance;
+- SHORT itself is not clipped;
+- the other valid channels agree between exposures; and
+- the pixel is a real bright highlight or has a second near-clipped LONG channel.
 
-## Periodic viewfinder bounce correction
+That last requirement specifically protects saturated single-channel colors such as reddish/peach skin from pulling SHORT into otherwise valid faces. No neighborhood chroma blur or broad desaturation/color repair is added.
 
-The 5-second clean-AE remeter cadence itself is unchanged. V1.4.13's visible vertical jump was caused by the changing debug/status message resizing the bottom `wrap_content` panel and therefore resizing the weighted viewfinder.
+Tone mapping leaves normal LONG mids alone and compresses only the upper/recovered highlight range, using one RGB scale so recovered highlight hue is preserved.
 
-V1.4.14 gives the status/debug row invariant one-line 20dp geometry with ellipsis. The remeter message can change text without changing control-panel or viewfinder height.
+## MANUAL SAFE remains adaptive
 
-## Compact navigation-safe controls retained
+HDR MANUAL is not locked to a fixed bracket. The user retains manual LONG/brightness intent and a SHORT headroom floor, while the same live highlight detector can make SHORT darker when the scene requires more protection. MANUAL carries slightly more headroom than AUTO rather than becoming a separate fixed-bracket algorithm.
 
-The compact control sizing and Android bottom navigation/gesture inset from V1.4.13 are retained. Brightness remains usable above the system gesture pill in portrait and remains available in landscape.
+## Stable APK updates
 
-## Preserved mechanics
+V1.4.15 introduces a stable test signing identity for GitHub Actions. The private PKCS12 key is not committed to this repository or included in the upload ZIP; Actions reconstructs it from the repository secret `IRIS_TEST_SIGNING_KEY_B64` and verifies both the keystore hash and final APK signing certificate before artifact export.
 
-The exact successful V1.4.13 immutable shutter-time pair, hidden AE remetering cadence, 50/60-Hz guards, post-RAW boost ownership, producer-owned orientation, FOV-safe 30 fps path, explicit cropped 60 fps path, RAW/JPEG capture set, DNG/JPEG saving, logging, deterministic full-index patch proof, pinned real GLSL/Java compiler gates and full Android assemble order are inherited unchanged except for V1.4.14 authority/version/hash/regression pins.
+Because V1.4.14 and earlier successful GitHub debug APKs used ephemeral runner debug keys, installing V1.4.15 may require one final uninstall. After V1.4.15 is installed, future builds using the same secret and higher `versionCode` should install through Android's normal update path.
 
-Runtime logs are written to:
+Stable signing certificate SHA-256:
+
+`531aeed9ead79d28c424ad8f71a459b4ced8aff37e95c11bd295083fbb25c4e8`
+
+## Runtime logs
 
 `Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_YYYYMMDD_HHMMSS_mmm.txt`

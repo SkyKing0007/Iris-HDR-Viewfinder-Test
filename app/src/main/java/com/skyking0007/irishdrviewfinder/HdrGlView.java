@@ -14,6 +14,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,8 +29,64 @@ final class HdrGlView extends GLSurfaceView {
         void onInputSurfaceReady(Surface surface);
     }
 
+    interface SceneStatsListener {
+        void onSceneStats(SceneStats stats);
+    }
+
+    static final class SceneStats {
+        final long shortFrameNumber;
+        final long longFrameNumber;
+        final double shortExposureProduct;
+        final double longExposureProduct;
+        final double exposureRatio;
+        final float longMedianLinear;
+        final float longP90Linear;
+        final float longMeaningfulClipFraction;
+        final float shortMeaningfulClipFraction;
+        final float shortDarkFraction;
+        final float calibrationR;
+        final float calibrationG;
+        final float calibrationB;
+        final float overlapErrorEv;
+        final int overlapSamples;
+
+        SceneStats(
+                long shortFrameNumber,
+                long longFrameNumber,
+                double shortExposureProduct,
+                double longExposureProduct,
+                double exposureRatio,
+                float longMedianLinear,
+                float longP90Linear,
+                float longMeaningfulClipFraction,
+                float shortMeaningfulClipFraction,
+                float shortDarkFraction,
+                float calibrationR,
+                float calibrationG,
+                float calibrationB,
+                float overlapErrorEv,
+                int overlapSamples) {
+            this.shortFrameNumber = shortFrameNumber;
+            this.longFrameNumber = longFrameNumber;
+            this.shortExposureProduct = shortExposureProduct;
+            this.longExposureProduct = longExposureProduct;
+            this.exposureRatio = exposureRatio;
+            this.longMedianLinear = longMedianLinear;
+            this.longP90Linear = longP90Linear;
+            this.longMeaningfulClipFraction = longMeaningfulClipFraction;
+            this.shortMeaningfulClipFraction = shortMeaningfulClipFraction;
+            this.shortDarkFraction = shortDarkFraction;
+            this.calibrationR = calibrationR;
+            this.calibrationG = calibrationG;
+            this.calibrationB = calibrationB;
+            this.overlapErrorEv = overlapErrorEv;
+            this.overlapSamples = overlapSamples;
+        }
+    }
+
     private final HdrRenderer renderer;
     private volatile InputSurfaceListener inputSurfaceListener;
+    private volatile SceneStatsListener sceneStatsListener;
     private volatile Surface currentInputSurface;
 
     HdrGlView(Context context) {
@@ -51,6 +108,10 @@ final class HdrGlView extends GLSurfaceView {
         if (listener != null && surface != null && surface.isValid()) {
             post(() -> listener.onInputSurfaceReady(surface));
         }
+    }
+
+    void setSceneStatsListener(SceneStatsListener listener) {
+        sceneStatsListener = listener;
     }
 
     void republishInputSurface() {
@@ -111,6 +172,12 @@ final class HdrGlView extends GLSurfaceView {
 
     private final class HdrRenderer implements GLSurfaceView.Renderer {
         private static final int PENDING_SLOTS = 6;
+        private static final int STATS_WIDTH = 32;
+        private static final int STATS_HEIGHT = 24;
+        private static final int STATS_PIXELS = STATS_WIDTH * STATS_HEIGHT;
+        private static final long STATS_INTERVAL_NS = 200_000_000L;
+        private static final float MEANINGFUL_CLIP_CHANNEL = 0.992f;
+        private static final float MEANINGFUL_CLIP_LUMA = 0.72f;
 
         private final Context context;
         private final FloatBuffer vertexBuffer;
@@ -135,8 +202,17 @@ final class HdrGlView extends GLSurfaceView {
         private int longTexture;
         private int stagingShortTexture;
         private int stagingLongTexture;
+        private int statsTexture;
         private int framebuffer;
         private SurfaceTexture surfaceTexture;
+        private final ByteBuffer longStatsBuffer = ByteBuffer.allocateDirect(STATS_PIXELS * 4)
+                .order(ByteOrder.nativeOrder());
+        private final ByteBuffer shortStatsBuffer = ByteBuffer.allocateDirect(STATS_PIXELS * 4)
+                .order(ByteOrder.nativeOrder());
+        private long lastStatsNs;
+        private float shortCalibrationR = 1.0f;
+        private float shortCalibrationG = 1.0f;
+        private float shortCalibrationB = 1.0f;
         private Surface inputSurface;
         private int frameWidth;
         private int frameHeight;
@@ -193,6 +269,8 @@ final class HdrGlView extends GLSurfaceView {
             longTexture = createTexture2d();
             stagingShortTexture = createTexture2d();
             stagingLongTexture = createTexture2d();
+            statsTexture = createTexture2d();
+            allocateRgbTexture(statsTexture, STATS_WIDTH, STATS_HEIGHT);
             for (PendingFrame pending : pendingFrames) {
                 pending.texture = createTexture2d();
                 pending.occupied = false;
@@ -222,6 +300,10 @@ final class HdrGlView extends GLSurfaceView {
             stagingShortMeta = null;
             lastShortMeta = null;
             lastLongMeta = null;
+            lastStatsNs = 0L;
+            shortCalibrationR = 1.0f;
+            shortCalibrationG = 1.0f;
+            shortCalibrationB = 1.0f;
             fpsWindowStartNs = System.nanoTime();
             fpsWindowInputFrames = 0;
             fpsWindowPairs = 0;
@@ -248,6 +330,7 @@ final class HdrGlView extends GLSurfaceView {
                 processLatestCameraFrame();
             }
             reconcilePendingFrames();
+            maybePublishSceneStats();
             drawDisplay();
             updateFps();
         }
@@ -275,6 +358,10 @@ final class HdrGlView extends GLSurfaceView {
             stagingShortMeta = null;
             lastShortMeta = null;
             lastLongMeta = null;
+            lastStatsNs = 0L;
+            shortCalibrationR = 1.0f;
+            shortCalibrationG = 1.0f;
+            shortCalibrationB = 1.0f;
             metaByTimestamp.clear();
         }
 
@@ -445,7 +532,186 @@ final class HdrGlView extends GLSurfaceView {
                 ratio = (float) Math.max(1.0, Math.min(65_536.0, r));
             }
             GLES30.glUniform1f(GLES30.glGetUniformLocation(displayProgram, "exposureRatio"), ratio);
+            GLES30.glUniform3f(
+                    GLES30.glGetUniformLocation(displayProgram, "shortCalibration"),
+                    shortCalibrationR, shortCalibrationG, shortCalibrationB);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+        }
+
+        private void maybePublishSceneStats() {
+            SceneStatsListener listener = sceneStatsListener;
+            if (listener == null || !haveShort || !haveLong
+                    || lastShortMeta == null || lastLongMeta == null) return;
+            long now = System.nanoTime();
+            if (lastStatsNs != 0L && now - lastStatsNs < STATS_INTERVAL_NS) return;
+            lastStatsNs = now;
+
+            double shortProduct = lastShortMeta.exposureProduct();
+            double longProduct = lastLongMeta.exposureProduct();
+            double ratio = Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));
+            readTextureStats(longTexture, longStatsBuffer);
+            readTextureStats(shortTexture, shortStatsBuffer);
+            SceneStats stats = calculateSceneStats(
+                    longStatsBuffer, shortStatsBuffer, ratio,
+                    lastShortMeta, lastLongMeta);
+            shortCalibrationR = stats.calibrationR;
+            shortCalibrationG = stats.calibrationG;
+            shortCalibrationB = stats.calibrationB;
+            listener.onSceneStats(stats);
+        }
+
+        private void readTextureStats(int sourceTexture, ByteBuffer target) {
+            target.clear();
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+            GLES30.glFramebufferTexture2D(
+                    GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                    GLES30.GL_TEXTURE_2D, statsTexture, 0);
+            GLES30.glViewport(0, 0, STATS_WIDTH, STATS_HEIGHT);
+            GLES30.glUseProgram(copyProgram);
+            bindQuad();
+            bindSampler2d(copyProgram, "sourceTex", sourceTexture, 0);
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+            GLES30.glReadPixels(
+                    0, 0, STATS_WIDTH, STATS_HEIGHT,
+                    GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, target);
+            target.rewind();
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
+        }
+
+        private SceneStats calculateSceneStats(
+                ByteBuffer longPixels, ByteBuffer shortPixels, double ratio,
+                FrameMeta shortMeta, FrameMeta longMeta) {
+            float[] longLumas = new float[STATS_PIXELS];
+            float[] ratioR = new float[STATS_PIXELS];
+            float[] ratioG = new float[STATS_PIXELS];
+            float[] ratioB = new float[STATS_PIXELS];
+            int overlapCount = 0;
+            int longClipped = 0;
+            int shortClipped = 0;
+            int shortDark = 0;
+
+            for (int i = 0; i < STATS_PIXELS; i++) {
+                int o = i * 4;
+                float lr8 = (longPixels.get(o) & 0xFF) / 255.0f;
+                float lg8 = (longPixels.get(o + 1) & 0xFF) / 255.0f;
+                float lb8 = (longPixels.get(o + 2) & 0xFF) / 255.0f;
+                float sr8 = (shortPixels.get(o) & 0xFF) / 255.0f;
+                float sg8 = (shortPixels.get(o + 1) & 0xFF) / 255.0f;
+                float sb8 = (shortPixels.get(o + 2) & 0xFF) / 255.0f;
+
+                float lr = srgbToLinear(lr8);
+                float lg = srgbToLinear(lg8);
+                float lb = srgbToLinear(lb8);
+                float sr = srgbToLinear(sr8);
+                float sg = srgbToLinear(sg8);
+                float sb = srgbToLinear(sb8);
+                float longLuma = 0.2126f * lr + 0.7152f * lg + 0.0722f * lb;
+                float shortLuma = 0.2126f * sr + 0.7152f * sg + 0.0722f * sb;
+                longLumas[i] = longLuma;
+
+                float longMax = Math.max(lr8, Math.max(lg8, lb8));
+                float longSecond = secondLargest(lr8, lg8, lb8);
+                if ((longMax >= MEANINGFUL_CLIP_CHANNEL
+                                && (longLuma >= MEANINGFUL_CLIP_LUMA || longSecond >= 0.985f))) {
+                    longClipped++;
+                }
+                float shortMax = Math.max(sr8, Math.max(sg8, sb8));
+                float shortSecond = secondLargest(sr8, sg8, sb8);
+                if (shortMax >= MEANINGFUL_CLIP_CHANNEL
+                        && (shortLuma >= MEANINGFUL_CLIP_LUMA || shortSecond >= 0.985f)) {
+                    shortClipped++;
+                }
+                if (shortLuma < 0.008f) shortDark++;
+
+                float nsr = (float) (sr * ratio);
+                float nsg = (float) (sg * ratio);
+                float nsb = (float) (sb * ratio);
+                boolean validLong = lr8 > 0.08f && lg8 > 0.08f && lb8 > 0.08f
+                        && lr8 < 0.90f && lg8 < 0.90f && lb8 < 0.90f;
+                boolean validShort = sr8 > 0.015f && sg8 > 0.015f && sb8 > 0.015f
+                        && sr8 < 0.90f && sg8 < 0.90f && sb8 < 0.90f;
+                if (validLong && validShort
+                        && nsr > 0.015f && nsg > 0.015f && nsb > 0.015f) {
+                    ratioR[overlapCount] = clampCalibration(lr / nsr);
+                    ratioG[overlapCount] = clampCalibration(lg / nsg);
+                    ratioB[overlapCount] = clampCalibration(lb / nsb);
+                    overlapCount++;
+                }
+            }
+
+            Arrays.sort(longLumas);
+            float median = percentileSorted(longLumas, 0.50f);
+            float p90 = percentileSorted(longLumas, 0.90f);
+            float calR = medianPrefix(ratioR, overlapCount, 1.0f);
+            float calG = medianPrefix(ratioG, overlapCount, 1.0f);
+            float calB = medianPrefix(ratioB, overlapCount, 1.0f);
+
+            float[] errors = new float[Math.max(1, overlapCount)];
+            int errorCount = 0;
+            if (overlapCount > 0) {
+                for (int i = 0; i < STATS_PIXELS; i++) {
+                    int o = i * 4;
+                    float lr8 = (longPixels.get(o) & 0xFF) / 255.0f;
+                    float lg8 = (longPixels.get(o + 1) & 0xFF) / 255.0f;
+                    float lb8 = (longPixels.get(o + 2) & 0xFF) / 255.0f;
+                    float sr8 = (shortPixels.get(o) & 0xFF) / 255.0f;
+                    float sg8 = (shortPixels.get(o + 1) & 0xFF) / 255.0f;
+                    float sb8 = (shortPixels.get(o + 2) & 0xFF) / 255.0f;
+                    boolean validLong = lr8 > 0.08f && lg8 > 0.08f && lb8 > 0.08f
+                            && lr8 < 0.90f && lg8 < 0.90f && lb8 < 0.90f;
+                    boolean validShort = sr8 > 0.015f && sg8 > 0.015f && sb8 > 0.015f
+                            && sr8 < 0.90f && sg8 < 0.90f && sb8 < 0.90f;
+                    if (!validLong || !validShort) continue;
+                    float ll = 0.2126f * srgbToLinear(lr8)
+                            + 0.7152f * srgbToLinear(lg8)
+                            + 0.0722f * srgbToLinear(lb8);
+                    float sl = 0.2126f * srgbToLinear(sr8) * calR
+                            + 0.7152f * srgbToLinear(sg8) * calG
+                            + 0.0722f * srgbToLinear(sb8) * calB;
+                    sl *= ratio;
+                    if (ll > 0.015f && sl > 0.015f && errorCount < errors.length) {
+                        errors[errorCount++] = (float) Math.abs(Math.log(sl / ll) / Math.log(2.0));
+                    }
+                }
+            }
+            float overlapError = medianPrefix(errors, errorCount, 0.0f);
+            return new SceneStats(
+                    shortMeta.frameNumber, longMeta.frameNumber,
+                    shortMeta.exposureProduct(), longMeta.exposureProduct(), ratio,
+                    median, p90,
+                    longClipped / (float) STATS_PIXELS,
+                    shortClipped / (float) STATS_PIXELS,
+                    shortDark / (float) STATS_PIXELS,
+                    calR, calG, calB, overlapError, overlapCount);
+        }
+
+        private static float srgbToLinear(float value) {
+            return value <= 0.04045f
+                    ? value / 12.92f
+                    : (float) Math.pow((value + 0.055f) / 1.055f, 2.4);
+        }
+
+        private static float secondLargest(float a, float b, float c) {
+            return a + b + c - Math.min(a, Math.min(b, c)) - Math.max(a, Math.max(b, c));
+        }
+
+        private static float clampCalibration(float value) {
+            return Math.max(0.75f, Math.min(1.33f, value));
+        }
+
+        private static float percentileSorted(float[] values, float percentile) {
+            if (values.length == 0) return 0.0f;
+            int index = Math.max(0, Math.min(values.length - 1,
+                    Math.round(percentile * (values.length - 1))));
+            return values[index];
+        }
+
+        private static float medianPrefix(float[] values, int count, float fallback) {
+            if (count <= 0) return fallback;
+            Arrays.sort(values, 0, count);
+            int mid = count / 2;
+            if ((count & 1) != 0) return values[mid];
+            return 0.5f * (values[mid - 1] + values[mid]);
         }
 
         private void bindQuad() {
