@@ -282,7 +282,7 @@ final class CameraController {
                     "BRIGHTNESS_EV",
                     String.format(
                             Locale.US,
-                            "%+.1fEV owner=LONG_EXPOSURE_SHUTTER_PRIORITY mode=%s",
+                            "%+.1fEV owner=WHOLE_HDR_PAIR_EXPOSURE_BIAS mode=%s",
                             displayBrightnessEv,
                             autoHdrExposure ? "AUTO" : "MANUAL_SAFE"));
             if (characteristics == null) return;
@@ -1387,89 +1387,116 @@ final class CameraController {
         long baseLongExposure = clampExposure(lastAeExposureNs);
         int baseLongIso = clampIso(lastAeIso);
 
-        // First reconstruct the exact clean-AE/V1.4.7 baseline pair. Brightness must
-        // never feed back into the hidden AE anchor or the SHORT highlight target.
+        // Reconstruct the exact clean-AE/V1.4.7 baseline pair first. Brightness is a
+        // separate whole-pair exposure intent and may not alter HDR fusion ownership.
         if (targetPreviewFps >= 60 && baseLongExposure > SIXTY_FPS_DURATION_NS) {
             double sensorProduct = (double) baseLongExposure * baseLongIso;
             baseLongExposure = clampExposure(SIXTY_FPS_DURATION_NS);
             baseLongIso = solveIsoForProduct(sensorProduct, baseLongExposure);
         }
+
+        long baseShortExposure;
+        int baseShortIso = minIso;
         double baseLongProduct = Math.max(1.0, (double) baseLongExposure * baseLongIso);
-        autoShortIso = minIso;
         if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
             double targetShortProduct = Math.max(1.0, baseLongProduct / HDR_BRACKET_RATIO);
             long desiredShort = Math.round(targetShortProduct / Math.max(1, minIso));
-            autoShortExposureNs = Math.min(baseLongExposure, clampExposure(desiredShort));
+            baseShortExposure = Math.min(baseLongExposure, clampExposure(desiredShort));
         } else {
-            // Preserve the proven V1.4.7 anti-banding SHORT authority. Known 50/60-Hz
-            // and unknown/PWM lighting keep the un-biased clean-AE integration window
-            // for SHORT, with sensor-minimum gain. Brightness is LONG-only.
-            autoShortExposureNs = baseLongExposure;
+            // Exact V1.4.7 anti-banding baseline: 50/60-Hz and unknown/PWM use the
+            // same integration window for SHORT and LONG, with SHORT at sensor minimum.
+            baseShortExposure = baseLongExposure;
         }
 
-        // 0.0 EV is byte-for-byte policy-equivalent to the proven unbiased baseline.
-        // Do not quantize or re-solve a clean-AE pair when the user requested no bias.
         if (Math.abs(displayBrightnessEv) < 0.0001f) {
+            // 0 EV is deliberately the exact V1.4.7 capture relationship.
+            autoShortExposureNs = baseShortExposure;
+            autoShortIso = baseShortIso;
             autoLongExposureNs = baseLongExposure;
             autoLongIso = baseLongIso;
             return;
         }
 
-        // V1.4.12 Brightness is capture exposure intent, not post-fusion gain. Target
-        // LONG exposure product changes by 2^EV; integration time supplies the change
-        // first, then ISO solves only the residual needed for the exact requested EV.
         double requestedGain = Math.pow(2.0, clampBrightnessEv(displayBrightnessEv));
-        double targetLongProduct = Math.max(1.0, baseLongProduct * requestedGain);
-        long desiredLongExposure = clampExposure(Math.round(baseLongExposure * requestedGain));
-        long maxLongExposure = targetPreviewFps >= 60
+        double baseShortProduct = Math.max(1.0, (double) baseShortExposure * baseShortIso);
+        double targetShortProduct = Math.max(1.0, baseShortProduct * requestedGain);
+        long maxAllowedNs = targetPreviewFps >= 60
                 ? SIXTY_FPS_DURATION_NS
                 : Math.max(manualFrameDurationNs, baseLongExposure);
-        desiredLongExposure = Math.min(desiredLongExposure, maxLongExposure);
 
-        autoLongExposureNs = chooseBrightnessLongExposureLocked(
-                baseLongExposure,
-                desiredLongExposure,
-                targetLongProduct,
-                minIso,
-                sceneFlicker,
-                maxLongExposure);
-        autoLongIso = solveIsoForProduct(targetLongProduct, autoLongExposureNs);
+        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
+            long desiredShortExposure = clampExposure(Math.round(baseShortExposure * requestedGain));
+            desiredShortExposure = Math.min(desiredShortExposure, maxAllowedNs);
+            autoShortExposureNs = desiredShortExposure;
+            autoShortIso = solveIsoForProduct(targetShortProduct, autoShortExposureNs);
+
+            // If sensor limits prevent the exact requested SHORT shift, LONG follows the
+            // achieved SHORT shift so the proven V1.4.7 HDR ratio remains unchanged.
+            double achievedShortProduct = Math.max(
+                    1.0, (double) autoShortExposureNs * autoShortIso);
+            double achievedPairGain = achievedShortProduct / baseShortProduct;
+            double targetLongProduct = Math.max(1.0, baseLongProduct * achievedPairGain);
+            long desiredLongExposure = clampExposure(Math.round(baseLongExposure * achievedPairGain));
+            desiredLongExposure = Math.min(desiredLongExposure, maxAllowedNs);
+            autoLongExposureNs = desiredLongExposure;
+            autoLongIso = solveIsoForProduct(targetLongProduct, autoLongExposureNs);
+        } else {
+            // Flicker-safe whole-pair shift: SHORT and LONG keep one common integration
+            // window. Shutter time moves first only on the existing 50/60-Hz safe grid;
+            // ISO supplies residual gain to BOTH frames. Unknown/PWM keeps the proven
+            // baseline shutter rather than inventing a banding-prone integration time.
+            long desiredCommonExposure = clampExposure(Math.round(baseLongExposure * requestedGain));
+            desiredCommonExposure = Math.min(desiredCommonExposure, maxAllowedNs);
+            long commonExposure = chooseWholePairBrightnessExposureLocked(
+                    baseLongExposure,
+                    desiredCommonExposure,
+                    targetShortProduct,
+                    minIso,
+                    sceneFlicker,
+                    maxAllowedNs);
+            autoShortExposureNs = commonExposure;
+            autoShortIso = solveIsoForProduct(targetShortProduct, commonExposure);
+
+            double achievedShortProduct = Math.max(
+                    1.0, (double) autoShortExposureNs * autoShortIso);
+            double achievedPairGain = achievedShortProduct / baseShortProduct;
+            double targetLongProduct = Math.max(1.0, baseLongProduct * achievedPairGain);
+            autoLongExposureNs = commonExposure;
+            autoLongIso = solveIsoForProduct(targetLongProduct, commonExposure);
+        }
     }
 
-    private long chooseBrightnessLongExposureLocked(
+    private long chooseWholePairBrightnessExposureLocked(
             long baseExposureNs,
             long desiredExposureNs,
-            double targetLongProduct,
+            double targetShortProduct,
             int minIso,
             int flicker,
             long maxAllowedNs) {
         long base = Math.min(clampExposure(baseExposureNs), maxAllowedNs);
         long desired = Math.min(clampExposure(desiredExposureNs), maxAllowedNs);
-        long periodNs;
-        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ) {
-            periodNs = 10_000_000L;
-        } else if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) {
-            periodNs = 8_333_333L;
-        } else if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
-            return desired;
-        } else {
-            // Unknown/PWM keeps the proven baseline integration rather than inventing
-            // a potentially banding-prone intermediate shutter. ISO handles residual.
+        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) return desired;
+        if (flicker != CaptureResult.STATISTICS_SCENE_FLICKER_50HZ
+                && flicker != CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) {
             return base;
         }
 
-        long maxPeriods = Math.max(1L, maxAllowedNs / periodNs);
-        long lowerPeriods = Math.max(1L, desired / periodNs);
-        long upperPeriods = Math.min(maxPeriods,
-                Math.max(1L, (long) Math.ceil(desired / (double) periodNs)));
-        long lower = clampExposure(Math.min(maxAllowedNs, lowerPeriods * periodNs));
-        long upper = clampExposure(Math.min(maxAllowedNs, upperPeriods * periodNs));
-
-        // Prefer the next longer anti-banding-safe shutter only when the requested
-        // exposure product can support it without demanding ISO below sensor minimum.
-        double upperIso = targetLongProduct / Math.max(1.0, upper);
-        if (upper >= desired && upperIso >= minIso) return upper;
-        return lower;
+        long periodNs = flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ
+                ? 10_000_000L : 8_333_333L;
+        long maxByShortMinimumIso = (long) Math.floor(
+                targetShortProduct / Math.max(1.0, minIso));
+        long shutterCeiling = Math.min(maxAllowedNs, maxByShortMinimumIso);
+        long preferredCeiling = Math.min(desired, shutterCeiling);
+        long periods = preferredCeiling / periodNs;
+        if (periods < 1L) {
+            // A shorter value would violate the existing anti-banding guard. Keep the
+            // V1.4.7 baseline shutter; the achieved pair gain is then limited by SHORT
+            // sensor-minimum ISO and LONG follows that achieved gain exactly.
+            return base;
+        }
+        long candidate = clampExposure(periods * periodNs);
+        if (candidate < base && desired >= base) return base;
+        return Math.min(candidate, maxAllowedNs);
     }
 
     private void publishAutoHdrSettingsLocked(String event, boolean logEvent) {
@@ -1545,34 +1572,59 @@ final class CameraController {
                     requestedBaseLongProduct, manualEffectiveLongExposureNs);
         }
 
-        // MANUAL SAFE Brightness uses the same ownership as AUTO: the selected manual
-        // pair is the unbiased base, SHORT remains the highlight-safe owner, and only
-        // LONG receives the requested exposure bias. Anti-banding/cadence limits remain
-        // authoritative; ISO solves only the residual that shutter time cannot supply.
+        // MANUAL SAFE uses the same whole-pair Brightness contract as AUTO. The
+        // selected/flicker-safe manual pair is the unbiased base; Brightness moves SHORT
+        // and LONG together so their HDR exposure relationship does not change.
+        long baseShortExposure = manualEffectiveShortExposureNs;
+        int baseShortIso = manualEffectiveShortIso;
         long baseLongExposure = manualEffectiveLongExposureNs;
         int baseLongIso = manualEffectiveLongIso;
+        double baseShortProduct = Math.max(1.0, (double) baseShortExposure * baseShortIso);
         double baseLongProduct = Math.max(1.0, (double) baseLongExposure * baseLongIso);
-        double shortProductBeforeBias = Math.max(
-                1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
+
         if (Math.abs(displayBrightnessEv) >= 0.0001f) {
             double requestedGain = Math.pow(2.0, clampBrightnessEv(displayBrightnessEv));
-            double targetLongProduct = Math.max(
-                    shortProductBeforeBias,
-                    baseLongProduct * requestedGain);
-            long desiredLongExposure = clampExposure(Math.round(baseLongExposure * requestedGain));
-            long maxLongExposure = targetPreviewFps >= 60
+            double targetShortProduct = Math.max(1.0, baseShortProduct * requestedGain);
+            long maxAllowedNs = targetPreviewFps >= 60
                     ? SIXTY_FPS_DURATION_NS
                     : Math.max(manualFrameDurationNs, baseLongExposure);
-            desiredLongExposure = Math.min(desiredLongExposure, maxLongExposure);
-            manualEffectiveLongExposureNs = chooseBrightnessLongExposureLocked(
-                    baseLongExposure,
-                    desiredLongExposure,
-                    targetLongProduct,
-                    minIso,
-                    sceneFlicker,
-                    maxLongExposure);
-            manualEffectiveLongIso = solveIsoForProduct(
-                    targetLongProduct, manualEffectiveLongExposureNs);
+
+            if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
+                long desiredShortExposure = clampExposure(Math.round(baseShortExposure * requestedGain));
+                desiredShortExposure = Math.min(desiredShortExposure, maxAllowedNs);
+                manualEffectiveShortExposureNs = desiredShortExposure;
+                manualEffectiveShortIso = solveIsoForProduct(
+                        targetShortProduct, manualEffectiveShortExposureNs);
+
+                double achievedShortProduct = Math.max(
+                        1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
+                double achievedPairGain = achievedShortProduct / baseShortProduct;
+                double targetLongProduct = Math.max(1.0, baseLongProduct * achievedPairGain);
+                long desiredLongExposure = clampExposure(Math.round(baseLongExposure * achievedPairGain));
+                desiredLongExposure = Math.min(desiredLongExposure, maxAllowedNs);
+                manualEffectiveLongExposureNs = desiredLongExposure;
+                manualEffectiveLongIso = solveIsoForProduct(
+                        targetLongProduct, manualEffectiveLongExposureNs);
+            } else {
+                long desiredCommonExposure = clampExposure(Math.round(baseLongExposure * requestedGain));
+                desiredCommonExposure = Math.min(desiredCommonExposure, maxAllowedNs);
+                long commonExposure = chooseWholePairBrightnessExposureLocked(
+                        baseLongExposure,
+                        desiredCommonExposure,
+                        targetShortProduct,
+                        minIso,
+                        sceneFlicker,
+                        maxAllowedNs);
+                manualEffectiveShortExposureNs = commonExposure;
+                manualEffectiveShortIso = solveIsoForProduct(targetShortProduct, commonExposure);
+
+                double achievedShortProduct = Math.max(
+                        1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
+                double achievedPairGain = achievedShortProduct / baseShortProduct;
+                double targetLongProduct = Math.max(1.0, baseLongProduct * achievedPairGain);
+                manualEffectiveLongExposureNs = commonExposure;
+                manualEffectiveLongIso = solveIsoForProduct(targetLongProduct, commonExposure);
+            }
         }
 
         double longProduct = Math.max(
@@ -1580,7 +1632,7 @@ final class CameraController {
         double shortProduct = Math.max(
                 1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
         manualEffectiveBracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);
-        manualAchievedBrightnessEv = Math.log(longProduct / baseLongProduct) / Math.log(2.0);
+        manualAchievedBrightnessEv = Math.log(shortProduct / baseShortProduct) / Math.log(2.0);
 
         return oldShortExposure != manualEffectiveShortExposureNs
                 || oldLongExposure != manualEffectiveLongExposureNs

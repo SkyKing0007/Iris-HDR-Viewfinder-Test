@@ -1,36 +1,47 @@
-# Iris HDR Viewfinder Test V1.4.13
+# Iris HDR Viewfinder Test V1.4.14
 
-V1.4.13 is built from the exact successful V1.4.12 Actions compiled candidate. It keeps V1.4.12 shutter-priority physical Brightness and anti-banding behavior, while correcting the widening-bracket HDR artifacts seen on walls, shelf lighting and plant edges.
+V1.4.14 is a root-cause reset built from the exact successful V1.4.13 Actions compiled candidate. It intentionally restores the successful V1.4.7 HDR image algorithm byte-for-byte while keeping the later proven capture-freeze, anti-banding, Manual Safe, cadence/FOV, orientation, logging and build-verification mechanics.
 
-## Brightness: -5 EV to +2 EV in AUTO and MANUAL SAFE
+## Exact V1.4.7 HDR IQ reset
 
-**Brightness** now spans `-5.0 EV` to `+2.0 EV` in `0.1 EV` steps and remains enabled in both HDR AUTO and HDR MANUAL SAFE.
+The live `hdr_display.frag` and saved `JpegFusion.java` are byte-exact copies of the successful V1.4.7 Actions candidate.
 
-AUTO continues to use clean hidden AE as the unbiased baseline. SHORT remains on the unbiased highlight-safe baseline and LONG receives the requested Brightness exposure intent using shutter time first, then ISO only for residual target error.
+That deliberately removes the V1.4.8-V1.4.13 experimental HDR/tone changes from the image algorithm, including adaptive aperture-driven bracket widening, post-fusion Brightness, global appearance/color compensation, V1.4.13 true-multi-channel clipping reconstruction and the edge-disagreement recovery path.
 
-MANUAL SAFE now uses the selected manual SHORT/LONG/ISO settings as its unbiased base, keeps SHORT as the highlight-safe owner, and applies the same shutter-priority Brightness bias to LONG. Negative Brightness is clamped so LONG never falls below the SHORT exposure product and the HDR pair cannot invert.
+At **Brightness 0.0 EV**, the HDR pair is reconstructed using the V1.4.7 zero-Brightness capture relationship and then processed by the exact V1.4.7 live/saved HDR algorithm.
 
-Known 50 Hz lighting retains the 10 ms anti-banding family; known 60 Hz retains the 8.333333 ms family. Unknown/PWM retains baseline integration rather than inventing an unsafe intermediate shutter. Forced 60 fps still caps live LONG integration at 16.666666 ms.
+The known V1.4.7 red/orange highlight-color defect is **not claimed fixed in this build**. V1.4.14 is intentionally isolating overall exposure/brightness from HDR algorithm changes so that defect is not mixed with another broad color experiment.
 
-## V1.4.13 highlight artifact correction
+## Brightness moves the complete HDR pair
 
-V1.4.12 proved that the physical Brightness solver worked, but increasing the LONG/SHORT separation also made the older full-RGB highlight handoff increasingly visible. The normalized SHORT JPEG was being multiplied by the wider exposure ratio and blended into valid LONG pixels before the color-protection stage, creating wall/highlight blotchiness and displaced plant-edge artifacts.
+**Brightness** remains `-5.0 EV` through `+2.0 EV` in `0.1 EV` steps and remains available in HDR AUTO and HDR MANUAL SAFE.
 
-V1.4.13 removes that full-RGB handoff. LONG remains the complete owner of ordinary scene RGB and luminance. SHORT contributes only missing highlight radiance after at least two LONG channels are genuinely near clipping. A one-sided normalized-luminance agreement test rejects a SHORT sample that becomes materially darker than the same bright LONG sample, which protects thin leaves/branches against a bright shelf or wall without any neighborhood sampling or cross-edge blur.
+Unlike V1.4.12/V1.4.13, Brightness no longer holds SHORT fixed while moving LONG farther away. It applies one exposure-product gain to the entire baseline HDR set:
 
-SHORT chromaticity is emergency-only after virtually complete multi-channel LONG clipping. The broad V1.4.8-V1.4.10 appearance/color reconstruction does not return.
+`requested gain = 2 ^ BrightnessEV`
 
-## Stable tone ownership
+SHORT is solved first. LONG then follows the **actually achieved SHORT gain**, so sensor/ISO/timing limits do not deliberately widen or narrow the baseline HDR separation.
 
-The physical exposure ratio is still used to normalize SHORT correctly, but Brightness no longer changes the display tone policy. Live and saved fusion use one fixed ~3 EV V1.4.7 display shape: knee `0.70`, white anchor `0.74`, display ceiling `0.88`, with a fixed 3-EV highlight headroom mapping. This prevents Brightness from simultaneously moving LONG exposure, SHORT admission and the tone curve.
+For a representative 60-Hz baseline of approximately `SHORT 1/120 ISO50 / LONG 1/120 ISO245`:
 
-## Compact navigation-safe controls
+- `+0.5 EV` remains near the same HDR separation at approximately `SHORT 1/120 ISO71 / LONG 1/120 ISO348` because the next longer anti-banding period would overshoot SHORT minimum-ISO headroom.
+- `+1.0 EV` can move both members to approximately `1/60` at their baseline ISOs, gaining real integration time while preserving the same HDR separation.
 
-The diagnostic control panel uses smaller text/buttons/slider rows and reserves the Android navigation-bar bottom inset. The Brightness slider therefore remains above the Android gesture pill/system bar in portrait while preserving both portrait and landscape layouts.
+Known 50 Hz uses the existing 10 ms period family; known 60 Hz uses the existing 8.333333 ms family. Unknown/PWM retains baseline integration rather than inventing a banding-prone shutter. Forced 60 fps still caps live integration at 16.666666 ms. If a requested negative EV cannot be achieved without violating the anti-banding/minimum-ISO contract, the achieved shift may be limited rather than breaking the guard.
+
+## Periodic viewfinder bounce correction
+
+The 5-second clean-AE remeter cadence itself is unchanged. V1.4.13's visible vertical jump was caused by the changing debug/status message resizing the bottom `wrap_content` panel and therefore resizing the weighted viewfinder.
+
+V1.4.14 gives the status/debug row invariant one-line 20dp geometry with ellipsis. The remeter message can change text without changing control-panel or viewfinder height.
+
+## Compact navigation-safe controls retained
+
+The compact control sizing and Android bottom navigation/gesture inset from V1.4.13 are retained. Brightness remains usable above the system gesture pill in portrait and remains available in landscape.
 
 ## Preserved mechanics
 
-The exact successful V1.4.12 immutable shutter-time pair, hidden AE remetering, 50/60-Hz guards, post-RAW boost ownership, producer-owned orientation, FOV-safe 30 fps path, optional cropped 60 fps path, RAW/JPEG capture set, DNG/JPEG saving, logging, deterministic full-index patch proof, real GLSL/Java compiler gates and full Android assemble order are inherited unchanged except for V1.4.13 authority/version/hash/regression pins.
+The exact successful V1.4.13 immutable shutter-time pair, hidden AE remetering cadence, 50/60-Hz guards, post-RAW boost ownership, producer-owned orientation, FOV-safe 30 fps path, explicit cropped 60 fps path, RAW/JPEG capture set, DNG/JPEG saving, logging, deterministic full-index patch proof, pinned real GLSL/Java compiler gates and full Android assemble order are inherited unchanged except for V1.4.14 authority/version/hash/regression pins.
 
 Runtime logs are written to:
 

@@ -252,7 +252,7 @@ final class CaptureSetSaver {
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));
                 root.put("brightnessEv", displayBrightnessEv);
-                root.put("brightnessOwner", "LONG_EXPOSURE_SHUTTER_PRIORITY");
+                root.put("brightnessOwner", "WHOLE_HDR_PAIR_EXPOSURE_BIAS");
                 Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
                 if (sensorOrientation != null) root.put("sensorOrientation", sensorOrientation);
                 JSONArray physicalIds = new JSONArray();

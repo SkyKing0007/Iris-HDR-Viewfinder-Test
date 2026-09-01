@@ -17,6 +17,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.text.TextUtils;
 import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
@@ -208,7 +209,14 @@ public final class MainActivity extends Activity implements CameraController.Lis
         });
 
         statusText = textView("Waiting for camera permission…", portrait ? 10 : 11);
-        panel.addView(statusText, matchWrap());
+        statusText.setSingleLine(true);
+        statusText.setEllipsize(TextUtils.TruncateAt.END);
+        statusText.setIncludeFontPadding(false);
+        statusText.setMinHeight(dp(20));
+        statusText.setMaxHeight(dp(20));
+        panel.addView(statusText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(20)));
 
         cameraSpinner = new Spinner(this);
         cameraSpinner.setBackgroundColor(0xCCEEEEEE);
@@ -337,8 +345,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
             Toast.makeText(
                     this,
                     autoHdrEnabled
-                            ? "AUTO HDR continuously meters the scene; manual exposure sliders are locked; Brightness remains active"
-                            : "MANUAL SAFE: exposure sliders set the base bracket; Brightness remains active with flicker-safe shutter priority",
+                            ? "AUTO HDR continuously meters the scene; Brightness moves the complete HDR pair"
+                            : "MANUAL SAFE: exposure sliders set the base bracket; Brightness moves the complete HDR pair",
                     Toast.LENGTH_SHORT).show();
         });
 
