@@ -1,4 +1,4 @@
-Iris HDR Viewfinder Test V1.5.3
+Iris HDR Viewfinder Test V1.5.3 V1.1
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED / UPLOAD-READY - NOT V1.5.3 BUILD-PROVEN
 
@@ -17,60 +17,58 @@ Runtime authority:
 - Repository manifest SHA-256: a5e66f46295ec7dd88c2b6196414304b0e65da81204f9d51627754bfdbc7d5a6
 - Regressions SHA-256: 6a946ee053e180285990b67e6a1ae353e1b2e10e4c6823bdebba13698ca8d2e0
 
+Failed V1.5.3 candidate evidence (NOT authority):
+- Commit: 33e93e528a69750da79f5847cb033d810f2d7251
+- Tree: effffd262e5faef64cfd2d72445cd5d320935fb4
+- Actions run: 33690475046
+- Job: 100447831412
+- Failure stage: Compile exact runtime GLSL assets
+- Exact failure: hdr_display.frag fusionSample referenced longSecond outside its declaration scope; longPeak/longLuma were also absent from that local scope and would fail subsequently.
+- Java, patch proof, assemble and post-build stages were correctly skipped.
+
 Verification-mechanics authority:
 - Exact successful V1.5.2 16-stage authority-seeded compiler/build/invariance sequence.
-- V1.5.2 canonical full-index/no-ext-diff patch mechanics are inherited unchanged.
 - Gradle/SDK/glslang/Java/signing/assemble/freeze mechanics are unchanged.
+- The failed V1.5.3 workflow reached the same real pinned GLSL compiler stage, proving the procedural sequence itself remained intact.
 
 Backup:
-- NONE CREATED for V1.5.3, per explicit user instruction.
-- Deterministic V1.5.2 <-> V1.5.3 full-index patches provide rollback proof in Actions.
+- NONE CREATED for V1.5.3 V1.1, per explicit user instruction.
 
-V1.5.3 exact runtime changed-file allowlist: 2 files:
+V1.5.3 intended runtime changed-file allowlist relative successful V1.5.2: exactly 2 files:
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/assets/shaders/raw_hdr_fusion.frag
 
-Build/version changed file:
-- app/build.gradle.kts (versionCode 32 / versionName 1.0-v1.5.3 only)
+V1.5.3 V1.1 runtime correction relative failed V1.5.3 commit: exactly 1 file:
+- app/src/main/assets/shaders/hdr_display.frag
 
-Infrastructure changed-file list:
-- .github/workflows/build.yml
-- BUILD_WORKFLOW_COPY.yml
-- scripts/verify_orientation.py
+Compiler-only V1.1 correction:
+- Adds fusionSample-local longPeak = max3(longRgb).
+- Adds fusionSample-local longSecond = second3(longRgb).
+- Adds fusionSample-local longLuma = longSceneLuma.
+- These are the same descriptors already computed in helper functions; only scope is corrected.
+- No HDR threshold, SHORT/LONG ownership rule, 8-EV GTM equation, RAW fusion equation, demosaic equation, alignment behavior, exposure policy or capture behavior changes.
+- Permanent regression 129 now requires those locals before hardClippedCore use.
 
-Package-document changed-file list:
-- PACKAGE_INFO.txt
-- PACKAGE_MANIFEST_SHA256.txt
-- README.md
-- VSCODE_DEV_UPLOAD.txt
-
-Infrastructure differs from last successful V1.5.2 implementation: YES, narrowly.
-- Authority pins advance to the exact successful V1.5.2 artifact.
-- Version/allowlist/runtime-digest pins advance to V1.5.3.
-- Permanent regressions are added for unconditional clipped-LONG -> SHORT takeover, pre-clipping SHORT highlight-domain ownership, full trusted-SHORT color preservation and 7-EV display-range preservation.
-- No compiler/build/signing/candidate-freeze mechanics are redesigned.
-
-V1.5.3 correction:
-- LONG remains the body/shadow authority while healthy; SHORT remains the designated highlight authority.
-- Source ownership remains one scalar for the complete 2x2 Bayer quad; V1.5.2's anti-peach/orange coherence is preserved.
-- Coherent SHORT ownership begins at the HDR highlight shoulder instead of waiting for the final sensor percent.
-- If any LONG phase reaches the physical clipping zone and current SHORT has usable unsaturated CFA support, the complete quad is 100% SHORT-owned. Soft alignment/photometric confidence may no longer resurrect clipped LONG white.
-- Hard SHORT takeover restores SHORT physical color trust, so V1.5.1's neutral fallback cannot whiten a fully supported SHORT quad.
-- V1.5.1 raw_hdr_demosaic.frag broad-pink/ceiling-magenta and pink-edge protections remain byte-identical to successful V1.5.2.
-- V1.5.2 HdrGlView stable response calibration remains byte-identical, protecting against peach/orange live pulsation.
-- Live HDR also gives physically clipped LONG cores full current-SHORT authority when SHORT has signal/headroom, and broadens coherent SHORT ownership through the highlight shoulder.
-- Shared global tone mapping remains NO-LTM and RGB-uniform, but its fixed scene ceiling expands from 6 EV (64x) to 8 EV (256x). AUTO can capture a 7-EV SHORT; this prevents valid 7-EV SHORT structure from being clipped again after successful fusion.
-- No capture/exposure policy change. No alignment rewrite. No GPU/performance architecture change in V1.5.3.
-
-Protected visual contracts:
+Protected V1.5.3 runtime intent:
+- clipped LONG + usable SHORT => complete 2x2 Bayer quad becomes 100% SHORT-owned;
+- coherent SHORT takeover begins in highlight shoulder before hard clipping;
 - no broad pink/magenta ceiling highlights;
 - no peach/orange CFA checkerboard or synthetic fill;
-- no reintroduction of V1.5.2 white-blotch/green-edge boundary insertion;
-- no LTM.
+- V1.5.2 demosaic and stable live response calibration remain byte-identical;
+- one shared RGB-uniform global tone map with fixed 8-EV scene range;
+- NO LTM.
 
-Stable signing is unchanged from V1.5.2.
-Local real GLSL/Android Java/full assemble remain NOT RUN unless explicitly reported otherwise; GitHub Actions is authoritative.
+Build/version:
+- versionCode 32
+- versionName 1.0-v1.5.3
+- unchanged from failed V1.5.3 because that candidate never became successful runtime authority.
 
 Prepared candidate runtime manifest:
 - app/src file count: 16
-- SHA-256: e4d76676b5b2982c46ac29a3d90dadea74a4df9993545e9e84cde3167139b0f2
+- SHA-256: afa56c9e92e55c46da87a74cba8ec6f83ffe112f2a4721e8ed61eafc1d3a8cef
+
+Compiler status in this environment:
+- REAL GLSL COMPILE: NOT RUN (pinned Ubuntu package unavailable in this container)
+- REAL JAVA COMPILE: NOT RUN
+- FULL ANDROID ASSEMBLE: NOT RUN
+- GitHub Actions remains authoritative.

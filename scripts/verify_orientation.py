@@ -1340,6 +1340,21 @@ require('shortPhotoVisibleGeneration' not in gl
         and 'PHOTO_VISIBLE_FAST_NS' not in gl,
         "AUTO exposure generations must not reopen a fast visible photo-response window")
 
+# 129 - V1.5.3 real GLSL compiler regression (Actions run 33690475046):
+# hardClippedCore originally referenced longPeak/longSecond/longLuma outside the
+# helper-function scopes where they had been declared. Require all three locals
+# inside fusionSample itself before the hard-core expression.
+fusion_start = hdr_shader.index('void fusionSample(')
+fusion_end = hdr_shader.index('void main()', fusion_start)
+fusion_scope = hdr_shader[fusion_start:fusion_end]
+require('float longPeak = max3(longRgb);' in fusion_scope
+        and 'float longSecond = second3(longRgb);' in fusion_scope
+        and 'float longLuma = longSceneLuma;' in fusion_scope
+        and fusion_scope.index('float longPeak = max3(longRgb);') < fusion_scope.index('float hardClippedCore =')
+        and fusion_scope.index('float longSecond = second3(longRgb);') < fusion_scope.index('float hardClippedCore =')
+        and fusion_scope.index('float longLuma = longSceneLuma;') < fusion_scope.index('float hardClippedCore ='),
+        "GLSL compiler regression 129: fusionSample hard-core LONG descriptors must be locally declared before use")
+
 # V1.5.3 exact device failure: every physically clipped LONG quad with current usable
 # SHORT must be 100% SHORT-owned. Geometry/photometric confidence may shape the warp
 # before clipping, but may never select clipped LONG as radiometric fallback.
@@ -1398,4 +1413,4 @@ require('quadColorRisk' in raw_demosaic_shader and 'coherentHighlightColorRisk' 
 require('local tone' not in hdr_shader.lower() and 'bilateral tone' not in hdr_shader.lower(),
         "V1.5.3 must remain no-LTM")
 
-print("V1.5.3 REGRESSION PASS: exact V1.5.2 Actions authority, clipped-LONG unconditional SHORT takeover, coherent pre-clipping SHORT shoulder, preserved broad-pink/peach-edge protections, stable live calibration, shared 8-EV global GTM, no LTM")
+print("V1.5.3 V1.1 REGRESSION PASS: exact V1.5.2 Actions authority, clipped-LONG unconditional SHORT takeover, coherent pre-clipping SHORT shoulder, preserved broad-pink/peach-edge protections, stable live calibration, shared 8-EV global GTM, no LTM")

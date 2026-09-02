@@ -206,6 +206,12 @@ void fusionSample(
     float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);
     vec3 shortScene = calibratedShortScene(shortRgb, ratio) * exp2(localGainEv);
     float longSceneLuma = luma3(longScene);
+    // V1.5.3 V1.1 compiler-only scope correction: the hard-core test below
+    // needs these LONG descriptors in fusionSample scope. Values/math are
+    // identical to the existing helper calculations; no HDR thresholds change.
+    float longPeak = max3(longRgb);
+    float longSecond = second3(longRgb);
+    float longLuma = longSceneLuma;
 
     float shoulderNeed = longHighlightShoulder(longRgb, longScene);
     float clippedCore = longClippedCore(longRgb, longScene);

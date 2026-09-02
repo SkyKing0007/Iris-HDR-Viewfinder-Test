@@ -276,7 +276,7 @@ jobs:
           python3 - <<'PYPOST'
           from pathlib import Path
           import hashlib, subprocess
-          expected_runtime='e4d76676b5b2982c46ac29a3d90dadea74a4df9993545e9e84cde3167139b0f2'
+          expected_runtime='afa56c9e92e55c46da87a74cba8ec6f83ffe112f2a4721e8ed61eafc1d3a8cef'
           files=sorted(p for p in Path('app/src').rglob('*') if p.is_file())
           rows=[]
           for p in files:
@@ -339,6 +339,7 @@ jobs:
           126 - V1.5.3 valid-SHORT color regression: hard SHORT takeover restores physical color trust; the V1.5.1 neutral fallback remains only for genuinely missing color evidence and may not whiten a fully supported SHORT quad.
           127 - V1.5.3 7-EV display-range regression: live and saved HDR remain one global no-LTM tone map, but the fixed scene ceiling is 8 EV so valid 7-EV SHORT structure cannot collapse into the old 6-EV white plateau.
           128 - V1.5.3 preserved-artifact regression: V1.5.1 broad-pink/ceiling-magenta protection, V1.5.2 quad coherence, trust-aware demosaic, inherited-flow boundary guard and stable live calibration remain byte/semantic protected.
+          129 - V1.5.3 V1.1 GLSL scope regression: hdr_display fusionSample must declare longPeak, longSecond and longLuma locally before hardClippedCore uses them; Actions run 33690475046 is the exact prior compiler failure.
           REGNEW
 
           sha256sum output/Iris-HDR-Viewfinder-Test-V1.5.3-debug.apk \

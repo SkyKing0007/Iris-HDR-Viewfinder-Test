@@ -1,17 +1,20 @@
-Iris HDR Viewfinder Test V1.5.3 - vscode.dev upload
+Iris HDR Viewfinder Test V1.5.3 V1.1 - vscode.dev upload
 
 1. Open https://github.dev/SkyKing0007/Iris-HDR-Viewfinder-Test (or press . from the GitHub repository).
-2. Confirm branch main currently points to successful V1.5.2 commit 2ed7072212bc1e9571163a914be6497c6254b702.
+2. Confirm branch main currently points to failed V1.5.3 commit 33e93e528a69750da79f5847cb033d810f2d7251. Its parent must be successful V1.5.2 commit 2ed7072212bc1e9571163a914be6497c6254b702.
 3. Upload/replace the complete contents of this FULL-UPLOAD ZIP at repository root.
 4. Do not add APKs, DNGs, JPEGs, build/, .cxx/, __pycache__ or other generated files.
-5. Commit with: V1.5.3 unconditional SHORT clipping recovery + full HDR range
-6. Push main once. The packaged workflow is the authoritative compiler/build proof.
+5. Commit with: V1.5.3 V1.1 fix HDR display GLSL scope
+6. Push main once. The packaged workflow uses the unchanged V1.5.2-proven compiler/build procedure for authoritative proof.
 
-No backup branch is required for V1.5.3 per explicit instruction.
+No backup branch is required, per explicit instruction.
 
 Expected version after replacement: versionCode 32 / versionName 1.0-v1.5.3.
-Expected runtime changes relative to the exact V1.5.2 Actions candidate: exactly two files:
+Expected runtime changes relative to exact successful V1.5.2 Actions candidate: exactly two files:
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/assets/shaders/raw_hdr_fusion.frag
 
-The proven V1.5.2 raw_hdr_demosaic.frag, HdrGlView.java, CameraController.java, RawHdrFusion.java, DNG saver, capture/exposure policy, alignment owner and every other runtime file are protected and unchanged.
+Expected compiler-only runtime delta relative to failed V1.5.3 commit: exactly one file:
+- app/src/main/assets/shaders/hdr_display.frag
+
+The V1.5.3 highlight reconstruction/ownership math is unchanged; V1.1 only repairs local GLSL variable scope.

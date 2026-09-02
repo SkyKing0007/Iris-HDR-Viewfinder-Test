@@ -1,22 +1,36 @@
-# Iris HDR Viewfinder Test V1.5.3
+# Iris HDR Viewfinder Test V1.5.3 V1.1
 
-V1.5.3 is the **complete SHORT highlight-authority correction** built directly from the exact successful V1.5.2 GitHub Actions candidate.
+V1.5.3 V1.1 is a **compiler-only correction** to the failed V1.5.3 handoff. It is still reconstructed and verified against the exact successful V1.5.2 GitHub Actions candidate; failed V1.5.3 commit `33e93e528a69750da79f5847cb033d810f2d7251` is evidence only, never runtime authority.
 
-The V1.5.2 test proved that broad pink was fixed and quad-coherent fusion substantially improved false-color behavior, but it also proved two remaining information-loss paths: clipped LONG could still survive when soft confidence gates reduced SHORT ownership, and the shared global display curve still hard-ceiled at 6 EV while AUTO can capture a 7-EV SHORT.
+The failed Actions run `33690475046` passed authority reconstruction, Java/Android/Gradle/signing setup and the static shader scan, then failed the real pinned GLSL compile because `hdr_display.frag` used `longSecond` inside `fusionSample()` without a declaration in that function scope. `longPeak` and `longLuma` used by the same expression were also not locally declared.
 
-V1.5.3 fixes both without LTM:
+V1.5.3 V1.1 corrects only that runtime defect:
 
-- **Clipped LONG cannot win.** If any LONG CFA phase reaches the physical clipping zone and the aligned SHORT quad has usable unsaturated support, the complete 2x2 Bayer quad is 100% SHORT-owned. Alignment/photometric confidence can shape the pre-clipping transition, but it cannot choose clipped LONG as a radiometric fallback.
-- **SHORT starts before clipping.** The complete Bayer quad transitions coherently toward SHORT through the HDR highlight shoulder, so exterior/window/ceiling structure is not withheld until the last few sensor code values.
-- **Valid SHORT color stays valid.** Hard SHORT takeover restores physical color trust. The V1.5.1 neutral-chroma fail-closed path remains only for genuinely missing color evidence and cannot turn a fully supported SHORT quad into neutral white.
-- **No peach/orange regression.** R/G1/G2/B still share one source-ownership scalar per Bayer quad. The V1.5.2 trust-aware demosaic remains byte-identical.
-- **No broad-pink regression.** The proven V1.5.1 `raw_hdr_demosaic.frag` clipping-provenance/camera-neutral completion and CFA-parity edge behavior are byte-identical to V1.5.2.
-- **No live-pulsation regression.** V1.5.2's generation-stable `HdrGlView` response calibration is byte-identical.
-- **Live HDR follows the same ownership intent.** Physically clipped LONG cores cannot be displayed merely because pair-rate reliability is conservative; current SHORT signal/headroom owns the core, while a coherent shoulder brings in valid SHORT detail earlier.
-- **The GTM no longer reclips the recovered SHORT.** One shared RGB-uniform global tone map remains in place, with no LTM. Its fixed scene range is increased from 64x (6 EV) to 256x (8 EV), so a valid AUTO 7-EV SHORT still has visible code separation after fusion instead of collapsing into the old white plateau.
+- `float longPeak = max3(longRgb);`
+- `float longSecond = second3(longRgb);`
+- `float longLuma = longSceneLuma;`
 
-There is no capture/exposure-policy change, no alignment rewrite, no backup, and no GPU/performance redesign in this build.
+These values are mathematically identical to the descriptors already used by the existing helper functions. **No V1.5.3 image-processing math is retuned or reordered.** The unconditional clipped-LONG → SHORT authority, quad coherence, preserved SHORT color, 8-EV global no-LTM tone map, V1.5.1 broad-pink protection, V1.5.2 anti-peach demosaic and stable live calibration are unchanged.
 
-Runtime authority: successful V1.5.2 commit `2ed7072212bc1e9571163a914be6497c6254b702`, Actions run `33682632400`, artifact `9866894122`.
+Permanent regression 129 now asserts that all three descriptors are locally declared inside `fusionSample()` before `hardClippedCore` uses them, preserving the exact real compiler failure as a future guard.
 
-Current V1.5.3 status: **PREPARED / UPLOAD-READY, NOT YET V1.5.3 BUILD-PROVEN** until the packaged Actions workflow passes the pinned real GLSL compiler, real Java compiler, full `:app:assembleDebug`, invariance and final candidate export.
+## Authority
+
+Successful runtime + verification authority remains V1.5.2:
+
+- commit `2ed7072212bc1e9571163a914be6497c6254b702`
+- Actions run `33682632400`
+- artifact `9866894122`
+
+Failed V1.5.3 evidence:
+
+- commit `33e93e528a69750da79f5847cb033d810f2d7251`
+- Actions run `33690475046`
+- job `100447831412`
+- failure: real GLSL compiler stage only
+
+Version remains `1.0-v1.5.3 / 32`; the failed candidate never became a successful runtime authority.
+
+The packaged Actions workflow preserves the successful V1.5.2 procedure: same 16-stage authority reconstruction, Java 17, Android 37, Gradle 9.6.0, stable signing, pinned `glslang-tools=15.1.0-2~ubuntu0.24.04.2`, exact runtime shader compilation, real Java compilation, deterministic patch/PRE-BUILD proof, full `:app:assembleDebug`, post-build invariance and final candidate export.
+
+Current status: **PREPARED / UPLOAD-READY, NOT BUILD-PROVEN** until Actions passes.
