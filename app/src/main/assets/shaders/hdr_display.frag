@@ -104,8 +104,8 @@ float longHighlightShoulder(vec3 longRgb, vec3 longScene) {
     float longPeak = max3(longRgb);
     float longSecond = second3(longRgb);
     float longLuma = luma3(longScene);
-    float multiChannel = smoothstep(0.955, 0.988, longSecond);
-    float brightSingleChannel = smoothstep(0.985, 0.998, longPeak)
+    float multiChannel = smoothstep(0.86, 0.975, longSecond);
+    float brightSingleChannel = smoothstep(0.965, 0.995, longPeak)
         * smoothstep(0.62, 0.84, longLuma);
     return max(multiChannel, brightSingleChannel);
 }
@@ -124,7 +124,7 @@ float longClippedCore(vec3 longRgb, vec3 longScene) {
 }
 
 vec3 globalToneMap(vec3 sceneLinear) {
-    // V1.5.1 keeps one global, scene-referred GTM for BOTH live HDR and RAW still.
+    // V1.5.3 keeps one global, scene-referred GTM for BOTH live HDR and RAW still.
     // There is no LTM. LONG body values through 0.70 remain literal. From 0.70 to
     // scene white, a fixed stop-domain shoulder reserves visible separation for
     // SHORT-recovered highlights instead of packing 2x..16x radiance into the last
@@ -132,7 +132,7 @@ vec3 globalToneMap(vec3 sceneLinear) {
     float scenePeak = max3(sceneLinear);
     const float knee = 0.70;
     const float displayAtSceneOne = 0.80;
-    const float maxSceneRadiance = 64.0; // fixed 6-EV scene white, not bracket-driven
+    const float maxSceneRadiance = 256.0; // fixed 8-EV scene white; preserves all valid 7-EV SHORT structure
     const float displayCeiling = 0.9995;
     if (scenePeak <= knee || scenePeak <= 0.000001) {
         return max(sceneLinear, vec3(0.0));
@@ -215,20 +215,31 @@ void fusionSample(
     float shortSecond = second3(shortRgb);
     float lumaSafe = 1.0 - smoothstep(0.975, 0.997, shortSecond);
     float signalSafe = smoothstep(0.008, 0.025, shortEncodedLuma);
-    float shortUsable = min(lumaSafe, signalSafe) * fieldLumaTrust;
+    float shortPhysicalUsable = min(lumaSafe, signalSafe);
+    float shortUsable = shortPhysicalUsable * fieldLumaTrust;
     float corePermission = smoothstep(0.25, 0.55, shortUsable);
-    coreMask = clippedCore * corePermission;
+    float hardCorePermission = smoothstep(0.20, 0.50, shortPhysicalUsable);
+    float hardClippedCore = step(0.985, longSecond)
+        + (1.0 - step(0.985, longSecond))
+            * step(0.997, longPeak) * step(0.50, longLuma);
+    hardClippedCore = clamp(hardClippedCore, 0.0, 1.0);
+    // Pair-rate flicker trust may shape the soft shoulder, but when LONG is genuinely
+    // clipped it cannot turn recovery off. If current SHORT has signal/headroom, SHORT
+    // owns the core so live HDR cannot fall back to a white LONG plateau.
+    coreMask = max(clippedCore * corePermission, hardClippedCore * hardCorePermission);
+    if (hardClippedCore >= 1.0 && shortPhysicalUsable >= 0.50) coreMask = 1.0;
 
     float agreement = validChannelAgreement(longRgb, longScene, shortScene);
-    // V1.4.22 source ownership begins only from genuine LONG information loss.
-    // Bright-but-valid reflections/TV/table highlights no longer independently
-    // invite SHORT. The neighboring-core blur below provides the narrow feather.
-    rawMask = coreMask;
-    // One-sided boundary support is intentionally narrow and exists only so a
-    // clipped-core mask can feather into near-clipped pixels on the same surface.
+    // V1.5.3 extends SHORT ownership through the complete highlight shoulder rather
+    // than waiting for the last encoded percent before clipping. The mask remains
+    // coherent and requires current SHORT signal/headroom; hard clipped cores are full.
+    float shoulderMask = shoulderNeed
+        * smoothstep(0.30, 0.72, shortUsable)
+        * mix(0.70, 1.0, agreement);
+    rawMask = max(coreMask, shoulderMask);
     damageSupport = max(
-        coreMask,
-        smoothstep(0.38, 0.86, shoulderNeed * shortUsable));
+        rawMask,
+        smoothstep(0.24, 0.78, shoulderNeed * max(shortUsable, 0.75 * shortPhysicalUsable)));
 
     // V1.4.21 validity-aware boundary guide. LONG defines edges while it still
     // carries scene information. As LONG loses highlight structure, the calibrated

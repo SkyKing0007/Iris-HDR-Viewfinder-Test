@@ -1,65 +1,76 @@
-Iris HDR Viewfinder Test V1.5.2
+Iris HDR Viewfinder Test V1.5.3
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
-Status: PREPARED / UPLOAD-READY - NOT V1.5.2 BUILD-PROVEN
+Status: PREPARED / UPLOAD-READY - NOT V1.5.3 BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.5.1 GitHub Actions compiled candidate/artifact
-- Commit: 50c9bdd2709db67bd466ced1f5a82efa182f97cc
-- Tree: 946be536427762e8bcdbadc6cce8a296404c8f28
-- Actions run: 33675597653
-- Job: 100399370805
-- Artifact ID: 9864289091
-- Artifact name: Iris-HDR-Viewfinder-Test-V1.5.1
-- Artifact digest: sha256:0716856060c0dc183b6b8d08358adf7b04fd7b62fc3c2fbe27eb0a7e28f1cbc3
-- APK SHA-256: ec0f2ce25ee486ecdf4e0fea45909a27759bba256c420b5279d816259315de79
-- Source-candidate TAR SHA-256: b7cf2e66a1a8889b483940ffbc9e32256b12bf6f69d2f5303d9cdee15ae35f7b
-- Runtime manifest SHA-256: dded85ab921384e193fc4894612005c381df9a466749be0b12af2ad0ea362c4d
-- Repository manifest SHA-256: e6ab3fdee8e913b81e72b77f5aa99734bf930634b17db3108156f66e707a9e45
-- Regressions SHA-256: b3e2a5e612793ebf4753c6079278abdf19a98d491ff5526e2382ced3cc037486
+- Exact successful V1.5.2 GitHub Actions compiled candidate/artifact
+- Commit: 2ed7072212bc1e9571163a914be6497c6254b702
+- Tree: 7108e37bb9e4c9ab15d0b97661dcc6c9d93687c8
+- Actions run: 33682632400
+- Job: 100422554528
+- Artifact ID: 9866894122
+- Artifact name: Iris-HDR-Viewfinder-Test-V1.5.2
+- Artifact digest: sha256:e04adac9c1de450ff020f03534d193c836592acc109f2541fe3931f243903445
+- APK SHA-256: ad3b1274adabddad2cb62e1adeca427280f389bad1a1f37834e2977630218468
+- Source-candidate TAR SHA-256: 6f50bfd378c256acef7bacb5c138a512c9fa1f90ddbbf334c76a7b9ffb210763
+- Runtime manifest SHA-256: da69305305cd337b93920768cc6f477092af0bd26e4b942f66798fd46d880d12
+- Repository manifest SHA-256: a5e66f46295ec7dd88c2b6196414304b0e65da81204f9d51627754bfdbc7d5a6
+- Regressions SHA-256: 6a946ee053e180285990b67e6a1ae353e1b2e10e4c6823bdebba13698ca8d2e0
 
 Verification-mechanics authority:
-- Exact successful V1.5.1 16-stage authority-seeded compiler/build/invariance sequence.
-- Compiler/build/signing/candidate-freeze mechanics are inherited unchanged.
+- Exact successful V1.5.2 16-stage authority-seeded compiler/build/invariance sequence.
+- V1.5.2 canonical full-index/no-ext-diff patch mechanics are inherited unchanged.
+- Gradle/SDK/glslang/Java/signing/assemble/freeze mechanics are unchanged.
 
 Backup:
-- NONE CREATED for V1.5.2, per explicit user instruction.
-- Deterministic V1.5.1 <-> V1.5.2 full-index patches provide rollback proof in Actions.
+- NONE CREATED for V1.5.3, per explicit user instruction.
+- Deterministic V1.5.2 <-> V1.5.3 full-index patches provide rollback proof in Actions.
 
-V1.5.2 exact runtime changed-file allowlist: 4 files:
+V1.5.3 exact runtime changed-file allowlist: 2 files:
 - app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/assets/shaders/raw_hdr_demosaic.frag
 - app/src/main/assets/shaders/raw_hdr_fusion.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 
 Build/version changed file:
-- app/build.gradle.kts (versionCode 31 / versionName 1.0-v1.5.2 only)
+- app/build.gradle.kts (versionCode 32 / versionName 1.0-v1.5.3 only)
 
 Infrastructure changed-file list:
 - .github/workflows/build.yml
 - BUILD_WORKFLOW_COPY.yml
 - scripts/verify_orientation.py
 
-Infrastructure differs from last successful V1.5.1 implementation: YES, narrowly.
-- Authority pins advance to the exact successful V1.5.1 artifact.
-- Version/allowlist pins advance to V1.5.2.
-- Permanent regressions are added for quad exposure-source coherence, inherited-flow boundary rejection, trust-aware demosaic and live response stability.
-- Gradle/SDK/glslang/Java/signing/assemble/artifact/candidate-freeze mechanics remain unchanged.
-- Patch generation is intentionally corrected to the permanent canonical rule: `--binary --full-index --no-ext-diff`, with rollback generated directly as HEAD -> exact V1.5.1 authority rather than via `git diff -R`. This narrow mechanics delta is replayed against the real V1.5.1 Actions candidate before packaging.
+Package-document changed-file list:
+- PACKAGE_INFO.txt
+- PACKAGE_MANIFEST_SHA256.txt
+- README.md
+- VSCODE_DEV_UPLOAD.txt
 
-V1.5.2 correction:
-- LONG = body/shadow/normal-exposure authority while healthy.
-- SHORT = designated highlight exposure authority.
-- Highlight ownership is one scalar per exact 2x2 Bayer quad.
-- Whole-quad SHORT support/correspondence is proven before admission; fully clipped LONG cannot veto SHORT radiometrically.
-- Low-local-evidence inherited flow is rejected at real LONG boundaries, preventing shifted SHORT white blotches/green edges while still permitting coherent saturated interiors.
-- Fully trusted demosaic neighborhoods retain the exact V1.5.1 detail algorithm; untrusted CFA samples cannot independently steer green direction or R-G/B-G residuals.
-- Live HDR highlight chroma is SHORT or neutral SHORT luma once LONG is damaged; LONG chromaticity is not recycled into lost highlights.
-- Live processed-preview response requires 3 consecutive estimates within 0.045 EV before target commitment, then one 0.65 EV/s visible convergence rate independent of AUTO exposure-generation churn.
-- NO LTM. No capture/exposure policy change. No GPU/performance architecture change in V1.5.2.
+Infrastructure differs from last successful V1.5.2 implementation: YES, narrowly.
+- Authority pins advance to the exact successful V1.5.2 artifact.
+- Version/allowlist/runtime-digest pins advance to V1.5.3.
+- Permanent regressions are added for unconditional clipped-LONG -> SHORT takeover, pre-clipping SHORT highlight-domain ownership, full trusted-SHORT color preservation and 7-EV display-range preservation.
+- No compiler/build/signing/candidate-freeze mechanics are redesigned.
 
-Stable signing is unchanged from V1.5.1.
+V1.5.3 correction:
+- LONG remains the body/shadow authority while healthy; SHORT remains the designated highlight authority.
+- Source ownership remains one scalar for the complete 2x2 Bayer quad; V1.5.2's anti-peach/orange coherence is preserved.
+- Coherent SHORT ownership begins at the HDR highlight shoulder instead of waiting for the final sensor percent.
+- If any LONG phase reaches the physical clipping zone and current SHORT has usable unsaturated CFA support, the complete quad is 100% SHORT-owned. Soft alignment/photometric confidence may no longer resurrect clipped LONG white.
+- Hard SHORT takeover restores SHORT physical color trust, so V1.5.1's neutral fallback cannot whiten a fully supported SHORT quad.
+- V1.5.1 raw_hdr_demosaic.frag broad-pink/ceiling-magenta and pink-edge protections remain byte-identical to successful V1.5.2.
+- V1.5.2 HdrGlView stable response calibration remains byte-identical, protecting against peach/orange live pulsation.
+- Live HDR also gives physically clipped LONG cores full current-SHORT authority when SHORT has signal/headroom, and broadens coherent SHORT ownership through the highlight shoulder.
+- Shared global tone mapping remains NO-LTM and RGB-uniform, but its fixed scene ceiling expands from 6 EV (64x) to 8 EV (256x). AUTO can capture a 7-EV SHORT; this prevents valid 7-EV SHORT structure from being clipped again after successful fusion.
+- No capture/exposure policy change. No alignment rewrite. No GPU/performance architecture change in V1.5.3.
+
+Protected visual contracts:
+- no broad pink/magenta ceiling highlights;
+- no peach/orange CFA checkerboard or synthetic fill;
+- no reintroduction of V1.5.2 white-blotch/green-edge boundary insertion;
+- no LTM.
+
+Stable signing is unchanged from V1.5.2.
 Local real GLSL/Android Java/full assemble remain NOT RUN unless explicitly reported otherwise; GitHub Actions is authoritative.
 
 Prepared candidate runtime manifest:
 - app/src file count: 16
-- SHA-256: da69305305cd337b93920768cc6f477092af0bd26e4b942f66798fd46d880d12
+- SHA-256: e4d76676b5b2982c46ac29a3d90dadea74a4df9993545e9e84cde3167139b0f2

@@ -1,7 +1,7 @@
 #version 300 es
 precision highp float;
 precision highp int;
-// V1.5.2: R=fused scene-linear CFA, G=physical color trust,
+// V1.5.3: R=fused scene-linear CFA, G=physical color trust,
 // B=physical LONG clipping risk, A=SHORT ownership.
 // Keeping provenance beside the CFA value lets demosaic make one coherent
 // color-trust decision per Bayer quad instead of guessing from brightness.
@@ -268,17 +268,24 @@ void main() {
     vec2 shortState = sampleShortSamePhase(sourcePos, channel, photoState.x);
 
     float longPeak = quadLongPeak(qOrigin);
-    float longDamage = smoothstep(0.925, 0.990, longPeak);
+    // SHORT is the designated highlight exposure. Begin the coherent hand-off well
+    // before the sensor ceiling so real SHORT structure survives the HDR shoulder.
+    // Once ANY phase in the LONG Bayer quad has reached the physical clipping zone,
+    // LONG has lost information and is no longer permitted to veto valid SHORT.
+    float longHighlightNeed = smoothstep(0.70, 0.92, longPeak);
+    float hardLongClip = smoothstep(0.985, 0.997, longPeak);
     vec2 quadValidation = quadShortSupportAndCorrespondence(
         qOrigin, flowState.rg, photoState.x);
-    float shortSupport = smoothstep(0.45, 0.82, quadValidation.x);
+    float shortSupport = smoothstep(0.35, 0.78, quadValidation.x);
+    float hardShortAvailable = smoothstep(0.10, 0.35, quadValidation.x);
     float correspondenceConfidence = quadValidation.y;
     float flowConfidence = clamp(flowState.b, 0.0, 1.0);
     float localFlowEvidence = clamp(flowState.a, 0.0, 1.0);
     float photometricConfidence = clamp(photoState.y, 0.0, 1.0);
 
-    // Alignment cells may inherit coherent motion only inside textureless/saturated
-    // interiors. At a real LONG boundary, inherited geometry cannot insert SHORT.
+    // Alignment confidence may shape the pre-clipping transition, but it may not
+    // resurrect clipped LONG. The flow vector remains the best registered SHORT
+    // correspondence; at hard clipping the only radiometrically valid source is SHORT.
     float inheritedFlow = 1.0 - smoothstep(0.24, 0.48, localFlowEvidence);
     float boundaryContrast = quadBoundaryContrast(qOrigin);
     float inheritedBoundaryGate = 1.0
@@ -287,13 +294,15 @@ void main() {
         * smoothstep(0.35, 0.70, photometricConfidence)
         * correspondenceConfidence * inheritedBoundaryGate;
 
-    float ownership = clamp(
-        longDamage * shortSupport * geometricAdmission, 0.0, 1.0);
-    if (longPeak >= 0.995 && quadValidation.x >= 0.82
-            && flowConfidence >= 0.60 && photometricConfidence >= 0.55
-            && correspondenceConfidence >= 0.55
-            && inheritedBoundaryGate >= 0.70) {
+    float softOwnership = clamp(
+        longHighlightNeed * shortSupport * geometricAdmission, 0.0, 1.0);
+    float hardShortTakeover = hardLongClip * hardShortAvailable;
+    float ownership = max(softOwnership, hardShortTakeover);
+    if (longPeak >= 0.997 && quadValidation.x >= 0.10) {
+        // Permanent clipping contract: a physically clipped LONG quad with usable
+        // SHORT can never leak LONG white, regardless of soft confidence gates.
         ownership = 1.0;
+        hardShortTakeover = 1.0;
     }
 
     float longPhysicalTrust =
@@ -314,6 +323,10 @@ void main() {
     // some valid evidence. If a clipped/untrusted LONG value still owns part of
     // the output, that fraction remains color-incomplete even when SHORT itself
     // is valid. Full trust is recovered only as validated SHORT actually owns it.
+    // A hard SHORT takeover carries complete physical color evidence from SHORT.
+    // Do not send it through the clipped-LONG neutralization path merely because the
+    // alignment cell was inherited or photometric overlap was unavailable in the core.
+    shortValidated = max(shortValidated, hardShortTakeover);
     float physicalColorTrust = mix(
         longPhysicalTrust, shortValidated, ownership);
     float longPhysicalClipRisk = 1.0 - longPhysicalTrust;

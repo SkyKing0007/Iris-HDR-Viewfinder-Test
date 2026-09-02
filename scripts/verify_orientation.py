@@ -22,7 +22,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.5.2 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.5.3 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -309,9 +309,10 @@ require('longHighlightShoulder' in hdr_shader and 'longClippedCore' in hdr_shade
         and 'fusionSample' in hdr_shader and 'multiscaleHighlightRecovery' in hdr_shader,
         "live LONG-base full-core/edge-guided highlight compositor missing")
 require('float corePermission = smoothstep(0.25, 0.55, shortUsable);' in hdr_shader
-        and 'coreMask = clippedCore * corePermission;' in hdr_shader
-        and 'rawMask = coreMask;' in hdr_shader,
-        "live clipped core must use current SHORT safety for complete detail authority")
+        and 'float hardCorePermission = smoothstep(0.20, 0.50, shortPhysicalUsable);' in hdr_shader
+        and 'coreMask = max(clippedCore * corePermission, hardClippedCore * hardCorePermission);' in hdr_shader
+        and 'if (hardClippedCore >= 1.0 && shortPhysicalUsable >= 0.50) coreMask = 1.0;' in hdr_shader,
+        "live physically clipped core must use complete current SHORT detail authority without LONG leakage")
 require('temporalTrust' not in hdr_shader,
         "200-ms reliability history must never gate visible luma or chroma fusion")
 require('uniform sampler2D flickerFieldTex;' in hdr_shader
@@ -347,7 +348,7 @@ require('recoverOnlyLostChannels' not in hdr_shader
 require('vec3 globalToneMap(vec3 sceneLinear)' in hdr_shader
         and 'const float knee = 0.70;' in hdr_shader
         and 'const float displayAtSceneOne = 0.80;' in hdr_shader
-        and 'const float maxSceneRadiance = 64.0;' in hdr_shader
+        and 'const float maxSceneRadiance = 256.0;' in hdr_shader
         and 'mappedPeak = clamp(mappedPeak, knee, displayCeiling);' in hdr_shader,
         "shared fixed stop-domain global tone map missing")
 require('if (mode == 3)' in hdr_shader
@@ -435,12 +436,13 @@ require('FLOW_WIDTH = 64' in raw_fusion and 'FLOW_HEIGHT = 48' in raw_fusion
 require('sampleShortSamePhase' in raw_fusion_shader
         and '(sourcePos - vec2(offset)) * 0.5' in raw_fusion_shader
         and 'ivec2 qOrigin = quadOrigin(globalPos);' in raw_fusion_shader
-        and 'float longDamage = smoothstep(0.925, 0.990, longPeak);' in raw_fusion_shader
+        and 'float longHighlightNeed = smoothstep(0.70, 0.92, longPeak);' in raw_fusion_shader
+        and 'float hardLongClip = smoothstep(0.985, 0.997, longPeak);' in raw_fusion_shader
         and 'quadShortSupportAndCorrespondence' in raw_fusion_shader
         and 'float localFlowEvidence = clamp(flowState.a, 0.0, 1.0);' in raw_fusion_shader
         and 'inheritedBoundaryGate' in raw_fusion_shader
-        and 'flowConfidence >= 0.60 && photometricConfidence >= 0.55' in raw_fusion_shader,
-        "V1.5.2 quad-coherent SHORT highlight authority / boundary geometry gate missing")
+        and 'float hardShortTakeover = hardLongClip * hardShortAvailable;' in raw_fusion_shader,
+        "V1.5.3 quad-coherent SHORT highlight authority / clipped-LONG takeover missing")
 require('raw_hdr_fusion.frag' in raw_fusion and 'raw_hdr_demosaic.frag' in raw_fusion
         and 'hdr_display.frag' in raw_fusion
         and 'GLES30.GL_FRAMEBUFFER_COMPLETE' in raw_fusion
@@ -474,9 +476,10 @@ require('mirrorParityCoord' in raw_demosaic_shader
 require('EGL14.eglTerminate(' not in raw_fusion and 'EGL14.eglReleaseThread();' in raw_fusion,
         "RAW still worker must never terminate process EGL display owned by live GLSurfaceView")
 
-# Permanent synthetic GTM/ownership regressions, independent of physical bracket size.
-def v151_gtm_peak(value):
-    knee=0.70; scene_one=0.80; max_scene=64.0; ceiling=0.9995
+# Permanent shared-GTM/ownership regressions. V1.5.3 intentionally extends the
+# fixed scene ceiling from 6 EV to 8 EV because AUTO can capture a 7-EV SHORT.
+def v153_shared_gtm_peak(value):
+    knee=0.70; scene_one=0.80; max_scene=256.0; ceiling=0.9995
     if value <= knee: return max(value, 0.0)
     if value <= 1.0:
         t=max(0.0,min(1.0,(value-knee)/(1.0-knee)))
@@ -486,22 +489,22 @@ def v151_gtm_peak(value):
         stop=max(0.0,min(1.0,math.log(value,2)/math.log(max_scene,2)))
         mapped=scene_one+(ceiling-scene_one)*stop
     return max(knee,min(ceiling,mapped))
-values=[i/1000.0 for i in range(64001)]
-mapped=[v151_gtm_peak(v) for v in values]
+values=[i/1000.0 for i in range(256001)]
+mapped=[v153_shared_gtm_peak(v) for v in values]
 require(all(mapped[i+1] + 1e-9 >= mapped[i] for i in range(len(mapped)-1)),
-        "V1.5.1 GTM must remain monotonic")
-require(all(abs(v151_gtm_peak(v)-v) < 1e-9 for v in [0.0,0.05,0.20,0.50,0.70]),
-        "V1.5.1 GTM must preserve naturally exposed LONG body through knee")
-require(abs(v151_gtm_peak(1.0)-0.80) < 1e-9,
-        "V1.5.1 GTM must reserve display headroom above scene-linear 1.0")
-stop_values=[v151_gtm_peak(v) for v in [1.0,2.0,4.0,8.0,16.0,32.0,64.0]]
+        "V1.5.3 shared GTM must remain monotonic")
+require(all(abs(v153_shared_gtm_peak(v)-v) < 1e-9 for v in [0.0,0.05,0.20,0.50,0.70]),
+        "V1.5.3 GTM must preserve naturally exposed LONG body through knee")
+require(abs(v153_shared_gtm_peak(1.0)-0.80) < 1e-9,
+        "V1.5.3 GTM must reserve display headroom above scene-linear 1.0")
+stop_values=[v153_shared_gtm_peak(v) for v in [1.0,2.0,4.0,8.0,16.0,32.0,64.0,128.0,256.0]]
 stop_steps=[stop_values[i+1]-stop_values[i] for i in range(len(stop_values)-1)]
-require(min(stop_steps) >= 0.032 and max(stop_steps)-min(stop_steps) <= 0.002,
-        f"V1.5.1 GTM must preserve approximately uniform per-stop highlight separation: {stop_steps}")
-for radiance in [0.1,0.7,1.0,2.0,4.0,8.0,16.0,64.0]:
-    reference=v151_gtm_peak(radiance)
-    for bracket_ev in range(2,7):
-        require(abs(v151_gtm_peak(radiance)-reference) < 1e-12,
+require(min(stop_steps) >= 0.024 and max(stop_steps)-min(stop_steps) <= 0.002,
+        f"V1.5.3 GTM must preserve approximately uniform per-stop highlight separation through 8 EV: {stop_steps}")
+for radiance in [0.1,0.7,1.0,2.0,4.0,8.0,16.0,64.0,128.0,192.0]:
+    reference=v153_shared_gtm_peak(radiance)
+    for bracket_ev in range(2,8):
+        require(abs(v153_shared_gtm_peak(radiance)-reference) < 1e-12,
                 f"same radiance changed appearance at {bracket_ev} EV bracket")
 
 # V1.5.1 physical color-trust contract: trust follows the source mixture and
@@ -1013,15 +1016,15 @@ require('float fieldLumaTrust = mix(1.0, clamp(fieldState.g, 0.0, 1.0), guardReq
         and 'float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);' in hdr_shader,
         "phase-sensitive SHORT must fail closed at pair rate while safe SHORT bypasses mandatory field trust")
 
-# 056 / 074 / 080 / V1.5.2 - Exact current pre-handoff authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.5.1' in workflow
-        and 'run-id: 33675597653' in workflow,
-        "workflow must download the exact successful V1.5.1 Actions authority")
-require('50c9bdd2709db67bd466ced1f5a82efa182f97cc' in workflow
-        and '946be536427762e8bcdbadc6cce8a296404c8f28' in workflow,
-        "V1.5.1 authority commit/tree pins missing")
+# 056 / 074 / 080 / V1.5.3 - Exact current pre-handoff authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.5.2' in workflow
+        and 'run-id: 33682632400' in workflow,
+        "workflow must download the exact successful V1.5.2 Actions authority")
+require('2ed7072212bc1e9571163a914be6497c6254b702' in workflow
+        and '7108e37bb9e4c9ab15d0b97661dcc6c9d93687c8' in workflow,
+        "V1.5.2 authority commit/tree pins missing")
 require('backup-' not in workflow,
-        "V1.5.2 narrow correction must not depend on or create a backup branch")
+        "V1.5.3 narrow correction must not depend on or create a backup branch")
 
 # 048 / 049 / 052 / 054 - Brightness remains user LONG intent in AUTO and MANUAL.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -5.0f' in main
@@ -1046,8 +1049,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 31' in gradle and 'versionName = "1.0-v1.5.2"' in gradle,
-        "V1.5.2 version/build pin missing")
+require('versionCode = 32' in gradle and 'versionName = "1.0-v1.5.3"' in gradle,
+        "V1.5.3 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -1225,10 +1228,11 @@ for ownership in [0.0, 0.15, 0.50, 0.85, 1.0]:
     fused=long_endpoint+(short_endpoint-long_endpoint)*ownership
     require(long_endpoint-1e-9 <= fused <= short_endpoint+1e-9,
             f"convex radiance ownership must remain within source endpoints: {ownership},{fused}")
-require('rawMask = coreMask;' in hdr_shader and 'shoulderMask' not in hdr_shader,
-        "live bright shoulder must not independently own SHORT outside a genuine clipped core")
-require('shoulderNeed * shortUsable' in hdr_shader,
-        "uncorrectable fast-SHORT regions must fail closed even at neighboring live recovery feather")
+require('float shoulderMask = shoulderNeed' in hdr_shader
+        and 'rawMask = max(coreMask, shoulderMask);' in hdr_shader,
+        "V1.5.3 live HDR must preserve valid SHORT structure throughout the highlight shoulder")
+require('shoulderNeed * max(shortUsable, 0.75 * shortPhysicalUsable)' in hdr_shader,
+        "live recovery feather must preserve current SHORT signal even when pair-rate trust is conservative")
 require('float fieldLumaTrust = mix(1.0, clamp(fieldState.g, 0.0, 1.0), guardRequired);' in hdr_shader
         and 'float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);' in hdr_shader,
         "flicker-safe/outdoor live SHORT must bypass mandatory field trust while phase-sensitive SHORT fails closed")
@@ -1238,8 +1242,9 @@ require('provisionalShortProbe' in frame_meta and 'autoShortProbeBaselineEv' in 
         and 'HDR SHORT probe is still being validated' in camera,
         "still capture must never commit an unaccepted darker SHORT probe")
 require('rowPhotometric(qCenter.y + flowState.g)' in raw_fusion_shader
-        and 'flowConfidence >= 0.60 && photometricConfidence >= 0.55' in raw_fusion_shader,
-        "RAW still must fail closed on source-row radiometry or geometry uncertainty")
+        and 'float geometricAdmission = flowConfidence' in raw_fusion_shader
+        and '* correspondenceConfidence * inheritedBoundaryGate;' in raw_fusion_shader,
+        "RAW still pre-clipping SHORT transition must remain geometry/radiometry gated")
 
 # Validity-aware guide must continue to use calibrated SHORT where LONG has lost edge
 # structure while remaining LONG-owned in ordinary scene body.
@@ -1311,30 +1316,86 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-# V1.5.2 device regressions from the V1.5.1 office test.
+# V1.5.2 device regressions from the V1.5.1 office test remain permanent.
 require('quadLongPeak' in raw_fusion_shader
         and 'quadShortSupportAndCorrespondence' in raw_fusion_shader
-        and 'ownership = clamp(' in raw_fusion_shader
-        and 'longDamage * shortSupport * geometricAdmission' in raw_fusion_shader,
-        "orange/peach CFA checkerboard regression: source ownership must be one quad decision")
+        and 'float softOwnership = clamp(' in raw_fusion_shader
+        and 'longHighlightNeed * shortSupport * geometricAdmission' in raw_fusion_shader,
+        "orange/peach CFA checkerboard regression: soft source ownership must remain one quad decision")
 require('quadBoundaryContrast' in raw_fusion_shader
         and 'inheritedFlow * smoothstep(0.08, 0.28, boundaryContrast)' in raw_fusion_shader,
-        "white-blotch/green-edge regression: inherited flow must fail closed at real LONG boundaries")
+        "white-blotch/green-edge regression: inherited flow must remain bounded at real LONG boundaries before clipping")
 require('vec3 neutralAtShortLuma = vec3(shortSceneLuma);' in hdr_shader
         and 'vec3 trustedShort = mix(neutralAtShortLuma, shortScene, colorTrust);' in hdr_shader
         and 'longChromaticityAtShortLuma' not in hdr_shader,
-        "live highlight color must be SHORT-or-neutral once LONG is damaged")
+        "live highlight color must remain SHORT-or-neutral once LONG is damaged")
 require('PHOTO_COMMIT_STABLE_SAMPLES = 3' in gl
         and 'PHOTO_COMMIT_STABLE_EV = 0.045f' in gl
         and 'shortPhotoCandidateScale' in gl
         and 'shortPhotoCandidateStableSamples' in gl
         and 'PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.65f' in gl,
-        "live processed-response calibration must require consecutive stable evidence")
+        "live processed-response calibration must retain consecutive stable evidence")
 require('shortPhotoVisibleGeneration' not in gl
         and 'PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND' not in gl
         and 'PHOTO_VISIBLE_FAST_NS' not in gl,
         "AUTO exposure generations must not reopen a fast visible photo-response window")
-require('local tone' not in hdr_shader.lower() and 'bilateral tone' not in hdr_shader.lower(),
-        "V1.5.2 must remain no-LTM")
 
-print("V1.5.2 REGRESSION PASS: exact-published-pair WYSIWYG freeze, matched RAW_SENSOR sole still authority, CFA-aware continuous alignment/fusion, source-row photometric fail-closed protection, one demosaic/WB/color owner, shared global GTM, live information-gain SHORT/flicker protections, adaptive LONG appearance, exact exposure-generation pairs, capture-performance/EGL/orientation/FOV/signing protections")
+# V1.5.3 exact device failure: every physically clipped LONG quad with current usable
+# SHORT must be 100% SHORT-owned. Geometry/photometric confidence may shape the warp
+# before clipping, but may never select clipped LONG as radiometric fallback.
+require('float hardLongClip = smoothstep(0.985, 0.997, longPeak);' in raw_fusion_shader
+        and 'float hardShortTakeover = hardLongClip * hardShortAvailable;' in raw_fusion_shader
+        and 'if (longPeak >= 0.997 && quadValidation.x >= 0.10)' in raw_fusion_shader
+        and 'ownership = 1.0;' in raw_fusion_shader,
+        "clipped-LONG leakage regression: valid SHORT must become unconditional whole-quad authority")
+require('shortValidated = max(shortValidated, hardShortTakeover);' in raw_fusion_shader,
+        "hard SHORT takeover must retain SHORT physical color trust and never fall into clipped-LONG neutralization")
+
+def v153_raw_ownership(long_peak, short_min_support, geometric):
+    highlight = smoothstep_local(0.70, 0.92, long_peak)
+    hard_clip = smoothstep_local(0.985, 0.997, long_peak)
+    short_support = smoothstep_local(0.35, 0.78, short_min_support)
+    hard_available = smoothstep_local(0.10, 0.35, short_min_support)
+    soft = max(0.0, min(1.0, highlight * short_support * geometric))
+    hard = hard_clip * hard_available
+    ownership = max(soft, hard)
+    if long_peak >= 0.997 and short_min_support >= 0.10:
+        ownership = 1.0
+    return ownership
+require(v153_raw_ownership(1.0, 0.40, 0.0) == 1.0,
+        "physically clipped LONG may not survive when usable SHORT exists even at zero soft geometry confidence")
+require(v153_raw_ownership(0.45, 1.0, 1.0) == 0.0,
+        "ordinary scene body must remain LONG-owned")
+require(0.0 < v153_raw_ownership(0.82, 1.0, 1.0) < 1.0,
+        "pre-clipping HDR shoulder must transition coherently toward SHORT instead of waiting for sensor clipping")
+
+# AUTO can reach 7 EV. A fixed 6-EV scene ceiling discarded valid SHORT structure
+# after correct fusion, so keep one global no-LTM map with a fixed 8-EV ceiling.
+require('const float maxSceneRadiance = 256.0;' in hdr_shader,
+        "shared GTM must retain at least 8 EV scene range for the 7-EV AUTO bracket")
+def v153_gtm_peak(scene_peak):
+    knee=0.70; at_one=0.80; max_scene=256.0; ceiling=0.9995
+    if scene_peak <= knee: return scene_peak
+    if scene_peak <= 1.0:
+        t=max(0.0,min(1.0,(scene_peak-knee)/(1.0-knee)))
+        st=t*t*(3.0-2.0*t)
+        return knee+(at_one-knee)*st
+    pos=max(0.0,min(1.0,math.log2(scene_peak)/math.log2(max_scene)))
+    return at_one+(ceiling-at_one)*pos
+require(v153_gtm_peak(64.0) < v153_gtm_peak(96.0) < v153_gtm_peak(128.0) < v153_gtm_peak(192.0) < 0.9995,
+        "recoverable 6-7+ EV SHORT structure must retain ordered display separation rather than collapse to white")
+
+# Successful V1.5.1/V1.5.2 visual protections remain byte-frozen.
+require(hashlib.sha256((ROOT / 'app/src/main/assets/shaders/raw_hdr_demosaic.frag').read_bytes()).hexdigest()
+        == 'e7950bde3c9d478a0432befcf094fac087d130e75c8fb956cba21f7c811e7b2e',
+        "broad-pink/ceiling-magenta and trust-aware anti-peach demosaic must remain byte-identical to successful V1.5.2")
+require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java').read_bytes()).hexdigest()
+        == '3377d4f3ebac7a46cfb5887ca4592174ea6586e7d84a46af390bed6302a6f9fe',
+        "V1.5.2 generation-stable live calibration must remain byte-identical")
+require('quadColorRisk' in raw_demosaic_shader and 'coherentHighlightColorRisk' in raw_demosaic_shader
+        and 'balancedCameraRgb = mix(balancedCameraRgb, neutralCameraRgb, colorRisk);' in raw_demosaic_shader,
+        "proven clipped-highlight chroma completion path missing")
+require('local tone' not in hdr_shader.lower() and 'bilateral tone' not in hdr_shader.lower(),
+        "V1.5.3 must remain no-LTM")
+
+print("V1.5.3 REGRESSION PASS: exact V1.5.2 Actions authority, clipped-LONG unconditional SHORT takeover, coherent pre-clipping SHORT shoulder, preserved broad-pink/peach-edge protections, stable live calibration, shared 8-EV global GTM, no LTM")

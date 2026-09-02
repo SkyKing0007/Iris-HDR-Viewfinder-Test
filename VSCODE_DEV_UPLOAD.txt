@@ -1,19 +1,17 @@
-Iris HDR Viewfinder Test V1.5.2 - vscode.dev upload
+Iris HDR Viewfinder Test V1.5.3 - vscode.dev upload
 
 1. Open https://github.dev/SkyKing0007/Iris-HDR-Viewfinder-Test (or press . from the GitHub repository).
-2. Confirm branch main currently points to successful V1.5.1 commit 50c9bdd2709db67bd466ced1f5a82efa182f97cc.
+2. Confirm branch main currently points to successful V1.5.2 commit 2ed7072212bc1e9571163a914be6497c6254b702.
 3. Upload/replace the complete contents of this FULL-UPLOAD ZIP at repository root.
 4. Do not add APKs, DNGs, JPEGs, build/, .cxx/, __pycache__ or other generated files.
-5. Commit with: V1.5.2 quad-coherent SHORT highlights + stable live HDR
+5. Commit with: V1.5.3 unconditional SHORT clipping recovery + full HDR range
 6. Push main once. The packaged workflow is the authoritative compiler/build proof.
 
-No backup branch is required for V1.5.2 per explicit instruction.
+No backup branch is required for V1.5.3 per explicit instruction.
 
-Expected version after replacement: versionCode 31 / versionName 1.0-v1.5.2.
-Expected runtime changes relative to the exact V1.5.1 Actions candidate: exactly four files:
+Expected version after replacement: versionCode 32 / versionName 1.0-v1.5.3.
+Expected runtime changes relative to the exact V1.5.2 Actions candidate: exactly two files:
 - app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/assets/shaders/raw_hdr_demosaic.frag
 - app/src/main/assets/shaders/raw_hdr_fusion.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 
-CaptureController/CameraController, RAW still owner RawHdrFusion.java, DNG saver, exposure policy and all other runtime files are protected and unchanged.
+The proven V1.5.2 raw_hdr_demosaic.frag, HdrGlView.java, CameraController.java, RawHdrFusion.java, DNG saver, capture/exposure policy, alignment owner and every other runtime file are protected and unchanged.
