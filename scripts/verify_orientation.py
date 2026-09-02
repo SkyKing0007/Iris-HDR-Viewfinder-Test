@@ -18,7 +18,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.20 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.21 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -297,10 +297,15 @@ require('longChromaticityAtShortLuma' in hdr_shader
         "shared shader must preserve LONG-chromaticity, neutral-highlight and current-pair protections")
 require('guideEdgeWeight' in hdr_shader and 'addFusionNeighbor' in hdr_shader
         and 'damageSupport' in hdr_shader
+        and 'float shortGuideAuthority = max(' in hdr_shader
+        and 'guideLuma = mix(longSceneLuma, shortSceneLuma, shortGuideAuthority);' in hdr_shader
         and 'float blurredMask = min(damageSupport' in hdr_shader
-        and 'vec3 lowBand = mix(longLow, shortLow, coarseMask);' in hdr_shader
-        and 'vec3 detailBand = mix(longCenter - longLow, shortCenter - shortLow, fineMask);' in hdr_shader,
-        "shared one-sided Gaussian-mask/Laplacian transition missing")
+        and 'float ownershipMask = clamp(max(coreMask, blurredMask), 0.0, 1.0);' in hdr_shader
+        and 'return mix(longCenter, shortCenter, ownershipMask);' in hdr_shader,
+        "shared validity-guided coherent ownership transition missing")
+require('vec3 lowBand = mix(longLow, shortLow, coarseMask);' not in hdr_shader
+        and 'vec3 detailBand = mix(longCenter - longLow, shortCenter - shortLow, fineMask);' not in hdr_shader,
+        "V1.4.20 mismatched coarse/fine Laplacian source ownership returned")
 require('recoverOnlyLostChannels' not in hdr_shader
         and 'mix(longScene, shortScene, highlightWeight)' not in hdr_shader
         and 'mix(longScene, mappedShort, recoveryMask)' not in hdr_shader,
@@ -680,13 +685,13 @@ require(short_safe((247/255,1.0,1.0)) < 0.01,
         "V1.4.15 white-car failure: a SHORT with clipped G/B must not create a red-only fill")
 
 # 056 / 074 / 080 - Exact current pre-handoff authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.19' in workflow
-        and 'run-id: 33573631526' in workflow,
-        "workflow must download the exact successful V1.4.19 Actions authority")
-require('3c468603769cebf53c9bdfbb37f91ea852a2a133' in workflow,
-        "V1.4.19 authority commit pin missing")
-require('backup-v1.4.20' not in workflow,
-        "V1.4.20 must not invent a new backup-branch dependency")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.20' in workflow
+        and 'run-id: 33580258447' in workflow,
+        "workflow must download the exact successful V1.4.20 Actions authority")
+require('5d5fd64c7a9a7789f71aabf5f11d168bd6b5d6aa' in workflow,
+        "V1.4.20 authority commit pin missing")
+require('backup-v1.4.21' not in workflow,
+        "V1.4.21 must not invent a new backup-branch dependency")
 
 # 048 / 049 / 052 / 054 - Brightness remains user LONG intent in AUTO and MANUAL.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -5.0f' in main
@@ -711,8 +716,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 25' in gradle and 'versionName = "1.0-v1.4.20"' in gradle,
-        "V1.4.20 version/build pin missing")
+require('versionCode = 26' in gradle and 'versionName = "1.0-v1.4.21"' in gradle,
+        "V1.4.21 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -846,14 +851,38 @@ mask_disagree,_,_=v1419_recovery_mask(0.97,0.985,0.70,0.70,0.25,1.2,0.0)
 require(mask_disagree < 0.25,
         f"current-pair disagreement must suppress a non-core transition instead of averaging mismatched detail: {mask_disagree}")
 
-# The multiscale transition may smooth a mask only inside LONG damage support; a
+# V1.4.21 chandelier-edge regression. The old coarse/fine Laplacian ownership can
+# synthesize a contour outside both registered center samples when base/detail masks
+# disagree. The coherent-mask compositor must remain a convex interpolation instead.
+def old_split_band(long_center, short_center, long_low, short_low, coarse, fine):
+    return (long_low + (short_low-long_low)*coarse
+            + (long_center-long_low)*(1.0-fine)
+            + (short_center-short_low)*fine)
+old_edge=old_split_band(0.30,0.80,0.70,0.40,0.80,0.20)
+require(old_edge < 0.30,
+        f"chandelier regression fixture must reproduce old invented dark contour: {old_edge}")
+for ownership in [0.0,0.15,0.50,0.85,1.0]:
+    coherent=0.30+(0.80-0.30)*ownership
+    require(0.30-1e-9 <= coherent <= 0.80+1e-9,
+            f"coherent ownership must never leave source endpoint range: {ownership},{coherent}")
+
+# The bilateral ownership mask may smooth only inside LONG damage support; a
 # neighboring SHORT region can never leak across an intact LONG edge.
-center_mask=0.8; neighbor_mask=1.0; damage_support=0.35
+center_mask=0.8; neighbor_mask=1.0; core_mask=0.0; damage_support=0.35
 blurred=min(damage_support,(center_mask*4.0+neighbor_mask)/5.0)
-coarse=max(0.0,blurred)
-fine=max(0.0,min(damage_support,0.5*center_mask+0.5*blurred))
-require(coarse <= damage_support + 1e-9 and fine <= damage_support + 1e-9,
-        f"one-sided damage support must bound both coarse/fine source authority: {coarse},{fine}")
+ownership=max(core_mask,blurred)
+require(ownership <= damage_support + 1e-9,
+        f"one-sided damage support must bound coherent source authority: {ownership}")
+
+# Validity-aware guide must use calibrated SHORT where LONG has actually lost edge
+# structure while remaining LONG-owned in ordinary scene body.
+def validity_guide(long_luma, short_luma, clipped_core, shoulder_need, short_usable):
+    short_authority=max(clipped_core, smoothstep_local(0.20,0.85,shoulder_need*short_usable))
+    return long_luma+(short_luma-long_luma)*short_authority
+require(abs(validity_guide(1.0,0.62,1.0,1.0,1.0)-0.62) < 1e-9,
+        "fully clipped LONG must hand edge-guide authority to SHORT")
+require(abs(validity_guide(0.25,0.27,0.0,0.0,1.0)-0.25) < 1e-9,
+        "ordinary valid LONG must remain the edge guide")
 
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
@@ -915,4 +944,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.20 REGRESSION PASS: GPU-tiled shared-shader still fusion, parallel DNG/source I/O, SHORT-only modulation rejection, pair-rate visible photometric smoothing, adaptive scene-body LONG independent of bootstrap AE, scene-learned five-knot SHORT response, current-pair luma fusion without 5-Hz gating, one-sided edge-guided Laplacian transition, full clipped-core SHORT authority, protected chroma trust, exact exposure-generation pairs, adaptive AUTO+MANUAL HDR, LONG-owned Brightness -5..+2EV, stable signing, frozen capture pair, orientation/FOV/cadence/sRGB protections")
+print("V1.4.21 REGRESSION PASS: GPU-tiled shared-shader still fusion, parallel DNG/source I/O, SHORT-only modulation rejection, pair-rate visible photometric smoothing, adaptive scene-body LONG independent of bootstrap AE, scene-learned five-knot SHORT response, current-pair luma fusion without 5-Hz gating, validity-guided coherent ownership transition, full clipped-core SHORT authority, protected chroma trust, exact exposure-generation pairs, adaptive AUTO+MANUAL HDR, LONG-owned Brightness -5..+2EV, stable signing, frozen capture pair, orientation/FOV/cadence/sRGB protections")

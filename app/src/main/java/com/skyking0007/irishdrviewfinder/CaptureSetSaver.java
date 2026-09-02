@@ -269,7 +269,7 @@ final class CaptureSetSaver {
                 JSONObject root = new JSONObject();
                 root.put("captureId", captureId);
                 root.put("cameraId", cameraId);
-                root.put("fusion", "V1.4.20 GPU-tiled shared-shader scene-learned edge-safe HDR fusion");
+                root.put("fusion", "V1.4.21 GPU-tiled validity-guided coherent-mask HDR fusion");
                 root.put("short", resultJson(shortResult));
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));

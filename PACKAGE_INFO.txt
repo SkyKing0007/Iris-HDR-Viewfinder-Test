@@ -1,40 +1,40 @@
-Iris HDR Viewfinder Test V1.4.20
+Iris HDR Viewfinder Test V1.4.21
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.4.19 GitHub Actions compiled candidate/artifact
-- Commit: 3c468603769cebf53c9bdfbb37f91ea852a2a133
-- Tree: 2ff39475cfd25dc0b8489b3ea749658c3994ec68
-- Actions run: 33573631526
-- Job: 100072727381
-- Artifact ID: 9825850668
-- Artifact digest: sha256:4ea44773c5e717a78c4ee107c82d40336aa1329cac6fae14eb16617b9fd58012
-- APK SHA-256: 7ab7d6b249389e211a52fbd9a6c3271b842ea2a6c50c4a7910d5b62d26a16436
-- Source-candidate TAR SHA-256: 85c06178adbbb627b2c1b9bf0a4221a49e6e3d91043e173cd323f2368d2a7eaf
-- Runtime manifest SHA-256: c86946da0d4f53a39eb0eb19fdb888a7470de60a0395ea2ab22f318be5af1605
-- Repository manifest SHA-256: d53dd50dded07beb583792203b1ca0e0781f31769123f911fa559339a85fbb8e
-- Regressions SHA-256: 675a98481de687d1af83daabadea26f1bd5f4815816609d3445fe7440b31df89
+- Exact successful V1.4.20 GitHub Actions compiled candidate/artifact
+- Commit: 5d5fd64c7a9a7789f71aabf5f11d168bd6b5d6aa
+- Tree: e208289842ea762d6d51ed698d7c809c536decbb
+- Actions run: 33580258447
+- Job: 100092854252
+- Artifact ID: 9828155218
+- Artifact digest: sha256:4b1b56c598c76302fd9d716b8a02bc2213a2ab9e84bf1e53685be496d5a2f635
+- APK SHA-256: 1ba65c055e5cd39849ac3b1dff28669fe15cc75796d3c541fc7580c2ef8190d0
+- Source-candidate TAR SHA-256: 1fceb6f4af3fd476256df6f2b9bf378b2c962a337fb1db559f627870bd95e5ab
+- Runtime manifest SHA-256: 0f62bf059e36a43b44ef8159d1c970d418e75448876e1e2801b134525a42848b
+- Repository manifest SHA-256: 9f377a25959acf819b914c4b6ad4f1a0089c88cc3063c7fc2357b312214e5377
+- Regressions SHA-256: 1d138a6001048cdab29764c65470742a0ab8280595f63276f82775a5b315c828
 
 Verification-mechanics authority:
-- Exact successful V1.4.19 Actions compiler/build/invariance sequence.
-- V1.4.20 preserves the same step order and real GLSL, real Java, full assemble, signing and post-build invariance mechanics.
-- Authority download/pins, version, strict allowlists and V1.4.20 regressions advance to V1.4.19 -> V1.4.20.
-- Per project decision, no new backup branch is created; rollback uses exact V1.4.19 artifact hashes plus deterministic forward/rollback patches.
+- Exact successful V1.4.20 Actions compiler/build/invariance sequence.
+- V1.4.21 preserves the same step order and real GLSL, real Java, full assemble, signing and post-build invariance mechanics.
+- Authority download/pins, version, strict allowlists and V1.4.21 regressions advance to V1.4.20 -> V1.4.21.
+- Per project decision, no new backup branch is created; rollback uses exact V1.4.20 artifact hashes plus deterministic forward/rollback patches.
 
-V1.4.20 runtime changed-file allowlist: exactly four files:
+V1.4.21 runtime changed-file allowlist: exactly two files:
 - app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java (metadata version string only)
 
-Runtime files explicitly unchanged/protected from V1.4.19:
+Runtime files explicitly unchanged/protected from V1.4.20:
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/fullscreen.vert
 - app/src/main/assets/shaders/oes_to_rgb.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
 
@@ -50,36 +50,30 @@ Documentation/hash pins:
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-V1.4.20 GPU-first still-fusion transition:
-- The full-resolution 4096x3072 HDR image math is removed from the Java per-pixel fusion loop.
-- JpegFusion keeps only JPEG decode/orientation normalization, sparse scene-response sampling, GPU orchestration/readback packing and JPEG encoding.
-- The exact live fullscreen.vert + hdr_display.frag assets are compiled in an independent offscreen GLES3 pbuffer context for still fusion.
-- Full-resolution processing is tiled at 512 output rows with the same bounded 1..4-pixel fusion radius/halo, preventing large permanent full-frame GPU allocations.
-- Tiled reliability sampling is mapped back to full-frame 32x24 coordinates so live chroma/quality trust retains the same spatial meaning.
-- DNG/source-JPEG I/O runs on two I/O workers while a dedicated fusion worker starts immediately once matched SHORT/LONG JPEG bytes/results exist.
-- Minimal timing markers permanently expose DNG_SAVE, SOURCE_JPEG_SAVE, FUSION_DECODE, FUSION_CURVE, FUSION_GPU, FUSION_ENCODE, FUSION_WRITE and FUSION_PIPELINE.
+V1.4.21 validity-guided coherent-mask boundary correction:
+- V1.4.20 and V1.4.21 use the same GPU still/live fusion architecture and the same full clipped-core SHORT recovery contract.
+- The device chandelier sample showed good SHORT/LONG registration (~0.26px residual) but abnormal cyan/bright contours existed only in FUSED, proving fusion-boundary synthesis rather than gross misalignment.
+- V1.4.20 used different coarse and fine source-ownership masks in a one-level Laplacian reconstruction. When those masks disagreed, the reconstructed edge could combine one exposure's low-frequency base with the other exposure's detail and leave the range represented by either center sample.
+- V1.4.21 removes that split ownership. One edge-aware ownership mask controls the entire center-pixel reconstruction and final RGB is a convex mix between LONG and recovered SHORT.
+- The ownership mask remains one-sided inside LONG damage support; neighboring SHORT authority cannot spill across intact dark LONG structure.
+- Edge guidance is validity-aware: LONG luminance owns the guide while LONG retains information, then calibrated SHORT luminance takes over as LONG enters true clipping/strong damaged shoulder.
+- True recoverable clipped cores retain complete SHORT authority; this correction changes only the transition perimeter, not highlight completeness.
+- Existing scene-learned response, pair-rate temporal radiance smoothing, SHORT-only PWM rejection, chroma protection, exact-generation pairing and LONG/SHORT exposure policy are unchanged.
 
-V1.4.20 live temporal-radiance stabilization:
-- The five-knot response learner now writes a target curve; visible fusion follows that target smoothly at render/pair cadence instead of stepping directly at the 200ms statistics cadence.
-- When LONG is locally stable but raw exposure-normalized SHORT changes by >=0.12EV, that sample is treated as SHORT-only/PWM/motion modulation and is excluded from global response-curve learning.
-- Coherent LONG+SHORT scene changes remain eligible for response learning.
-- Exposure-generation changes get a bounded faster visible convergence window; steady-state response changes remain smooth.
-- Existing LONG/SHORT exposure policy, exact-generation pairing, full clipped-core SHORT authority, one-sided edge protection and anti-pink chroma separation are preserved.
-
-Device regression evidence from V1.4.19:
-- Fixed MANUAL SAFE screenshots held SHORT/LONG/FPS/ISO/Brightness constant while the plant-light fusion region changed by about 0.38EV, proving the remaining pulse was inside fusion/radiometric learning rather than exposure control.
-- Capture log showed still inputs acquired in about 0.6-0.7s but CAPTURE_DONE at about 28-29s; the old single-thread CPU/I/O architecture owned the post-capture delay.
-- V1.4.20 specifically removes both mechanisms without scene-specific office/plant tuning.
+Permanent V1.4.20 chandelier regression:
+- The actual source pair was well registered, so a visible perimeter present only in FUSED is a fusion-math failure.
+- The regression suite reproduces the old split-band condition that creates a value outside both center endpoints and requires the new coherent compositor to stay within source endpoint bounds.
+- Fully clipped LONG must hand guide authority to calibrated SHORT; ordinary scene body must remain LONG-guided.
 
 Patch/rollback protection:
-- No new backup branch is created for V1.4.20.
-- Exact V1.4.19 authority hashes plus deterministic full-index V1.4.19->V1.4.20 forward and V1.4.20->V1.4.19 rollback patches are required at core.abbrev 7/12/40 with fuzz=0 replay.
+- No new backup branch is created for V1.4.21.
+- Exact V1.4.20 authority hashes plus deterministic full-index V1.4.20->V1.4.21 forward and V1.4.21->V1.4.20 rollback patches are required at core.abbrev 7/12/40 with fuzz=0 replay.
 
 Stable updates:
 - Reuses repository secret IRIS_TEST_SIGNING_KEY_B64; do not regenerate it.
 - Stable keystore SHA-256: 2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e
 - Signing certificate SHA-256: 53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8
-- V1.4.20 versionCode 25 should install as a normal update over successful stable-signed V1.4.19 after successful Actions proof.
+- V1.4.21 versionCode 26 should install as a normal update over successful stable-signed V1.4.20 after successful Actions proof.
 
 Local compiler status before Actions:
 - Pinned real glslangValidator: NOT RUN locally

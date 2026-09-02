@@ -184,7 +184,7 @@ void fusionSample(
     vec3 shortRgb = texture(shortTex, uv).rgb;
     longScene = srgbToLinear(longRgb);
     vec3 shortScene = calibratedShortScene(shortRgb, ratio);
-    guideLuma = luma3(longScene);
+    float longSceneLuma = luma3(longScene);
 
     float shoulderNeed = longHighlightShoulder(longRgb, longScene);
     float clippedCore = longClippedCore(longRgb, longScene);
@@ -214,6 +214,15 @@ void fusionSample(
         coreMask,
         smoothstep(0.02, 0.50, shoulderNeed * lumaSafe * signalSafe));
 
+    // V1.4.21 validity-aware boundary guide. LONG defines edges while it still
+    // carries scene information. As LONG loses highlight structure, the calibrated
+    // SHORT exposure takes over the guide so clipped glass/filament boundaries are
+    // not flattened by LONG and then crossed by the recovery-mask blur.
+    float shortGuideAuthority = max(
+        clippedCore,
+        smoothstep(0.20, 0.85, shoulderNeed * shortUsable));
+    guideLuma = mix(longSceneLuma, shortSceneLuma, shortGuideAuthority);
+
     vec2 reliabilityUv = clamp(uv * reliabilityUvScale + reliabilityUvOffset, vec2(0.0), vec2(1.0));
     vec2 temporalTrust = texture(shortReliabilityTex, reliabilityUv).rg;
     float rgbSafe = 1.0 - smoothstep(0.955, 0.985, shortPeak);
@@ -233,7 +242,6 @@ void fusionSample(
 
 void addFusionNeighbor(
         vec2 uv, float ratio, float centerGuide,
-        inout vec3 longAccum, inout vec3 shortAccum,
         inout float maskAccum, inout float weightAccum) {
     vec3 longNeighbor;
     vec3 shortNeighbor;
@@ -246,8 +254,6 @@ void addFusionNeighbor(
         longNeighbor, shortNeighbor, maskNeighbor, coreNeighbor,
         damageNeighbor, guideNeighbor);
     float weight = guideEdgeWeight(centerGuide, guideNeighbor);
-    longAccum += longNeighbor * weight;
-    shortAccum += shortNeighbor * weight;
     maskAccum += maskNeighbor * weight;
     weightAccum += weight;
 }
@@ -263,40 +269,30 @@ vec3 multiscaleHighlightRecovery(vec2 uv, float ratio) {
         uv, ratio, longCenter, shortCenter,
         centerMask, coreMask, damageSupport, centerGuide);
 
-    vec3 longAccum = longCenter * 4.0;
-    vec3 shortAccum = shortCenter * 4.0;
+    // V1.4.21 uses one coherent source-ownership field for every spatial band.
+    // V1.4.20 mixed a broad low-frequency mask with a different fine-detail mask,
+    // which could synthesize SHORT base tone with LONG detail (or the reverse) and
+    // create cyan/bright contours that existed in neither registered exposure.
+    // The new bilateral mask may soften only inside LONG damage support, while the
+    // final RGB remains a convex interpolation of the actual center samples.
     float maskAccum = centerMask * 4.0;
     float weightAccum = 4.0;
     addFusionNeighbor(
         uv + vec2(fusionTexelStep.x, 0.0), ratio, centerGuide,
-        longAccum, shortAccum, maskAccum, weightAccum);
+        maskAccum, weightAccum);
     addFusionNeighbor(
         uv - vec2(fusionTexelStep.x, 0.0), ratio, centerGuide,
-        longAccum, shortAccum, maskAccum, weightAccum);
+        maskAccum, weightAccum);
     addFusionNeighbor(
         uv + vec2(0.0, fusionTexelStep.y), ratio, centerGuide,
-        longAccum, shortAccum, maskAccum, weightAccum);
+        maskAccum, weightAccum);
     addFusionNeighbor(
         uv - vec2(0.0, fusionTexelStep.y), ratio, centerGuide,
-        longAccum, shortAccum, maskAccum, weightAccum);
+        maskAccum, weightAccum);
 
-    vec3 longLow = longAccum / max(weightAccum, 0.0001);
-    vec3 shortLow = shortAccum / max(weightAccum, 0.0001);
     float blurredMask = min(damageSupport, maskAccum / max(weightAccum, 0.0001));
-    float coarseMask = max(coreMask, blurredMask);
-    // Finest-band ownership stays closer to the current-pixel decision than the
-    // low-frequency blend. This is the Gaussian-mask/Laplacian-image relationship
-    // without a second expensive neighbor ring in the live mobile shader.
-    float fineMask = max(
-        coreMask,
-        min(damageSupport, mix(centerMask, blurredMask, 0.50)));
-
-    // One-level Laplacian fusion: exposure/color differences live in the smooth
-    // low-frequency band, while edge/detail ownership follows the tighter mask.
-    // This prevents ringing/contours where two processed exposures meet.
-    vec3 lowBand = mix(longLow, shortLow, coarseMask);
-    vec3 detailBand = mix(longCenter - longLow, shortCenter - shortLow, fineMask);
-    return max(lowBand + detailBand, vec3(0.0));
+    float ownershipMask = clamp(max(coreMask, blurredMask), 0.0, 1.0);
+    return mix(longCenter, shortCenter, ownershipMask);
 }
 
 void main() {
