@@ -1,41 +1,42 @@
-Iris HDR Viewfinder Test V1.4.18
+Iris HDR Viewfinder Test V1.4.19
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.4.17 GitHub Actions compiled candidate/artifact
-- Commit: b2c783c09e8e0a9050141e00c3bf23ee1617119e
-- Tree: b3a8e21f1ee06d296e9338fb6138a16083f08633
-- Actions run: 33556328139
-- Job: 100017924568
-- Artifact ID: 9819495519
-- Artifact digest: sha256:e70a5210183836b76e849fd2dc2a1826e26e2a7616f7bb8ceea4f70741aeb55a
-- APK SHA-256: dd72e93f6e51a9e66915edb150d0520b7b4637f602e40d10bf7551d2d2cc4d81
-- Source-candidate TAR SHA-256: cb2bfbb5ba6346603008347d36e28b1b4729923f092f2df6826ab43013d5a452
-- Runtime manifest SHA-256: 0b11b40e11099d0b7356108e359f0cc351ba06e0c8bb2772660a9f9964c4010d
-- Repository manifest SHA-256: 2242e89f1fcb93ac2e4f30d0100983654d739ec250f85956995f6efad7f52c03
-- Regressions SHA-256: 08fb5145239775ba087f42ac0eaf2539b5d17ba8391b7f81370a54b9f6f60af6
+- Exact successful V1.4.18 GitHub Actions compiled candidate/artifact
+- Commit: 7aa84fb57b96b0c940f8ffb56feeaa1abed74e73
+- Tree: 7537c326a5836d2b56abcfb54cbd3e06f3265e6c
+- Actions run: 33561081215
+- Job: 100033445971
+- Artifact ID: 9821318334
+- Artifact digest: sha256:a06252ecb763bede743db96f7dc4e0c52f2a8d4f131bb38f907bc1383004e5b6
+- APK SHA-256: 2a92601bcfcba219c5f4e627221a7e7b26652ed2dde95122d925ba589573a089
+- Source-candidate TAR SHA-256: 5257c9bf34feff6f963f568a2ed41b5ccdb1a024819792be5b0c2a3ff984569b
+- Runtime manifest SHA-256: d0778130857f37037b911499d3a853d92be7cb1c4f72852191d81cf21b970131
+- Repository manifest SHA-256: f8bac0790c4159293ca2f17278173f2319141ef0a51c046aadc0810105053c0b
+- Regressions SHA-256: f7357ffd8807c0c058ae0a39cc271f63b7d0028df4b2f421cc93bbf50006d313
 
 Verification-mechanics authority:
-- Exact successful V1.4.17 V1.1 Actions 16-step compiler/build/invariance sequence.
-- V1.4.18 retains the same step order and signing/compiler/build mechanics.
-- The V1.4.17 V1.1 second-commit correction lineage guard is intentionally retired because V1.4.18 is a direct child of the successful V1.4.17 authority.
-- V1.4.18 restores the normal direct-parent authority proof and adds the required architectural backup-branch proof.
-- Real GLSL/Java/full assemble proof remains GitHub Actions authority.
+- Exact successful V1.4.18 Actions 16-step compiler/build/invariance sequence.
+- V1.4.19 preserves the same compiler, signing, real-GLSL, real-Java, full-assemble and post-build invariance order.
+- Authority download/pins, version, strict changed-file allowlist and applicable regression checks advance to V1.4.18 -> V1.4.19.
+- The V1.4.18-specific pre-transition backup guard is intentionally absent; no new backup branch is required for V1.4.19 per project decision.
 
-Architectural backup requirement:
-- Required before V1.4.18 source commit because fusion ownership/live-to-still trust propagation changes are high-risk runtime architecture.
-- Required branch: backup-v1.4.17-pre-full-core-fusion
-- Required commit: b2c783c09e8e0a9050141e00c3bf23ee1617119e
-- Automated branch creation was attempted but GitHub integration returned HTTP 403; create it in GitHub before committing V1.4.18.
-
-V1.4.18 runtime changed-file allowlist: exactly six files:
+V1.4.19 runtime changed-file allowlist: exactly three files:
 - app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+
+Runtime files explicitly unchanged/protected from V1.4.18:
+- app/src/main/AndroidManifest.xml
+- app/src/main/assets/shaders/copy_2d.frag
+- app/src/main/assets/shaders/fullscreen.vert
+- app/src/main/assets/shaders/oes_to_rgb.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
 
 Infrastructure changed-file list:
 - .github/workflows/build.yml
@@ -49,28 +50,36 @@ Documentation/hash pins:
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-V1.4.18 fusion architecture:
-- Exposure generation/policy is inherited byte-for-behavior from V1.4.17; no scene-exposure target, bracket target, flicker or 60-fps exposure math is retuned for the office sample.
-- FUSED starts from LONG and keeps LONG untouched outside actual highlight need.
-- A normalized clipped-core detector identifies where LONG has genuinely lost information.
-- If current SHORT remains signal-safe/unclipped, clipped-core detail authority reaches 1.0; slower luma history may shape only the shoulder, never attenuate the true core.
-- The outer highlight shoulder remains a soft blend to prevent hard seams.
-- Local 32x24 luma trust uses graded attack/release for the soft shoulder instead of one-sample binary reset; true clipped-core luma/detail is driven by current SHORT usability and cannot blink from the 5-Hz history state.
-- Chroma trust releases faster than luma/detail trust so unstable processed-ISP color is suppressed first.
-- At shutter time the current two-channel live trust field is frozen and propagated through CameraController -> CaptureSetSaver -> JpegFusion.
-- Full-resolution JPEG fusion bilinearly samples the frozen field for shoulder/chroma confidence and uses the same clipped-core/soft-shoulder contract; the captured SHORT itself owns clipped-core luma permission so stale preview history cannot suppress recoverable still detail.
-- Questionable SHORT color may never veto good SHORT detail; LONG chromaticity is retained at SHORT-derived recovered luminance when chroma trust is lower.
-- Neutral clipped LONG highlights retain anti-pink/anti-orange protection.
-- If SHORT is itself clipped/dark/persistently unreliable, recovery falls back locally to LONG.
-- No prior preview frame contributes image pixels; history affects only the small reliability field.
+V1.4.19 scene-general fusion correction:
+- V1.4.18 LONG/SHORT exposure policy and exact-generation pairing remain byte-identical.
+- The live and saved fusion paths replace scalar-only visible SHORT normalization with the same five-knot scene-learned monotonic SHORT->LONG response over valid unsaturated overlap.
+- Live response updates are bounded to 0.06 EV per 200ms statistics update so response learning converges rather than flashes.
+- Current complete SHORT/LONG pair owns visible luma core and shoulder decisions; the 32x24 reliability R/luma history no longer gates visible fusion at 5 Hz.
+- Temporal reliability remains for chroma protection and controller quality evidence.
+- Recoverable true LONG-clipped core retains full current-SHORT detail authority.
+- The transition band uses one-sided edge-guided one-level Gaussian-mask/Laplacian-image fusion: low-frequency exposure/color differences blend smoothly while fine-detail ownership stays tighter to the current-pixel decision.
+- LONG damage support prevents neighboring SHORT authority from bleeding across intact dark edges such as branches, text, foliage boundaries or structural edges.
+- Current-pair SHORT/LONG disagreement suppresses non-core shoulder mixing after photometric mapping.
+- Questionable SHORT chroma retains LONG chromaticity at recovered SHORT luminance; neutral anti-pink/anti-orange protection is preserved.
+- No office exposure/color value defines the response or mask. All decisions remain normalized scene/signal/clipping/overlap driven.
 
-Representative supplied office-pair replay:
-- V1.4.17 average recovery authority inside the strongly clipped LONG core was about 0.54.
-- V1.4.18 reaches effectively 1.0 authority across the subset of that clipped core where SHORT is actually usable.
-- This replay is regression evidence only; the algorithm itself uses normalized scene-independent clipping/signal/trust criteria.
+Representative supplied V1.4.18 office-pair replay:
+- Static source registration is sub-pixel, so the observed boundary contour/ringing was diagnosed as source-switch/photometric-boundary behavior rather than gross alignment.
+- The V1.4.19 prototype reduced the measured artificial high-frequency fusion-boundary overshoot rate by about 37% versus the actual V1.4.18 FUSED JPEG while retaining complete usable clipped-core authority.
+- This sample is regression evidence only; no office-specific exposure or color constant is used by the algorithm.
+
+Patch/rollback protection:
+- No new backup branch is created for V1.4.19.
+- Exact V1.4.18 authority hashes plus deterministic full-index V1.4.18->V1.4.19 forward and V1.4.19->V1.4.18 rollback patches are required at core.abbrev 7/12/40 with fuzz=0 replay.
 
 Stable updates:
 - Reuses repository secret IRIS_TEST_SIGNING_KEY_B64; do not regenerate it.
 - Stable keystore SHA-256: 2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e
 - Signing certificate SHA-256: 53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8
-- V1.4.18 versionCode 23 should install as a normal update over successful stable-signed V1.4.17 after successful Actions proof.
+- V1.4.19 versionCode 24 should install as a normal update over successful stable-signed V1.4.18 after successful Actions proof.
+
+Local compiler status before Actions:
+- Pinned real glslangValidator: NOT RUN locally
+- Real project Java compiler: NOT RUN locally
+- Full :app:assembleDebug: NOT RUN locally
+- Therefore this package may be called PREPARED / UPLOAD-READY only until Actions succeeds.

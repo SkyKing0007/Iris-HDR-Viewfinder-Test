@@ -12,7 +12,9 @@ uniform int haveNormal;
 uniform int haveShort;
 uniform int haveLong;
 uniform float exposureRatio;
-uniform float shortCalibration;
+uniform vec4 shortPhotoScaleA;
+uniform float shortPhotoScaleB;
+uniform vec2 fusionTexelStep;
 uniform vec2 fullFitScale;
 uniform vec2 splitFitScale;
 
@@ -134,44 +136,85 @@ vec3 mapRecoveredHighlight(vec3 recoveredScene, float ratio) {
     return recoveredScene * (mappedPeak / scenePeak);
 }
 
-vec3 maskedHighlightRecovery(
-        vec2 uv, vec3 longRgb, vec3 shortRgb, vec3 longScene, vec3 shortScene,
-        float ratio) {
+float shortPhotoScaleForLuma(float normalizedLuma) {
+    const float k0 = 0.020;
+    const float k1 = 0.060;
+    const float k2 = 0.150;
+    const float k3 = 0.350;
+    const float k4 = 0.700;
+    float value = max(normalizedLuma, 0.00001);
+    if (value <= k0) return shortPhotoScaleA.x;
+    if (value <= k1) {
+        float t = clamp(log(value / k0) / log(k1 / k0), 0.0, 1.0);
+        return mix(shortPhotoScaleA.x, shortPhotoScaleA.y, t);
+    }
+    if (value <= k2) {
+        float t = clamp(log(value / k1) / log(k2 / k1), 0.0, 1.0);
+        return mix(shortPhotoScaleA.y, shortPhotoScaleA.z, t);
+    }
+    if (value <= k3) {
+        float t = clamp(log(value / k2) / log(k3 / k2), 0.0, 1.0);
+        return mix(shortPhotoScaleA.z, shortPhotoScaleA.w, t);
+    }
+    if (value <= k4) {
+        float t = clamp(log(value / k3) / log(k4 / k3), 0.0, 1.0);
+        return mix(shortPhotoScaleA.w, shortPhotoScaleB, t);
+    }
+    return shortPhotoScaleB;
+}
+
+vec3 calibratedShortScene(vec3 shortRgb, float ratio) {
+    vec3 normalizedScene = srgbToLinear(shortRgb) * ratio;
+    return normalizedScene * shortPhotoScaleForLuma(luma3(normalizedScene));
+}
+
+float guideEdgeWeight(float centerLuma, float neighborLuma) {
+    float deltaEv = abs(log2(max(neighborLuma, 0.0001) / max(centerLuma, 0.0001)));
+    return 1.0 - smoothstep(0.18, 0.70, deltaEv);
+}
+
+void fusionSample(
+        vec2 uv, float ratio,
+        out vec3 longScene, out vec3 recoveredShort,
+        out float rawMask, out float coreMask,
+        out float damageSupport, out float guideLuma) {
+    vec3 longRgb = texture(longTex, uv).rgb;
+    vec3 shortRgb = texture(shortTex, uv).rgb;
+    longScene = srgbToLinear(longRgb);
+    vec3 shortScene = calibratedShortScene(shortRgb, ratio);
+    guideLuma = luma3(longScene);
+
     float shoulderNeed = longHighlightShoulder(longRgb, longScene);
     float clippedCore = longClippedCore(longRgb, longScene);
     float shortEncodedLuma = luma3(shortRgb);
     float shortSceneLuma = luma3(shortScene);
-    float longSceneLuma = luma3(longScene);
     float shortPeak = max3(shortRgb);
     float shortSecond = second3(shortRgb);
-
-    // R=luminance/detail trust, G=chroma trust. The 32x24 map is bilinear filtered,
-    // so one unstable light does not disable a stable window and mask edges are soft.
-    vec2 temporalTrust = texture(shortReliabilityTex, uv).rg;
     float lumaSafe = 1.0 - smoothstep(0.975, 0.997, shortSecond);
     float signalSafe = smoothstep(0.008, 0.025, shortEncodedLuma);
+    float shortUsable = min(lumaSafe, signalSafe);
+    float corePermission = smoothstep(0.25, 0.55, shortUsable);
+    coreMask = clippedCore * corePermission;
+
     float radianceEvidence = smoothstep(
         1.01, 1.10,
         max3(shortScene) / max(max3(longScene), 0.0005));
-    // A truly clipped LONG core contains no remaining source detail to protect.
-    // Current SHORT signal/saturation safety therefore owns core luma/detail permission
-    // directly; coarse 5-Hz history may shape only the shoulder and chroma. This keeps
-    // recoverable core authority complete and prevents temporal trust from pulsing it.
-    float shortUsable = min(lumaSafe, signalSafe);
-    float corePermission = smoothstep(0.25, 0.55, shortUsable);
-    float coreMask = clippedCore * corePermission;
-    float shoulderRaw = shoulderNeed * lumaSafe * signalSafe
-        * radianceEvidence * temporalTrust.r;
-    float shoulderMask = smoothstep(0.04, 0.58, shoulderRaw) * (1.0 - clippedCore);
-    float recoveryMask = max(coreMask, shoulderMask);
-
-    // Color trust is intentionally stricter than luminance trust. If SHORT color is
-    // questionable, recover its brightness/detail with LONG chromaticity instead of
-    // importing pink/orange modulation. Neutral clipped LONG remains neutral.
-    float rgbSafe = 1.0 - smoothstep(0.955, 0.985, shortPeak);
     float agreement = validChannelAgreement(longRgb, longScene, shortScene);
-    float colorTrust = clamp(temporalTrust.g * rgbSafe * agreement, 0.0, 1.0);
+    // Visible luma fusion is owned by this exact complete SHORT/LONG pair. The
+    // 5-Hz history no longer gates luma, eliminating its remaining periodic pulse.
+    float shoulderRaw = shoulderNeed * lumaSafe * signalSafe
+        * radianceEvidence * agreement;
+    float shoulderMask = smoothstep(0.04, 0.58, shoulderRaw) * (1.0 - clippedCore);
+    rawMask = max(coreMask, shoulderMask);
+    // One-sided protection: multiscale mask filtering may smooth only inside a
+    // LONG-damaged region; it cannot leak SHORT across an intact dark edge.
+    damageSupport = max(
+        coreMask,
+        smoothstep(0.02, 0.50, shoulderNeed * lumaSafe * signalSafe));
 
+    vec2 temporalTrust = texture(shortReliabilityTex, uv).rg;
+    float rgbSafe = 1.0 - smoothstep(0.955, 0.985, shortPeak);
+    float colorTrust = clamp(temporalTrust.g * rgbSafe * agreement, 0.0, 1.0);
     float longSpread = max3(longRgb) - min3(longRgb);
     float shortSpread = max3(shortRgb) - min3(shortRgb);
     float neutralLongClip = (1.0 - smoothstep(0.015, 0.060, longSpread))
@@ -180,10 +223,77 @@ vec3 maskedHighlightRecovery(
     colorTrust *= 1.0 - neutralLongClip * mildShortTint;
 
     vec3 longChromaticityAtShortLuma = longScene
-        * (shortSceneLuma / max(longSceneLuma, 0.0005));
+        * (shortSceneLuma / max(guideLuma, 0.0005));
     vec3 trustedShort = mix(longChromaticityAtShortLuma, shortScene, colorTrust);
-    vec3 mappedShort = mapRecoveredHighlight(trustedShort, ratio);
-    return mix(longScene, mappedShort, recoveryMask);
+    recoveredShort = mapRecoveredHighlight(trustedShort, ratio);
+}
+
+void addFusionNeighbor(
+        vec2 uv, float ratio, float centerGuide,
+        inout vec3 longAccum, inout vec3 shortAccum,
+        inout float maskAccum, inout float weightAccum) {
+    vec3 longNeighbor;
+    vec3 shortNeighbor;
+    float maskNeighbor;
+    float coreNeighbor;
+    float damageNeighbor;
+    float guideNeighbor;
+    fusionSample(
+        clamp(uv, vec2(0.0), vec2(1.0)), ratio,
+        longNeighbor, shortNeighbor, maskNeighbor, coreNeighbor,
+        damageNeighbor, guideNeighbor);
+    float weight = guideEdgeWeight(centerGuide, guideNeighbor);
+    longAccum += longNeighbor * weight;
+    shortAccum += shortNeighbor * weight;
+    maskAccum += maskNeighbor * weight;
+    weightAccum += weight;
+}
+
+vec3 multiscaleHighlightRecovery(vec2 uv, float ratio) {
+    vec3 longCenter;
+    vec3 shortCenter;
+    float centerMask;
+    float coreMask;
+    float damageSupport;
+    float centerGuide;
+    fusionSample(
+        uv, ratio, longCenter, shortCenter,
+        centerMask, coreMask, damageSupport, centerGuide);
+
+    vec3 longAccum = longCenter * 4.0;
+    vec3 shortAccum = shortCenter * 4.0;
+    float maskAccum = centerMask * 4.0;
+    float weightAccum = 4.0;
+    addFusionNeighbor(
+        uv + vec2(fusionTexelStep.x, 0.0), ratio, centerGuide,
+        longAccum, shortAccum, maskAccum, weightAccum);
+    addFusionNeighbor(
+        uv - vec2(fusionTexelStep.x, 0.0), ratio, centerGuide,
+        longAccum, shortAccum, maskAccum, weightAccum);
+    addFusionNeighbor(
+        uv + vec2(0.0, fusionTexelStep.y), ratio, centerGuide,
+        longAccum, shortAccum, maskAccum, weightAccum);
+    addFusionNeighbor(
+        uv - vec2(0.0, fusionTexelStep.y), ratio, centerGuide,
+        longAccum, shortAccum, maskAccum, weightAccum);
+
+    vec3 longLow = longAccum / max(weightAccum, 0.0001);
+    vec3 shortLow = shortAccum / max(weightAccum, 0.0001);
+    float blurredMask = min(damageSupport, maskAccum / max(weightAccum, 0.0001));
+    float coarseMask = max(coreMask, blurredMask);
+    // Finest-band ownership stays closer to the current-pixel decision than the
+    // low-frequency blend. This is the Gaussian-mask/Laplacian-image relationship
+    // without a second expensive neighbor ring in the live mobile shader.
+    float fineMask = max(
+        coreMask,
+        min(damageSupport, mix(centerMask, blurredMask, 0.50)));
+
+    // One-level Laplacian fusion: exposure/color differences live in the smooth
+    // low-frequency band, while edge/detail ownership follows the tighter mask.
+    // This prevents ringing/contours where two processed exposures meet.
+    vec3 lowBand = mix(longLow, shortLow, coarseMask);
+    vec3 detailBand = mix(longCenter - longLow, shortCenter - shortLow, fineMask);
+    return max(lowBand + detailBand, vec3(0.0));
 }
 
 void main() {
@@ -224,13 +334,7 @@ void main() {
     }
 
     float ratio = clamp(exposureRatio, 1.0, 65536.0);
-    vec3 shortRgb = texture(shortTex, uv).rgb;
-    vec3 longRgb = texture(longTex, uv).rgb;
-    vec3 shortScene = srgbToLinear(shortRgb) * ratio * shortCalibration;
-    vec3 longScene = srgbToLinear(longRgb);
-
-    vec3 displayLinear = maskedHighlightRecovery(
-        uv, longRgb, shortRgb, longScene, shortScene, ratio);
+    vec3 displayLinear = multiscaleHighlightRecovery(uv, ratio);
     vec3 displayRgb = linearToSrgb(displayLinear);
     outColor = vec4(clamp(displayRgb, 0.0, 1.0), 1.0);
 }

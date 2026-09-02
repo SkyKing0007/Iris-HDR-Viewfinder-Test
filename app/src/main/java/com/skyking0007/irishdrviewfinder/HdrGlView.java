@@ -204,6 +204,15 @@ final class HdrGlView extends GLSurfaceView {
         private static final int LUMA_RELIABILITY_RELEASE = 64;
         private static final int CHROMA_RELIABILITY_ATTACK = 48;
         private static final int CHROMA_RELIABILITY_RELEASE = 96;
+        // V1.4.19 scene-learned processed-response compensation. The exposure ratio
+        // remains physical authority; these five scale knots learn only the smooth
+        // residual ISP/tone response from mutually valid SHORT/LONG overlap.
+        private static final int PHOTO_KNOT_COUNT = 5;
+        private static final float[] PHOTO_LUMA_KNOTS = {0.020f, 0.060f, 0.150f, 0.350f, 0.700f};
+        private static final float PHOTO_SCALE_MIN = 0.60f;
+        private static final float PHOTO_SCALE_MAX = 1.50f;
+        private static final float PHOTO_MAX_UPDATE_EV = 0.06f;
+        private static final int PHOTO_MIN_BIN_SAMPLES = 12;
 
         private final Context context;
         private final FloatBuffer vertexBuffer;
@@ -240,6 +249,7 @@ final class HdrGlView extends GLSurfaceView {
                 .order(ByteOrder.nativeOrder());
         private long lastStatsNs;
         private float shortCalibration = 1.0f;
+        private final float[] shortPhotoScale = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
         private boolean havePreviousStats;
         private final int[] shortLumaReliability = new int[STATS_PIXELS];
         private final int[] shortChromaReliability = new int[STATS_PIXELS];
@@ -344,6 +354,7 @@ final class HdrGlView extends GLSurfaceView {
             lastLongMeta = null;
             lastStatsNs = 0L;
             shortCalibration = 1.0f;
+            Arrays.fill(shortPhotoScale, 1.0f);
             resetShortReliabilityHistory();
             havePreviousStats = false;
             highestExposureGenerationSeen = 0L;
@@ -403,6 +414,7 @@ final class HdrGlView extends GLSurfaceView {
             lastLongMeta = null;
             lastStatsNs = 0L;
             shortCalibration = 1.0f;
+            Arrays.fill(shortPhotoScale, 1.0f);
             resetShortReliabilityHistory();
             havePreviousStats = false;
             highestExposureGenerationSeen = 0L;
@@ -587,9 +599,19 @@ final class HdrGlView extends GLSurfaceView {
                 ratio = (float) Math.max(1.0, Math.min(65_536.0, r));
             }
             GLES30.glUniform1f(GLES30.glGetUniformLocation(displayProgram, "exposureRatio"), ratio);
+            GLES30.glUniform4f(
+                    GLES30.glGetUniformLocation(displayProgram, "shortPhotoScaleA"),
+                    shortPhotoScale[0], shortPhotoScale[1],
+                    shortPhotoScale[2], shortPhotoScale[3]);
             GLES30.glUniform1f(
-                    GLES30.glGetUniformLocation(displayProgram, "shortCalibration"),
-                    shortCalibration);
+                    GLES30.glGetUniformLocation(displayProgram, "shortPhotoScaleB"),
+                    shortPhotoScale[4]);
+            int minDimension = Math.max(1, Math.min(frameWidth, frameHeight));
+            float fusionRadiusPixels = Math.max(1.0f, Math.min(4.0f, Math.round(minDimension / 720.0f)));
+            GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(displayProgram, "fusionTexelStep"),
+                    fusionRadiusPixels / Math.max(1.0f, frameWidth),
+                    fusionRadiusPixels / Math.max(1.0f, frameHeight));
             bindSampler2d(displayProgram, "shortReliabilityTex", shortReliabilityTexture, 3);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
@@ -638,6 +660,8 @@ final class HdrGlView extends GLSurfaceView {
                 FrameMeta shortMeta, FrameMeta longMeta) {
             float[] longLumas = new float[STATS_PIXELS];
             float[] calibrationRatios = new float[STATS_PIXELS];
+            float[] photoRatios = new float[STATS_PIXELS];
+            float[] overlapShortLumas = new float[STATS_PIXELS];
             int overlapCount = 0;
             int longClipped = 0;
             int shortClipped = 0;
@@ -682,8 +706,12 @@ final class HdrGlView extends GLSurfaceView {
                         && sr8 < 0.90f && sg8 < 0.90f && sb8 < 0.90f;
                 float normalizedShortLuma = (float) (shortLuma * ratio);
                 if (validLong && validShort && normalizedShortLuma > 0.015f) {
-                    calibrationRatios[overlapCount++] = clampCalibration(
-                            longLuma / normalizedShortLuma);
+                    float responseRatio = longLuma / normalizedShortLuma;
+                    calibrationRatios[overlapCount] = clampCalibration(responseRatio);
+                    photoRatios[overlapCount] = clampFloat(
+                            responseRatio, PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
+                    overlapShortLumas[overlapCount] = normalizedShortLuma;
+                    overlapCount++;
                 }
             }
 
@@ -693,7 +721,10 @@ final class HdrGlView extends GLSurfaceView {
             float median = percentileSorted(longLumas, 0.50f);
             float p90 = percentileSorted(longLumas, 0.90f);
             float p98 = percentileSorted(longLumas, 0.98f);
-            float calibration = medianPrefix(calibrationRatios, overlapCount, 1.0f);
+            float[] calibrationCopy = Arrays.copyOf(calibrationRatios, overlapCount);
+            float calibration = medianPrefix(calibrationCopy, overlapCount, 1.0f);
+            updateShortPhotoCurve(
+                    overlapShortLumas, photoRatios, overlapCount, calibration);
 
             float[] errors = new float[Math.max(1, overlapCount)];
             int errorCount = 0;
@@ -711,9 +742,15 @@ final class HdrGlView extends GLSurfaceView {
                 float lr = srgbToLinear(lr8);
                 float lg = srgbToLinear(lg8);
                 float lb = srgbToLinear(lb8);
-                float sr = (float) (srgbToLinear(sr8) * ratio * calibration);
-                float sg = (float) (srgbToLinear(sg8) * ratio * calibration);
-                float sb = (float) (srgbToLinear(sb8) * ratio * calibration);
+                float srLinear = srgbToLinear(sr8);
+                float sgLinear = srgbToLinear(sg8);
+                float sbLinear = srgbToLinear(sb8);
+                float shortRawLuma = (float) ((0.2126f * srLinear + 0.7152f * sgLinear
+                        + 0.0722f * sbLinear) * ratio);
+                float photoScale = shortPhotoScaleForLuma(shortRawLuma);
+                float sr = (float) (srLinear * ratio * photoScale);
+                float sg = (float) (sgLinear * ratio * photoScale);
+                float sb = (float) (sbLinear * ratio * photoScale);
                 float ll = 0.2126f * lr + 0.7152f * lg + 0.0722f * lb;
                 float sl = 0.2126f * sr + 0.7152f * sg + 0.0722f * sb;
 
@@ -799,6 +836,92 @@ final class HdrGlView extends GLSurfaceView {
                     shortDark / (float) STATS_PIXELS,
                     calibration, overlapError, overlapCount,
                     shortTemporalReliable, unstableFraction);
+        }
+
+        private void updateShortPhotoCurve(
+                float[] normalizedShortLumas, float[] absoluteRatios,
+                int count, float calibration) {
+            if (count < 24 || calibration <= 0.0001f) return;
+            float[][] bins = new float[PHOTO_KNOT_COUNT][STATS_PIXELS];
+            int[] binCounts = new int[PHOTO_KNOT_COUNT];
+            for (int i = 0; i < count; i++) {
+                int bin = photoBinForLuma(normalizedShortLumas[i]);
+                bins[bin][binCounts[bin]++] = absoluteRatios[i];
+            }
+            float[] target = new float[PHOTO_KNOT_COUNT];
+            for (int bin = 0; bin < PHOTO_KNOT_COUNT; bin++) {
+                if (binCounts[bin] >= PHOTO_MIN_BIN_SAMPLES) {
+                    float absolute = medianPrefix(
+                            bins[bin], binCounts[bin], calibration);
+                    target[bin] = clampFloat(
+                            absolute, PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
+                } else {
+                    target[bin] = clampFloat(calibration, PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
+                }
+            }
+            float[] smoothTarget = target.clone();
+            smoothTarget[0] = clampFloat(
+                    0.75f * target[0] + 0.25f * target[1],
+                    PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
+            for (int bin = 1; bin < PHOTO_KNOT_COUNT - 1; bin++) {
+                smoothTarget[bin] = clampFloat(
+                        0.25f * target[bin - 1] + 0.50f * target[bin]
+                                + 0.25f * target[bin + 1],
+                        PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
+            }
+            smoothTarget[PHOTO_KNOT_COUNT - 1] = clampFloat(
+                    0.25f * target[PHOTO_KNOT_COUNT - 2]
+                            + 0.75f * target[PHOTO_KNOT_COUNT - 1],
+                    PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
+            enforceMonotonicPhotoCurve(smoothTarget);
+            for (int bin = 0; bin < PHOTO_KNOT_COUNT; bin++) {
+                float current = Math.max(0.0001f, shortPhotoScale[bin]);
+                float desired = Math.max(0.0001f, smoothTarget[bin]);
+                float deltaEv = (float) (Math.log(desired / current) / Math.log(2.0));
+                deltaEv = clampFloat(deltaEv, -PHOTO_MAX_UPDATE_EV, PHOTO_MAX_UPDATE_EV);
+                shortPhotoScale[bin] = clampFloat(
+                        (float) (current * Math.pow(2.0, deltaEv)),
+                        PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
+            }
+            enforceMonotonicPhotoCurve(shortPhotoScale);
+        }
+
+        private static void enforceMonotonicPhotoCurve(float[] scale) {
+            for (int bin = 1; bin < PHOTO_KNOT_COUNT; bin++) {
+                float previousOutput = PHOTO_LUMA_KNOTS[bin - 1] * scale[bin - 1];
+                float minimumScale = previousOutput * 1.01f / PHOTO_LUMA_KNOTS[bin];
+                scale[bin] = clampFloat(
+                        Math.max(scale[bin], minimumScale), PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
+            }
+        }
+
+        private static int photoBinForLuma(float luma) {
+            for (int bin = 0; bin < PHOTO_KNOT_COUNT - 1; bin++) {
+                float boundary = (float) Math.sqrt(
+                        PHOTO_LUMA_KNOTS[bin] * PHOTO_LUMA_KNOTS[bin + 1]);
+                if (luma < boundary) return bin;
+            }
+            return PHOTO_KNOT_COUNT - 1;
+        }
+
+        private float shortPhotoScaleForLuma(float normalizedShortLuma) {
+            float luma = Math.max(0.00001f, normalizedShortLuma);
+            if (luma <= PHOTO_LUMA_KNOTS[0]) return shortPhotoScale[0];
+            for (int i = 0; i < PHOTO_KNOT_COUNT - 1; i++) {
+                float low = PHOTO_LUMA_KNOTS[i];
+                float high = PHOTO_LUMA_KNOTS[i + 1];
+                if (luma <= high) {
+                    float t = (float) (Math.log(luma / low) / Math.log(high / low));
+                    return shortPhotoScale[i]
+                            + (shortPhotoScale[i + 1] - shortPhotoScale[i])
+                                    * clampFloat(t, 0.0f, 1.0f);
+                }
+            }
+            return shortPhotoScale[PHOTO_KNOT_COUNT - 1];
+        }
+
+        private static float clampFloat(float value, float low, float high) {
+            return Math.max(low, Math.min(high, value));
         }
 
         private static float srgbToLinear(float value) {
