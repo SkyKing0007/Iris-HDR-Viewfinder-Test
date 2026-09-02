@@ -1,54 +1,19 @@
-Iris HDR Viewfinder Test V1.5.1 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.5.2 - vscode.dev upload
 
-Repository:
-https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
+1. Open https://github.dev/SkyKing0007/Iris-HDR-Viewfinder-Test (or press . from the GitHub repository).
+2. Confirm branch main currently points to successful V1.5.1 commit 50c9bdd2709db67bd466ced1f5a82efa182f97cc.
+3. Upload/replace the complete contents of this FULL-UPLOAD ZIP at repository root.
+4. Do not add APKs, DNGs, JPEGs, build/, .cxx/, __pycache__ or other generated files.
+5. Commit with: V1.5.2 quad-coherent SHORT highlights + stable live HDR
+6. Push main once. The packaged workflow is the authoritative compiler/build proof.
 
-Base requirement:
-main must point exactly to successful V1.5.0 commit 4b1753c7e07705946e5a43ae9edf081795f252f6 before this upload/commit.
+No backup branch is required for V1.5.2 per explicit instruction.
 
-Backup:
-No V1.5.1 backup was requested or created. The narrow correction remains protected by deterministic full-index V1.5.0 <-> V1.5.1 rollback proof in Actions.
+Expected version after replacement: versionCode 31 / versionName 1.0-v1.5.2.
+Expected runtime changes relative to the exact V1.5.1 Actions candidate: exactly four files:
+- app/src/main/assets/shaders/hdr_display.frag
+- app/src/main/assets/shaders/raw_hdr_demosaic.frag
+- app/src/main/assets/shaders/raw_hdr_fusion.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 
-Signing:
-Reuse the existing repository secret IRIS_TEST_SIGNING_KEY_B64.
-Do NOT regenerate the signing key and do NOT upload any private key file.
-V1.5.1 versionCode 30 should install normally over stable-signed V1.5.0 after Actions proof.
-
-IMPORTANT:
-Upload ALL CONTENTS of the extracted FULL-UPLOAD ZIP into the repository root from a fresh vscode.dev workspace based on current remote main.
-Do not upload only app/ or only the runtime files.
-Do not push any APK.
-
-Before committing, confirm:
-1. main is still exactly 4b1753c7e07705946e5a43ae9edf081795f252f6 before replacement.
-2. BUILD_WORKFLOW_COPY.yml begins exactly with: name: Build Iris HDR Viewfinder Test V1.5.1
-3. .github/workflows/build.yml and BUILD_WORKFLOW_COPY.yml are byte-identical.
-4. No file outside this FULL candidate is added or removed.
-5. Intended runtime changes are exactly:
-   - app/src/main/assets/shaders/hdr_display.frag
-   - app/src/main/assets/shaders/raw_hdr_demosaic.frag
-   - app/src/main/assets/shaders/raw_hdr_fusion.frag
-   - app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java
-6. Intended build/version change is exactly:
-   - app/build.gradle.kts
-7. Intended infrastructure changes are exactly:
-   - .github/workflows/build.yml
-   - BUILD_WORKFLOW_COPY.yml
-   - scripts/verify_orientation.py
-8. Intended documentation/hash-pin changes are exactly:
-   - PACKAGE_INFO.txt
-   - PACKAGE_MANIFEST_SHA256.txt
-   - README.md
-   - VSCODE_DEV_UPLOAD.txt
-
-V1.5.1 does NOT add local tone mapping.
-Saved FUSED uses physical Bayer-quad highlight color provenance; live HDR uses the shared fixed global stop-domain tone map so SHORT-recovered highlights retain visible display separation.
-
-Suggested commit message:
-V1.5.1 provenance-safe highlights + no-LTM true HDR display
-
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.5.1.
-Do not call V1.5.1 build-proven until the workflow succeeds and its real GLSL/Java/full Android build, signing, exactly-one-APK, deterministic patch and post-build invariance proofs are verified.
-
-Runtime logs after installation:
-Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt
+CaptureController/CameraController, RAW still owner RawHdrFusion.java, DNG saver, exposure policy and all other runtime files are protected and unchanged.

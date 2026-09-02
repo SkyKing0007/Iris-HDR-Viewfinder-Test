@@ -1,124 +1,65 @@
-Iris HDR Viewfinder Test V1.5.1
+Iris HDR Viewfinder Test V1.5.2
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
-Status: PREPARED / UPLOAD-READY - NOT V1.5.1 BUILD-PROVEN
+Status: PREPARED / UPLOAD-READY - NOT V1.5.2 BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.5.0 GitHub Actions compiled candidate/artifact
-- Commit: 4b1753c7e07705946e5a43ae9edf081795f252f6
-- Tree: a4c92daa0d4439784d88766133d7f2092173c60e
-- Actions run: 33668681576
-- Job: 100376617522
-- Artifact ID: 9861657341
-- Artifact name: Iris-HDR-Viewfinder-Test-V1.5.0
-- Artifact digest: sha256:92afff02b238f801ebbe61f5a4d69d78955393990639a3eb15bf01347ebb51ea
-- APK SHA-256: c540dfaddfdabdf66f81ee4a97652cc3765a21d45dc275468faa4bababe6ef29
-- Source-candidate TAR SHA-256: 81c49c6a9dc483d3ea4c5006781686ac6295a3af9710b5643c4059307af25d3f
-- Runtime manifest SHA-256: 4510ca8d99a858aaaa591eddb94c3763a892c078851804eece2f751e8d46702c
-- Repository manifest SHA-256: 1eb78bfce5efc2d86e2b5f7a0d913df8ff79bc3c5c61c21749b42ded57c9a947
-- Regressions SHA-256: 2cd60d71e2d44131c08d92ef068050ca68ac5bb059fc3fac6eba13c44c82fbee
+- Exact successful V1.5.1 GitHub Actions compiled candidate/artifact
+- Commit: 50c9bdd2709db67bd466ced1f5a82efa182f97cc
+- Tree: 946be536427762e8bcdbadc6cce8a296404c8f28
+- Actions run: 33675597653
+- Job: 100399370805
+- Artifact ID: 9864289091
+- Artifact name: Iris-HDR-Viewfinder-Test-V1.5.1
+- Artifact digest: sha256:0716856060c0dc183b6b8d08358adf7b04fd7b62fc3c2fbe27eb0a7e28f1cbc3
+- APK SHA-256: ec0f2ce25ee486ecdf4e0fea45909a27759bba256c420b5279d816259315de79
+- Source-candidate TAR SHA-256: b7cf2e66a1a8889b483940ffbc9e32256b12bf6f69d2f5303d9cdee15ae35f7b
+- Runtime manifest SHA-256: dded85ab921384e193fc4894612005c381df9a466749be0b12af2ad0ea362c4d
+- Repository manifest SHA-256: e6ab3fdee8e913b81e72b77f5aa99734bf930634b17db3108156f66e707a9e45
+- Regressions SHA-256: b3e2a5e612793ebf4753c6079278abdf19a98d491ff5526e2382ced3cc037486
 
 Verification-mechanics authority:
-- Exact successful V1.5.0 16-stage authority-seeded compiler/build/invariance sequence.
-- V1.5.1 preserves the successful V1.5.0 compiler/build/signing/candidate-freeze mechanics.
-- Infrastructure delta is limited to V1.5.0 authority/version/allowlist pins and new permanent regressions for broad pink highlights, pink edges, physical color provenance and no-LTM live HDR display range.
+- Exact successful V1.5.1 16-stage authority-seeded compiler/build/invariance sequence.
+- Compiler/build/signing/candidate-freeze mechanics are inherited unchanged.
 
 Backup:
-- NONE CREATED for V1.5.1, per explicit user instruction.
-- This is a narrow correction and remains exactly rollback-protected by deterministic V1.5.0 <-> V1.5.1 full-index patches in Actions.
+- NONE CREATED for V1.5.2, per explicit user instruction.
+- Deterministic V1.5.1 <-> V1.5.2 full-index patches provide rollback proof in Actions.
 
-V1.5.1 exact runtime changed-file allowlist: 4 files:
+V1.5.2 exact runtime changed-file allowlist: 4 files:
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/assets/shaders/raw_hdr_demosaic.frag
 - app/src/main/assets/shaders/raw_hdr_fusion.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java
-
-V1.5.1 build/version changed file:
-- app/build.gradle.kts (versionCode 30 / versionName 1.0-v1.5.1 only)
-
-Runtime files explicitly unchanged/protected from successful V1.5.0:
-- app/src/main/AndroidManifest.xml
-- app/src/main/assets/shaders/copy_2d.frag
-- app/src/main/assets/shaders/flicker_field.frag
-- app/src/main/assets/shaders/fullscreen.vert
-- app/src/main/assets/shaders/oes_to_rgb.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
+
+Build/version changed file:
+- app/build.gradle.kts (versionCode 31 / versionName 1.0-v1.5.2 only)
 
 Infrastructure changed-file list:
 - .github/workflows/build.yml
 - BUILD_WORKFLOW_COPY.yml
 - scripts/verify_orientation.py
 
-Documentation/hash-pin changed files:
-- PACKAGE_INFO.txt
-- PACKAGE_MANIFEST_SHA256.txt
-- README.md
-- VSCODE_DEV_UPLOAD.txt
+Infrastructure differs from last successful V1.5.1 implementation: YES, narrowly.
+- Authority pins advance to the exact successful V1.5.1 artifact.
+- Version/allowlist pins advance to V1.5.2.
+- Permanent regressions are added for quad exposure-source coherence, inherited-flow boundary rejection, trust-aware demosaic and live response stability.
+- Gradle/SDK/glslang/Java/signing/assemble/artifact/candidate-freeze mechanics remain unchanged.
+- Patch generation is intentionally corrected to the permanent canonical rule: `--binary --full-index --no-ext-diff`, with rollback generated directly as HEAD -> exact V1.5.1 authority rather than via `git diff -R`. This narrow mechanics delta is replayed against the real V1.5.1 Actions candidate before packaging.
 
-Infrastructure differs from last successful V1.5.0 implementation: YES, narrowly and explicitly.
-- Authority pins advance to the exact successful V1.5.0 Actions artifact.
-- Version/changed-file allowlists advance to V1.5.1.
-- V1.5.1 adds regression proof for physical highlight color provenance, Bayer-quad trust coherence, CFA-parity-safe photo-edge sampling and fixed no-LTM stop-domain display allocation.
-- Gradle version, Android SDK, pinned glslang package/version, Java compile command, signing identity, assemble command, artifact mechanism, candidate-freeze order and post-build invariance mechanics remain unchanged.
+V1.5.2 correction:
+- LONG = body/shadow/normal-exposure authority while healthy.
+- SHORT = designated highlight exposure authority.
+- Highlight ownership is one scalar per exact 2x2 Bayer quad.
+- Whole-quad SHORT support/correspondence is proven before admission; fully clipped LONG cannot veto SHORT radiometrically.
+- Low-local-evidence inherited flow is rejected at real LONG boundaries, preventing shifted SHORT white blotches/green edges while still permitting coherent saturated interiors.
+- Fully trusted demosaic neighborhoods retain the exact V1.5.1 detail algorithm; untrusted CFA samples cannot independently steer green direction or R-G/B-G residuals.
+- Live HDR highlight chroma is SHORT or neutral SHORT luma once LONG is damaged; LONG chromaticity is not recycled into lost highlights.
+- Live processed-preview response requires 3 consecutive estimates within 0.045 EV before target commitment, then one 0.65 EV/s visible convergence rate independent of AUTO exposure-generation churn.
+- NO LTM. No capture/exposure policy change. No GPU/performance architecture change in V1.5.2.
 
-V1.5.1 root-cause correction - saved RAW FUSED:
-- V1.5.0 fused SHORT/LONG RAW per CFA site but discarded physical color provenance before demosaic. A clipped LONG phase and differently validated SHORT phases could therefore become an invalid R/G/B relationship and WB/color conversion could amplify it into broad magenta.
-- V1.5.1 preserves physical evidence beside the fused CFA in an RGBA16F carrier:
-  R = fused scene-linear CFA
-  G = physical color trust (valid LONG or validated aligned SHORT)
-  B = physical LONG clipping risk
-  A = SHORT ownership
-- Highlight color authority is evaluated per exact 2x2 Bayer quad, not by independent RGB brightness.
-- A fully physically proven bright color is unchanged, even when very bright.
-- If physical clipping exists and any required CFA phase lacks validated evidence, the quad becomes color-incomplete and only unprovable opponent chroma is driven toward neutral while stable green/majority-derived brightness is retained.
-- The trust decision is expanded by one packed Bayer quad around clipping boundaries to prevent one-pixel pink/cyan fringes. RGB itself is not blurred and no neighboring hue is borrowed.
-- True-photo boundary sampling mirrors by an even CFA displacement so Bayer phase is preserved; interior tile boundaries continue to use real supplied halo data.
-- Lens shading remains in the existing fusion domain; completion occurs after the LSC/WB-balanced reconstruction and before the Camera2 color matrix.
-- There is NO generic smoothstep(0.70,0.99,rgb) white-desaturation rule.
+Stable signing is unchanged from V1.5.1.
+Local real GLSL/Android Java/full assemble remain NOT RUN unless explicitly reported otherwise; GitHub Actions is authoritative.
 
-V1.5.1 root-cause correction - live HDR FUSED:
-- NO local tone mapping is added anywhere.
-- LONG remains the body/appearance owner and existing live SHORT highlight admission/recovery remains intact.
-- V1.5.0's single global shoulder compressed multi-stop recovered radiance too aggressively near display white, making HDR FUSED look nearly like clipped LONG despite usable SHORT evidence.
-- V1.5.1 keeps one bracket-independent global tone mapper shared by live and saved HDR but allocates highlight display range in scene stops:
-  * scene peak <= 0.70: literal/unmodified body
-  * 0.70 -> 1.0: smooth transition to ~0.80 display peak
-  * 1x -> 64x scene radiance: fixed log2/stop-domain allocation to 0.9995 display peak
-- RGB channels are scaled by one scalar; hue is not independently clipped or repaired.
-- The mapping is fixed, global, spatially uniform and bracket-independent: it is GTM, not LTM.
-
-Permanent V1.5.1 regressions:
-- Broad clipped white highlight must not turn pink/magenta when a CFA phase is unproven.
-- Brightness alone must never neutralize physically proven red/yellow/blue/etc. color.
-- Pink/cyan clipping-edge trust expansion is limited to one Bayer quad; no RGB blur/hue donor.
-- True-photo mirror must preserve CFA parity.
-- Live HDR must retain explicit display separation for SHORT-recovered 1x..64x radiance without LTM while preserving LONG-like body through 0.70.
-- RGBA provenance may not be discarded before highlight color completion.
-
-Candidate runtime manifest:
+Prepared candidate runtime manifest:
 - app/src file count: 16
-- SHA-256: dded85ab921384e193fc4894612005c381df9a466749be0b12af2ad0ea362c4d
-
-Stable signing:
-- Reuses repository secret IRIS_TEST_SIGNING_KEY_B64; do not regenerate it.
-- Stable keystore SHA-256: 2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e
-- Signing certificate SHA-256: 53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8
-- V1.5.1 versionCode 30 should install as a normal update over stable-signed V1.5.0 after successful Actions proof.
-
-Local validation/compiler status before Actions:
-- Exact V1.5.0 Actions authority reconstruction/hashes: PASS
-- Authority-seeded candidate path/byte equivalence: PASS
-- Exact 4-file runtime allowlist/protected-byte proof: PASS
-- V1.5.1 semantic/ownership/orientation regression validator: PASS
-- Complete GLSL reserved-identifier scan: PASS
-- Workflow YAML syntax + workflow-copy equality: PASS
-- Deterministic full-index forward/rollback proof at core.abbrev 7/12/40 with Git + GNU patch fuzz=0: PASS
-- Pinned real glslangValidator: NOT RUN locally
-- Real project Java compiler: NOT RUN locally
-- Full :app:assembleDebug: NOT RUN locally
-- Therefore this package is PREPARED / UPLOAD-READY only until V1.5.1 GitHub Actions succeeds.
+- SHA-256: da69305305cd337b93920768cc6f477092af0bd26e4b942f66798fd46d880d12

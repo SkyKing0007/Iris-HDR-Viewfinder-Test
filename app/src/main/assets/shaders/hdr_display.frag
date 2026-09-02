@@ -239,29 +239,22 @@ void fusionSample(
         smoothstep(0.20, 0.85, shoulderNeed * shortUsable));
     guideLuma = mix(longSceneLuma, shortSceneLuma, shortGuideAuthority);
 
-    // V1.4.23 visible chroma is pair-rate and fail-closed. The slow 200 ms
-    // reliability history cannot switch visible color. Local SHORT/LONG
-    // chromaticity disagreement also rejects color immediately while preserving
-    // usable SHORT luminance/detail.
+    // V1.5.2: LONG owns body appearance, but once LONG loses highlight information
+    // it is forbidden from supplying or vetoing chromaticity. SHORT is the designated
+    // highlight authority. A safe current SHORT supplies its own color; if its current
+    // processed-ISP chroma is untrustworthy, fail closed to neutral SHORT luminance
+    // instead of oscillating between LONG tint and SHORT tint.
     float rgbSafe = 1.0 - smoothstep(0.955, 0.985, shortPeak);
     float longColorValidity = 1.0 - smoothstep(0.94, 0.985, max3(longRgb));
     vec3 longChromaticity = longScene / max(longSceneLuma, 0.0005);
     vec3 shortChromaticity = shortScene / max(shortSceneLuma, 0.0005);
     float localChromaDelta = max3(abs(longChromaticity - shortChromaticity));
     float localChromaAgreement = 1.0 - smoothstep(0.08, 0.28, localChromaDelta);
-    float chromaGuard = mix(1.0, localChromaAgreement, longColorValidity);
+    float overlapAgreement = mix(1.0, localChromaAgreement * agreement, longColorValidity);
     float colorTrust = clamp(
-        fieldChromaTrust * rgbSafe * agreement * chromaGuard, 0.0, 1.0);
-    float longSpread = max3(longRgb) - min3(longRgb);
-    float shortSpread = max3(shortRgb) - min3(shortRgb);
-    float neutralLongClip = (1.0 - smoothstep(0.015, 0.060, longSpread))
-        * smoothstep(0.975, 0.998, second3(longRgb));
-    float mildShortTint = 1.0 - smoothstep(0.10, 0.25, shortSpread);
-    colorTrust *= 1.0 - neutralLongClip * mildShortTint;
-
-    vec3 longChromaticityAtShortLuma = longScene
-        * (shortSceneLuma / max(longSceneLuma, 0.0005));
-    vec3 trustedShort = mix(longChromaticityAtShortLuma, shortScene, colorTrust);
+        fieldChromaTrust * rgbSafe * overlapAgreement, 0.0, 1.0);
+    vec3 neutralAtShortLuma = vec3(shortSceneLuma);
+    vec3 trustedShort = mix(neutralAtShortLuma, shortScene, colorTrust);
     // Keep SHORT in calibrated scene-linear radiance here. Display highlight
     // compression is applied symmetrically to both source endpoints later.
     recoveredShort = trustedShort;

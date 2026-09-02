@@ -1,17 +1,17 @@
-# Iris HDR Viewfinder Test V1.5.1
+# Iris HDR Viewfinder Test V1.5.2
 
-V1.5.1 is the provenance-safe highlight and no-LTM live-HDR correction built directly from the exact successful V1.5.0 GitHub Actions candidate.
+V1.5.2 is the source-coherent HDR fusion and live-stability correction built directly from the exact successful V1.5.1 GitHub Actions candidate.
 
-Two independent device failures from V1.5.0 are addressed:
+It preserves the successful V1.5.1 broad-pink protection and fixes the remaining device failures without local tone mapping:
 
-1. **Saved FUSED_HDR broad pink / pink-edge highlights.** V1.5.0 could mix SHORT and LONG independently at CFA sites, discard that physical trust information, then let an incomplete clipped Bayer neighborhood become chromatic during demosaic/WB/color conversion. V1.5.1 carries physical color provenance with the fused CFA, makes highlight color trust at Bayer-quad granularity, expands only the trust decision by one Bayer quad at clipping boundaries, and drives only unproven opponent chroma toward neutral. Bright real color is never neutralized merely because it is bright.
+- **SHORT is the fixed highlight exposure authority.** LONG remains the body/shadow owner while healthy; once LONG approaches physical clipping, the complete 2x2 Bayer quad transitions coherently toward SHORT. R/G1/G2/B cannot choose different exposure mixtures.
+- **Geometry remains fail-closed.** The existing flow field already carries local-evidence in alpha. V1.5.2 uses that evidence: inherited motion may fill textureless saturated interiors, but it is rejected at a real LONG boundary unless radiometric correspondence is proven. This targets the white rear-window blotch and green shifted car/foliage edges.
+- **Trusted texture is preserved.** Fully trusted CFA neighborhoods use the exact V1.5.1 demosaic path. Only incomplete/untrusted highlight neighborhoods suppress unproven green-direction and opponent-chroma steering, targeting peach/orange speckling without smoothing real pine needles/dirt.
+- **Live HDR stops chasing AE generations.** Processed-preview SHORT/LONG response must agree for three consecutive 200-ms statistics updates before becoming a visible target. The visible curve then moves at one bounded rate; changing AUTO exposure generations no longer reopen a fast calibration window.
+- **Live highlight color is SHORT-or-neutral once LONG is damaged.** LONG chromaticity may not re-enter and create peach/orange switching.
 
-2. **Live HDR FUSED looking nearly like clipped LONG.** No local tone mapping is added. The live and saved paths still share one spatially uniform global tone mapper, but V1.5.1 gives recovered multi-stop radiance explicit fixed stop-domain display range instead of collapsing it rapidly toward white. LONG-like body appearance through 0.70 is preserved; 1x..64x highlight radiance is mapped monotonically through the remaining global display headroom.
+There is **no LTM**, no capture/exposure-policy change, no new backup, and no GPU/performance redesign in this build. The only build-mechanics correction is canonical full-index/no-ext-diff forward/rollback patch generation, with rollback generated directly from V1.5.2 back to the exact V1.5.1 authority and replayed on that real authority universe. CPU/GPU ownership and still-processing latency remain a separate follow-up after image correctness is proven.
 
-The saved RAW architecture remains SHORT+LONG RAW fusion before one demosaic. Capture policy, matched frame ownership, RAW alignment, photometric normalization, physical lens/crop ownership, DNG publication, and the rest of the successful V1.5.0 runtime are protected byte-for-byte.
+Runtime authority: successful V1.5.1 commit `50c9bdd2709db67bd466ced1f5a82efa182f97cc`, Actions run `33675597653`, artifact `9864289091`.
 
-There is **no LTM**, no generic "bright pixel -> white" smoothstep repair, no hue donor, and no RGB blur to hide clipping artifacts.
-
-Runtime authority: successful V1.5.0 commit `4b1753c7e07705946e5a43ae9edf081795f252f6`, Actions run `33668681576`, artifact `9861657341`.
-
-Current V1.5.1 status: **PREPARED / UPLOAD-READY, NOT YET V1.5.1 BUILD-PROVEN**. Local authority/static/semantic checks are being exhausted, while the pinned real GLSL compiler, real Android Java compiler, full `:app:assembleDebug`, signing, exactly-one-APK proof and final post-build invariance must succeed in GitHub Actions before V1.5.1 becomes build authority.
+Current V1.5.2 status: **PREPARED / UPLOAD-READY, NOT YET V1.5.2 BUILD-PROVEN** until the packaged Actions workflow passes the pinned real GLSL compiler, real Java compiler, full `:app:assembleDebug`, invariance and final candidate export.

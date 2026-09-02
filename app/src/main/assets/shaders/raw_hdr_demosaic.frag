@@ -72,6 +72,10 @@ float fetchCfa(ivec2 globalPos) {
     return fetchFusionState(globalPos).r;
 }
 
+float fetchTrust(ivec2 globalPos) {
+    return clamp(fetchFusionState(globalPos).g, 0.0, 1.0);
+}
+
 float fetchBalanced(ivec2 globalPos) {
     int channel = channelAt(globalPos);
     return fetchCfa(globalPos) * channelGain(channel);
@@ -81,54 +85,112 @@ float greenAt(ivec2 p) {
     int channel = channelAt(p);
     if (channel == 1 || channel == 2) return fetchBalanced(p);
     float center = fetchBalanced(p);
-    float gl = fetchBalanced(p + ivec2(-1, 0));
-    float gr = fetchBalanced(p + ivec2(1, 0));
-    float gu = fetchBalanced(p + ivec2(0, -1));
-    float gd = fetchBalanced(p + ivec2(0, 1));
-    float cL2 = fetchBalanced(p + ivec2(-2, 0));
-    float cR2 = fetchBalanced(p + ivec2(2, 0));
-    float cU2 = fetchBalanced(p + ivec2(0, -2));
-    float cD2 = fetchBalanced(p + ivec2(0, 2));
-    float gradH = abs(gl - gr) + abs(2.0 * center - cL2 - cR2);
-    float gradV = abs(gu - gd) + abs(2.0 * center - cU2 - cD2);
-    float gh = 0.5 * (gl + gr);
-    float gv = 0.5 * (gu + gd);
-    if (gradH < gradV * 0.75) return gh;
-    if (gradV < gradH * 0.75) return gv;
-    float wh = 1.0 / max(0.0001, gradH);
-    float wv = 1.0 / max(0.0001, gradV);
-    return (gh * wh + gv * wv) / (wh + wv);
+    ivec2 pl = p + ivec2(-1, 0);
+    ivec2 pr = p + ivec2(1, 0);
+    ivec2 pu = p + ivec2(0, -1);
+    ivec2 pd = p + ivec2(0, 1);
+    float gl = fetchBalanced(pl);
+    float gr = fetchBalanced(pr);
+    float gu = fetchBalanced(pu);
+    float gd = fetchBalanced(pd);
+    float tl = fetchTrust(pl);
+    float tr = fetchTrust(pr);
+    float tu = fetchTrust(pu);
+    float td = fetchTrust(pd);
+    ivec2 pl2 = p + ivec2(-2, 0);
+    ivec2 pr2 = p + ivec2(2, 0);
+    ivec2 pu2 = p + ivec2(0, -2);
+    ivec2 pd2 = p + ivec2(0, 2);
+    float highOrderTrust = min(
+        min(min(tl, tr), min(tu, td)),
+        min(min(fetchTrust(pl2), fetchTrust(pr2)),
+            min(fetchTrust(pu2), fetchTrust(pd2))));
+
+    // Exact V1.5.1 detail path remains byte-mathematically equivalent wherever
+    // every contributing CFA site has physical authority.
+    if (highOrderTrust >= 0.95) {
+        float cL2 = fetchBalanced(pl2);
+        float cR2 = fetchBalanced(pr2);
+        float cU2 = fetchBalanced(pu2);
+        float cD2 = fetchBalanced(pd2);
+        float gradH = abs(gl - gr) + abs(2.0 * center - cL2 - cR2);
+        float gradV = abs(gu - gd) + abs(2.0 * center - cU2 - cD2);
+        float gh = 0.5 * (gl + gr);
+        float gv = 0.5 * (gu + gd);
+        if (gradH < gradV * 0.75) return gh;
+        if (gradV < gradH * 0.75) return gv;
+        float wh = 1.0 / max(0.0001, gradH);
+        float wv = 1.0 / max(0.0001, gradV);
+        return (gh * wh + gv * wv) / (wh + wv);
+    }
+
+    // At a rejected/partly unproven highlight boundary, an untrusted green sample
+    // may contribute brightness but may not steer edge direction by itself.
+    float supportH = tl + tr;
+    float supportV = tu + td;
+    float gh = (gl * tl + gr * tr) / max(0.0001, supportH);
+    float gv = (gu * tu + gd * td) / max(0.0001, supportV);
+    if (supportH < 0.30 && supportV < 0.30) {
+        return 0.25 * (gl + gr + gu + gd);
+    }
+    if (supportH < 0.30) return gv;
+    if (supportV < 0.30) return gh;
+    float wh = supportH / max(0.002, abs(gl - gr) + 0.002);
+    float wv = supportV / max(0.002, abs(gu - gd) + 0.002);
+    return (gh * wh + gv * wv) / max(0.0001, wh + wv);
+}
+
+float trustedOpponentPair(
+        ivec2 p0, ivec2 p1, float gCenter) {
+    float t0 = fetchTrust(p0);
+    float t1 = fetchTrust(p1);
+    float d0 = fetchBalanced(p0) - greenAt(p0);
+    float d1 = fetchBalanced(p1) - greenAt(p1);
+    if (min(t0, t1) >= 0.95) return gCenter + 0.5 * (d0 + d1);
+    float support = t0 + t1;
+    if (support < 1.10) return gCenter;
+    return gCenter + (d0 * t0 + d1 * t1) / max(0.0001, support);
 }
 
 float colorAt(int targetChannel, ivec2 p, float gCenter) {
     int centerChannel = channelAt(p);
-    if (centerChannel == targetChannel) return fetchBalanced(p);
+    if (centerChannel == targetChannel) {
+        float trust = fetchTrust(p);
+        return mix(gCenter, fetchBalanced(p), smoothstep(0.45, 0.90, trust));
+    }
 
     bool centerGreen = centerChannel == 1 || centerChannel == 2;
     if (centerGreen) {
         ivec2 left = p + ivec2(-1, 0);
         ivec2 right = p + ivec2(1, 0);
         if (channelAt(left) == targetChannel && channelAt(right) == targetChannel) {
-            float d0 = fetchBalanced(left) - greenAt(left);
-            float d1 = fetchBalanced(right) - greenAt(right);
-            return max(0.0, gCenter + 0.5 * (d0 + d1));
+            return max(0.0, trustedOpponentPair(left, right, gCenter));
         }
         ivec2 up = p + ivec2(0, -1);
         ivec2 down = p + ivec2(0, 1);
-        float d0 = fetchBalanced(up) - greenAt(up);
-        float d1 = fetchBalanced(down) - greenAt(down);
-        return max(0.0, gCenter + 0.5 * (d0 + d1));
+        return max(0.0, trustedOpponentPair(up, down, gCenter));
     }
 
-    ivec2 d0p = p + ivec2(-1, -1);
-    ivec2 d1p = p + ivec2(1, -1);
-    ivec2 d2p = p + ivec2(-1, 1);
-    ivec2 d3p = p + ivec2(1, 1);
-    float d0 = fetchBalanced(d0p) - greenAt(d0p);
-    float d1 = fetchBalanced(d1p) - greenAt(d1p);
-    float d2 = fetchBalanced(d2p) - greenAt(d2p);
-    float d3 = fetchBalanced(d3p) - greenAt(d3p);
-    return max(0.0, gCenter + 0.25 * (d0 + d1 + d2 + d3));
+    ivec2 q0 = p + ivec2(-1, -1);
+    ivec2 q1 = p + ivec2(1, -1);
+    ivec2 q2 = p + ivec2(-1, 1);
+    ivec2 q3 = p + ivec2(1, 1);
+    float t0 = fetchTrust(q0);
+    float t1 = fetchTrust(q1);
+    float t2 = fetchTrust(q2);
+    float t3 = fetchTrust(q3);
+    float d0 = fetchBalanced(q0) - greenAt(q0);
+    float d1 = fetchBalanced(q1) - greenAt(q1);
+    float d2 = fetchBalanced(q2) - greenAt(q2);
+    float d3 = fetchBalanced(q3) - greenAt(q3);
+    if (min(min(t0, t1), min(t2, t3)) >= 0.95) {
+        return max(0.0, gCenter + 0.25 * (d0 + d1 + d2 + d3));
+    }
+    float support = t0 + t1 + t2 + t3;
+    if (support < 1.50) return gCenter;
+    float residual = (d0 * t0 + d1 * t1 + d2 * t2 + d3 * t3)
+        / max(0.0001, support);
+    return max(0.0, gCenter + residual);
 }
 
 ivec2 quadOrigin(ivec2 p) {
@@ -177,8 +239,8 @@ void main() {
     float r = colorAt(0, p, g);
     float b = colorAt(3, p, g);
 
-    // The demosaic above is in white-balanced camera RGB. V1.5.1 carries the
-    // sensor-domain trust state through fusion, then makes one Bayer-quad color
+    // The demosaic above is in white-balanced camera RGB. V1.5.2 consumes
+    // sensor-domain trust during interpolation, then makes one Bayer-quad color
     // decision AFTER LSC/WB balancing and BEFORE the Camera2 color matrix.
     //
     // Fully physically proven color is unchanged. If clipping left a phase

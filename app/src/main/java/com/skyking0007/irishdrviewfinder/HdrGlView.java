@@ -274,10 +274,12 @@ final class HdrGlView extends GLSurfaceView {
         private static final float[] PHOTO_LUMA_KNOTS = {0.020f, 0.060f, 0.150f, 0.350f, 0.700f};
         private static final float PHOTO_SCALE_MIN = 0.60f;
         private static final float PHOTO_SCALE_MAX = 1.50f;
-        private static final float PHOTO_MAX_UPDATE_EV = 0.06f;
-        private static final float PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.0f;
-        private static final float PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND = 1.20f;
-        private static final long PHOTO_VISIBLE_FAST_NS = 650_000_000L;
+        // V1.5.2 commits processed-preview response only after consecutive agreement.
+        // Exposure generations may move continuously under AUTO; they must not reopen a
+        // fast visible calibration window and create peach/orange pulsation.
+        private static final int PHOTO_COMMIT_STABLE_SAMPLES = 3;
+        private static final float PHOTO_COMMIT_STABLE_EV = 0.045f;
+        private static final float PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.65f;
         private static final float PHOTO_SHORT_ONLY_MODULATION_EV = 0.12f;
         private static final float PHOTO_LONG_STABLE_EV = 0.08f;
         private static final int PHOTO_MIN_BIN_SAMPLES = 12;
@@ -321,9 +323,9 @@ final class HdrGlView extends GLSurfaceView {
         private float shortCalibration = 1.0f;
         private final float[] shortPhotoScale = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
         private final float[] shortPhotoTargetScale = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
-        private long shortPhotoVisibleGeneration = Long.MIN_VALUE;
+        private final float[] shortPhotoCandidateScale = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+        private int shortPhotoCandidateStableSamples;
         private long shortPhotoVisibleLastNs;
-        private long shortPhotoVisibleFastUntilNs;
         private boolean havePreviousStats;
         private final int[] shortLumaReliability = new int[STATS_PIXELS];
         private final int[] shortChromaReliability = new int[STATS_PIXELS];
@@ -436,9 +438,9 @@ final class HdrGlView extends GLSurfaceView {
             shortCalibration = 1.0f;
             Arrays.fill(shortPhotoScale, 1.0f);
             Arrays.fill(shortPhotoTargetScale, 1.0f);
-            shortPhotoVisibleGeneration = Long.MIN_VALUE;
+            Arrays.fill(shortPhotoCandidateScale, 1.0f);
+            shortPhotoCandidateStableSamples = 0;
             shortPhotoVisibleLastNs = 0L;
-            shortPhotoVisibleFastUntilNs = 0L;
             Arrays.fill(previousShortRawLuma, 0.0f);
             resetShortReliabilityHistory();
             havePreviousStats = false;
@@ -502,9 +504,9 @@ final class HdrGlView extends GLSurfaceView {
             shortCalibration = 1.0f;
             Arrays.fill(shortPhotoScale, 1.0f);
             Arrays.fill(shortPhotoTargetScale, 1.0f);
-            shortPhotoVisibleGeneration = Long.MIN_VALUE;
+            Arrays.fill(shortPhotoCandidateScale, 1.0f);
+            shortPhotoCandidateStableSamples = 0;
             shortPhotoVisibleLastNs = 0L;
-            shortPhotoVisibleFastUntilNs = 0L;
             Arrays.fill(previousShortRawLuma, 0.0f);
             resetShortReliabilityHistory();
             havePreviousStats = false;
@@ -1112,35 +1114,40 @@ final class HdrGlView extends GLSurfaceView {
                             + 0.75f * target[PHOTO_KNOT_COUNT - 1],
                     PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
             enforceMonotonicPhotoCurve(smoothTarget);
+            float maxCandidateDeltaEv = 0.0f;
             for (int bin = 0; bin < PHOTO_KNOT_COUNT; bin++) {
-                float current = Math.max(0.0001f, shortPhotoTargetScale[bin]);
+                float previous = Math.max(0.0001f, shortPhotoCandidateScale[bin]);
                 float desired = Math.max(0.0001f, smoothTarget[bin]);
-                float deltaEv = (float) (Math.log(desired / current) / Math.log(2.0));
-                deltaEv = clampFloat(deltaEv, -PHOTO_MAX_UPDATE_EV, PHOTO_MAX_UPDATE_EV);
-                shortPhotoTargetScale[bin] = clampFloat(
-                        (float) (current * Math.pow(2.0, deltaEv)),
-                        PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
+                float deltaEv = (float) Math.abs(
+                        Math.log(desired / previous) / Math.log(2.0));
+                maxCandidateDeltaEv = Math.max(maxCandidateDeltaEv, deltaEv);
             }
-            enforceMonotonicPhotoCurve(shortPhotoTargetScale);
+            if (maxCandidateDeltaEv <= PHOTO_COMMIT_STABLE_EV) {
+                shortPhotoCandidateStableSamples++;
+            } else {
+                System.arraycopy(
+                        smoothTarget, 0, shortPhotoCandidateScale, 0, PHOTO_KNOT_COUNT);
+                shortPhotoCandidateStableSamples = 1;
+            }
+            // Use the newest stable estimate, not a chain of 0.06-EV target updates.
+            // The visible curve below performs the only gradual movement.
+            if (shortPhotoCandidateStableSamples >= PHOTO_COMMIT_STABLE_SAMPLES) {
+                System.arraycopy(
+                        smoothTarget, 0, shortPhotoTargetScale, 0, PHOTO_KNOT_COUNT);
+                enforceMonotonicPhotoCurve(shortPhotoTargetScale);
+                shortPhotoCandidateStableSamples = PHOTO_COMMIT_STABLE_SAMPLES;
+            }
         }
 
         private void advanceVisiblePhotoCurve() {
             long now = System.nanoTime();
-            long generation = lastLongMeta == null ? Long.MIN_VALUE : lastLongMeta.exposureGeneration;
-            if (generation != shortPhotoVisibleGeneration) {
-                shortPhotoVisibleGeneration = generation;
-                shortPhotoVisibleFastUntilNs = now + PHOTO_VISIBLE_FAST_NS;
-            }
             if (shortPhotoVisibleLastNs == 0L) {
                 shortPhotoVisibleLastNs = now;
                 return;
             }
             float dt = Math.min(0.100f, Math.max(0.0f, (now - shortPhotoVisibleLastNs) * 1.0e-9f));
             shortPhotoVisibleLastNs = now;
-            float rate = now <= shortPhotoVisibleFastUntilNs
-                    ? PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND
-                    : PHOTO_VISIBLE_RATE_EV_PER_SECOND;
-            float maxDeltaEv = rate * dt;
+            float maxDeltaEv = PHOTO_VISIBLE_RATE_EV_PER_SECOND * dt;
             for (int i = 0; i < PHOTO_KNOT_COUNT; i++) {
                 float current = Math.max(0.0001f, shortPhotoScale[i]);
                 float target = Math.max(0.0001f, shortPhotoTargetScale[i]);

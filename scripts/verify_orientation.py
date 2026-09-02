@@ -22,7 +22,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.5.1 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.5.2 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -277,14 +277,16 @@ require('uniform float shortCalibration;' not in hdr_shader
         "visible live fusion must use learned multi-knot response, never retired scalar calibration")
 require('PHOTO_KNOT_COUNT = 5' in gl
         and 'PHOTO_LUMA_KNOTS = {0.020f, 0.060f, 0.150f, 0.350f, 0.700f}' in gl
-        and 'PHOTO_MAX_UPDATE_EV = 0.06f' in gl
+        and 'PHOTO_COMMIT_STABLE_SAMPLES = 3' in gl
+        and 'PHOTO_COMMIT_STABLE_EV = 0.045f' in gl
         and 'shortPhotoTargetScale' in gl
+        and 'shortPhotoCandidateScale' in gl
         and 'advanceVisiblePhotoCurve' in gl
         and 'previousShortRawLuma' in gl
         and 'shortOnlyModulated' in gl,
-        "live five-knot learner must reject SHORT-only modulation and smooth visible curve at pair cadence")
-require('PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.0f' in gl
-        and 'PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND = 1.20f' in gl
+        "live five-knot learner must reject SHORT-only modulation and require stable target evidence")
+require('PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.65f' in gl
+        and 'PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND' not in gl
         and 'PHOTO_SHORT_ONLY_MODULATION_EV = 0.12f' in gl
         and 'PHOTO_LONG_STABLE_EV = 0.08f' in gl,
         "pair-rate visible radiance stabilization bounds missing")
@@ -316,13 +318,13 @@ require('uniform sampler2D flickerFieldTex;' in hdr_shader
         and 'uniform int flickerGuardRequired;' in hdr_shader
         and 'fieldLumaTrust' in hdr_shader and 'fieldChromaTrust' in hdr_shader
         and 'colorTrust = clamp(' in hdr_shader
-        and 'fieldChromaTrust * rgbSafe * agreement * chromaGuard' in hdr_shader,
+        and 'fieldChromaTrust * rgbSafe * overlapAgreement' in hdr_shader,
         "current-pair local flicker field must own phase-sensitive live SHORT luma/chroma safety")
-require('longChromaticityAtShortLuma' in hdr_shader
-        and 'shortSceneLuma / max(longSceneLuma, 0.0005)' in hdr_shader
-        and 'neutralLongClip' in hdr_shader
+require('vec3 neutralAtShortLuma = vec3(shortSceneLuma);' in hdr_shader
+        and 'vec3 trustedShort = mix(neutralAtShortLuma, shortScene, colorTrust);' in hdr_shader
+        and 'longChromaticityAtShortLuma' not in hdr_shader
         and 'validChannelAgreement' in hdr_shader,
-        "live shader must preserve corrected LONG-chromaticity and fail-closed highlight color protections")
+        "live damaged highlights must be SHORT-or-neutral and never recycle LONG chromaticity")
 require('guideEdgeWeight' in hdr_shader and 'addFusionNeighbor' in hdr_shader
         and 'damageSupport' in hdr_shader
         and 'float shortGuideAuthority = max(' in hdr_shader
@@ -428,13 +430,17 @@ require('CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP' in raw_fusion
 require('FLOW_WIDTH = 64' in raw_fusion and 'FLOW_HEIGHT = 48' in raw_fusion
         and 'PHOTO_FIELD_HEIGHT = 64' in raw_fusion
         and 'PhotometricField.estimate' in raw_fusion
-        and 'rowPhotometric(sourcePos.y)' in raw_fusion_shader,
+        and 'rowPhotometric(qCenter.y + flowState.g)' in raw_fusion_shader,
         "continuous flow plus SHORT-source-row photometric/PWM correction missing")
 require('sampleShortSamePhase' in raw_fusion_shader
         and '(sourcePos - vec2(offset)) * 0.5' in raw_fusion_shader
-        and 'float longDamage = smoothstep(0.88, 0.985, longSensor);' in raw_fusion_shader
+        and 'ivec2 qOrigin = quadOrigin(globalPos);' in raw_fusion_shader
+        and 'float longDamage = smoothstep(0.925, 0.990, longPeak);' in raw_fusion_shader
+        and 'quadShortSupportAndCorrespondence' in raw_fusion_shader
+        and 'float localFlowEvidence = clamp(flowState.a, 0.0, 1.0);' in raw_fusion_shader
+        and 'inheritedBoundaryGate' in raw_fusion_shader
         and 'flowConfidence >= 0.60 && photometricConfidence >= 0.55' in raw_fusion_shader,
-        "same-CFA SHORT warp / LONG-damage ownership / fail-closed confidence missing")
+        "V1.5.2 quad-coherent SHORT highlight authority / boundary geometry gate missing")
 require('raw_hdr_fusion.frag' in raw_fusion and 'raw_hdr_demosaic.frag' in raw_fusion
         and 'hdr_display.frag' in raw_fusion
         and 'GLES30.GL_FRAMEBUFFER_COMPLETE' in raw_fusion
@@ -442,12 +448,15 @@ require('raw_hdr_fusion.frag' in raw_fusion and 'raw_hdr_demosaic.frag' in raw_f
         and 'TILE_ROWS = 512' in raw_fusion,
         "bounded offscreen GLES3 RAW fusion/demosaic/shared-GTM pipeline missing")
 require('whiteBalanceGains' in raw_demosaic_shader
+        and 'float fetchTrust(ivec2 globalPos)' in raw_demosaic_shader
+        and 'trustedOpponentPair' in raw_demosaic_shader
+        and 'if (highOrderTrust >= 0.95)' in raw_demosaic_shader
         and 'vec3 balancedCameraRgb = vec3(r, g, b);' in raw_demosaic_shader
         and 'coherentHighlightColorRisk(p)' in raw_demosaic_shader
         and 'balancedCameraRgb = mix(balancedCameraRgb, neutralCameraRgb, colorRisk);' in raw_demosaic_shader
         and 'dot(colorRow0, balancedCameraRgb)' in raw_demosaic_shader
         and 'outColor = vec4(max(linearSrgb, vec3(0.0)), 1.0);' in raw_demosaic_shader,
-        "RAW must demosaic once, apply provenance-aware camera-space highlight completion, then one frozen color transform")
+        "RAW must preserve exact trusted detail while preventing untrusted CFA sites from steering opponent chroma")
 require('outFusionState = vec4(' in raw_fusion_shader
         and 'float physicalColorTrust = mix(' in raw_fusion_shader
         and 'longPhysicalTrust, shortValidated, ownership' in raw_fusion_shader
@@ -996,7 +1005,7 @@ require('final boolean flickerGuardRequired;' in frame_meta
 require('FLICKER_FIELD_WIDTH = 16' in gl and 'FLICKER_ROW_HEIGHT = 64' in gl
         and 'renderFlickerRowField(ratio);' in gl
         and 'PHOTO_FIELD_HEIGHT = 64' in raw_fusion
-        and 'rowPhotometric(sourcePos.y)' in raw_fusion_shader,
+        and 'rowPhotometric(qCenter.y + flowState.g)' in raw_fusion_shader,
         "live and RAW still must each retain pair-rate row-radiometry protection in their proper domains")
 require(hdr_shader.count('shortReliabilityTex') == 1 and 'temporalTrust' not in hdr_shader,
         "slow 200-ms reliability history must not own visible luma/chroma fusion")
@@ -1004,15 +1013,15 @@ require('float fieldLumaTrust = mix(1.0, clamp(fieldState.g, 0.0, 1.0), guardReq
         and 'float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);' in hdr_shader,
         "phase-sensitive SHORT must fail closed at pair rate while safe SHORT bypasses mandatory field trust")
 
-# 056 / 074 / 080 / V1.5.1 - Exact current pre-handoff authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.5.0' in workflow
-        and 'run-id: 33668681576' in workflow,
-        "workflow must download the exact successful V1.5.0 Actions authority")
-require('4b1753c7e07705946e5a43ae9edf081795f252f6' in workflow
-        and 'a4c92daa0d4439784d88766133d7f2092173c60e' in workflow,
-        "V1.5.0 authority commit/tree pins missing")
+# 056 / 074 / 080 / V1.5.2 - Exact current pre-handoff authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.5.1' in workflow
+        and 'run-id: 33675597653' in workflow,
+        "workflow must download the exact successful V1.5.1 Actions authority")
+require('50c9bdd2709db67bd466ced1f5a82efa182f97cc' in workflow
+        and '946be536427762e8bcdbadc6cce8a296404c8f28' in workflow,
+        "V1.5.1 authority commit/tree pins missing")
 require('backup-' not in workflow,
-        "V1.5.1 narrow correction must not depend on or create a backup branch")
+        "V1.5.2 narrow correction must not depend on or create a backup branch")
 
 # 048 / 049 / 052 / 054 - Brightness remains user LONG intent in AUTO and MANUAL.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -5.0f' in main
@@ -1037,8 +1046,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 30' in gradle and 'versionName = "1.0-v1.5.1"' in gradle,
-        "V1.5.1 version/build pin missing")
+require('versionCode = 31' in gradle and 'versionName = "1.0-v1.5.2"' in gradle,
+        "V1.5.2 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -1130,8 +1139,8 @@ curve=enforce_monotonic([1.50,0.60,1.50,1.50,0.60])
 mapped=[k*v for k,v in zip(photo_knots,curve)]
 require(all(mapped[i] > mapped[i-1] for i in range(1,len(mapped))),
         f"learned response curve must remain monotonic after bounded correction: {mapped}")
-require('PHOTO_MAX_UPDATE_EV = 0.06f' in gl,
-        "live learned response must remain temporally bounded to 0.06 EV/update")
+require('PHOTO_COMMIT_STABLE_SAMPLES = 3' in gl and 'PHOTO_COMMIT_STABLE_EV = 0.045f' in gl,
+        "live learned response must require three consecutive stable estimates before target commit")
 require('shortPhotoTargetScale' in gl and 'advanceVisiblePhotoCurve' in gl,
         "5-Hz learned target must be decoupled from pair-rate visible response")
 require('shortOnlyModulated = longDeltaEv <= PHOTO_LONG_STABLE_EV' in gl
@@ -1147,8 +1156,9 @@ require(short_only_modulated(0.02, 0.38),
         "fixed-LONG / oscillating-SHORT plant-light regression must be rejected from curve learning")
 require(not short_only_modulated(0.30, 0.32),
         "coherent real scene change must not be mistaken for SHORT-only modulation")
-require('PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.0f' in gl,
-        "settled exposure generation must not continuously breathe visible response at the 5-Hz learner cadence")
+require('PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.65f' in gl
+        and 'shortPhotoVisibleGeneration' not in gl,
+        "visible response may converge only toward a committed stable target and must not reset on AUTO generation churn")
 
 def v1423_recovery_mask(long_second, long_peak, long_luma, short_second, short_luma, field_trust=1.0):
     shoulder=max(smoothstep_local(0.955,0.988,long_second),
@@ -1227,7 +1237,7 @@ require('uv * reliabilityUvScale + reliabilityUvOffset' in hdr_shader,
 require('provisionalShortProbe' in frame_meta and 'autoShortProbeBaselineEv' in camera
         and 'HDR SHORT probe is still being validated' in camera,
         "still capture must never commit an unaccepted darker SHORT probe")
-require('rowPhotometric(sourcePos.y)' in raw_fusion_shader
+require('rowPhotometric(qCenter.y + flowState.g)' in raw_fusion_shader
         and 'flowConfidence >= 0.60 && photometricConfidence >= 0.55' in raw_fusion_shader,
         "RAW still must fail closed on source-row radiometry or geometry uncertainty")
 
@@ -1301,4 +1311,30 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.5.1 REGRESSION PASS: exact-published-pair WYSIWYG freeze, matched RAW_SENSOR sole still authority, CFA-aware continuous alignment/fusion, source-row photometric fail-closed protection, one demosaic/WB/color owner, shared global GTM, live information-gain SHORT/flicker protections, adaptive LONG appearance, exact exposure-generation pairs, capture-performance/EGL/orientation/FOV/signing protections")
+# V1.5.2 device regressions from the V1.5.1 office test.
+require('quadLongPeak' in raw_fusion_shader
+        and 'quadShortSupportAndCorrespondence' in raw_fusion_shader
+        and 'ownership = clamp(' in raw_fusion_shader
+        and 'longDamage * shortSupport * geometricAdmission' in raw_fusion_shader,
+        "orange/peach CFA checkerboard regression: source ownership must be one quad decision")
+require('quadBoundaryContrast' in raw_fusion_shader
+        and 'inheritedFlow * smoothstep(0.08, 0.28, boundaryContrast)' in raw_fusion_shader,
+        "white-blotch/green-edge regression: inherited flow must fail closed at real LONG boundaries")
+require('vec3 neutralAtShortLuma = vec3(shortSceneLuma);' in hdr_shader
+        and 'vec3 trustedShort = mix(neutralAtShortLuma, shortScene, colorTrust);' in hdr_shader
+        and 'longChromaticityAtShortLuma' not in hdr_shader,
+        "live highlight color must be SHORT-or-neutral once LONG is damaged")
+require('PHOTO_COMMIT_STABLE_SAMPLES = 3' in gl
+        and 'PHOTO_COMMIT_STABLE_EV = 0.045f' in gl
+        and 'shortPhotoCandidateScale' in gl
+        and 'shortPhotoCandidateStableSamples' in gl
+        and 'PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.65f' in gl,
+        "live processed-response calibration must require consecutive stable evidence")
+require('shortPhotoVisibleGeneration' not in gl
+        and 'PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND' not in gl
+        and 'PHOTO_VISIBLE_FAST_NS' not in gl,
+        "AUTO exposure generations must not reopen a fast visible photo-response window")
+require('local tone' not in hdr_shader.lower() and 'bilateral tone' not in hdr_shader.lower(),
+        "V1.5.2 must remain no-LTM")
+
+print("V1.5.2 REGRESSION PASS: exact-published-pair WYSIWYG freeze, matched RAW_SENSOR sole still authority, CFA-aware continuous alignment/fusion, source-row photometric fail-closed protection, one demosaic/WB/color owner, shared global GTM, live information-gain SHORT/flicker protections, adaptive LONG appearance, exact exposure-generation pairs, capture-performance/EGL/orientation/FOV/signing protections")
