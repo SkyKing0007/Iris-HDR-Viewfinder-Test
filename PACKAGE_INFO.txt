@@ -1,7 +1,7 @@
 Iris HDR Viewfinder Test V1.4.11 V2.1
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Target branch: experiment-v1.4.11-v2-brightness-4ev
-Status: PREPARED / UPLOAD-READY - NOT ACTIONS BUILD-PROVEN
+Status: CORRECTED PREPARED / UPLOAD-READY - NOT ACTIONS BUILD-PROVEN
 
 Runtime authority: exact successful V1.4.11 V2 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.11-V2
 Authority commit: 23ef58e7fdb96fcafec409b169f35152f93b19b9
@@ -16,7 +16,10 @@ Authority V2 runtime manifest SHA-256: 090c409f4fde6eb9b85d2cc2f9a744625ec426db8
 Authority V2 repository manifest SHA-256: 8885d14da8d95526435d09a97321c07123397d3a693cf45a62fd777287ff162f
 Authority V2 regressions SHA-256: 184111fb9adca4a3ec870f3819697d10a854023c73dddeea4fb081742a452b2f
 
-No new backup branch: localized UI-layout regression correction. Exact V2 authority plus deterministic forward/rollback patches provide rollback.
+Current failed branch HEAD being corrected: a2242cec37a320adbc52c02e3d32953aca11004d
+Its parent is the successful V2 authority commit above. The correction workflow pins this exact two-commit lineage while still reconstructing runtime authority from the successful V2 Actions artifact.
+
+No new backup branch: localized UI-layout/workflow correction. Exact V2 authority plus deterministic forward/rollback patches provide rollback.
 
 Intended runtime changed-file allowlist: exactly one file:
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
@@ -32,7 +35,7 @@ Plus candidate documentation/version/hash pins:
 - VSCODE_DEV_UPLOAD.txt
 - app/build.gradle.kts
 
-Infrastructure differs from successful V2 only for authority/version/artifact names, exact one-file runtime allowlist, updated manifest pins, and the permanent periodic-bounce regression. Gate/compiler/build order is unchanged.
+Infrastructure differs from successful V2 only for V2.1 authority/version/artifact pins, exact one-file runtime allowlist, updated manifest pins, periodic-bounce regression, exact failed-commit lineage pin, checkout fetch-depth 3 so the successful V2 grandparent remains available for git-archive/tree proof, and a new workflow embedded-Python syntax preflight. The previous V2.1 handoff accidentally concatenated a closing dictionary brace with the following for-loop in two embedded Python heredocs; this corrected handoff fixes both and makes that exact class of failure a permanent preflight regression. Runtime compiler/build order remains unchanged.
 
 Functional V2.1 change:
 - Fix 5-second vertical/zoom-like viewfinder bounce by making the status/debug row fixed one-line 20dp geometry with ellipsis.

@@ -26,7 +26,7 @@ jobs:
       - name: Checkout exact candidate history
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
       - name: Download exact successful V1.4.11 V2 Actions authority artifact
         uses: actions/download-artifact@v4
@@ -40,7 +40,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          IRIS_WORKFLOW_SYNTAX_ONLY=1 python3 scripts/verify_orientation.py
           authority='23ef58e7fdb96fcafec409b169f35152f93b19b9'
+          failed_v21='a2242cec37a320adbc52c02e3d32953aca11004d'
           authority_tree='4f5d854c2abbc83f93485d4a5760defc99992a09'
           backup='backup-v1.4.7-pre-adaptive-exposure-headroom'
           backup_authority='cb91702446d18b963b25f9ae2d8e84a0651be2ff'
@@ -49,7 +51,8 @@ jobs:
 
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'experiment-v1.4.11-v2-brightness-4ev'
-          test "$(git rev-parse HEAD^)" = "$authority"
+          test "$(git rev-parse HEAD^)" = "$failed_v21"
+          test "$(git rev-parse "$failed_v21^")" = "$authority"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           backup_sha="$(git ls-remote origin "refs/heads/$backup" | awk '{print $1}')"
           test "$backup_sha" = "$backup_authority"
@@ -206,7 +209,8 @@ jobs:
               'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': '56f73125a0c8470b7438df9ca031c0c1e12be6af07fc93b124c5383452b1f928',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': '58b0bf3aeef61ce85dd8117cec1dcb1b9332233b4eeb923ac949715ec1c8bb48',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java': 'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
-          }          for rel, sha in protected.items():
+          }
+          for rel, sha in protected.items():
               got=hashlib.sha256(Path(rel).read_bytes()).hexdigest()
               if got != sha:
                   raise SystemExit(f'V1.4.11 V2.1 PROTECTED RUNTIME FAIL: {rel} {got} != {sha}')
@@ -362,7 +366,8 @@ jobs:
               'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': '56f73125a0c8470b7438df9ca031c0c1e12be6af07fc93b124c5383452b1f928',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': '58b0bf3aeef61ce85dd8117cec1dcb1b9332233b4eeb923ac949715ec1c8bb48',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java': 'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
-          }          for rel, expected in protected.items():
+          }
+          for rel, expected in protected.items():
               got=hashlib.sha256(Path(rel).read_bytes()).hexdigest()
               if got != expected: raise SystemExit(f'POST-BUILD PROTECTED FAIL: {rel}')
           print('POST-BUILD FROZEN-CANDIDATE/PROTECTED INVARIANCE: PASS')

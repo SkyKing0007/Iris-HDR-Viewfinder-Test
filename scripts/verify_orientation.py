@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import math
+import os
+import textwrap
 
 ROOT = Path(__file__).resolve().parents[1]
 manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
@@ -18,6 +20,37 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 def require(condition, message):
     if not condition:
         raise SystemExit("V1.4.11 V2.1 REGRESSION FAIL: " + message)
+
+
+def verify_workflow_embedded_python():
+    for workflow_name in (".github/workflows/build.yml", "BUILD_WORKFLOW_COPY.yml"):
+        text = (ROOT / workflow_name).read_text()
+        lines = text.splitlines()
+        block_count = 0
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if "python3" in line and "<<'PY'" in line:
+                start = i + 1
+                end = start
+                while end < len(lines) and lines[end].strip() != "PY":
+                    end += 1
+                require(end < len(lines), f"unterminated Python heredoc in {workflow_name} at line {i + 1}")
+                code = textwrap.dedent("\n".join(lines[start:end])) + "\n"
+                try:
+                    compile(code, f"{workflow_name}:heredoc:{block_count + 1}", "exec")
+                except SyntaxError as exc:
+                    require(False, f"embedded Python syntax failure in {workflow_name} block {block_count + 1}: {exc}")
+                block_count += 1
+                i = end
+            i += 1
+        require(block_count == 4, f"expected 4 embedded Python heredocs in {workflow_name}, found {block_count}")
+
+
+verify_workflow_embedded_python()
+if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
+    print("V1.4.11 V2.1 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    raise SystemExit(0)
 
 
 # 015 - Real javac failure from V1.4 must never return.

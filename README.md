@@ -2,6 +2,8 @@
 
 V1.4.11 V2.1 is a narrow correction built from the exact successful V1.4.11 V2 Actions compiled candidate. It preserves V1.4.11 capture, fixed ~3 EV HDR bracket, SHORT/LONG fusion, LONG-first highlight color ownership, FOV/orientation, cadence, DNG/JPEG and logging behavior.
 
+**Workflow correction note:** the first V2.1 upload reached commit `a2242cec37a320adbc52c02e3d32953aca11004d` but failed before compilers because two embedded Python heredocs in the workflow had a closing dictionary brace concatenated with the next `for` statement. This corrected package pins that failed commit as the immediate parent, keeps successful V2 as runtime authority, fixes both syntax defects, and preflights every embedded Python heredoc before the authority-reconstruction body proceeds. No additional runtime behavior is changed.
+
 ## Brightness EV
 
 **Brightness** spans `-4.0 EV` to `+4.0 EV` in `0.1 EV` steps. `0.0 EV` is neutral. SHORT/LONG fusion completes first; Brightness is then a scene-linear gain before the existing V1.4.7 HDR highlight display fit. It does not change physical SHORT/LONG exposure, bracket width, highlight admission or fusion weights.
