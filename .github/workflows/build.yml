@@ -26,7 +26,7 @@ jobs:
       - name: Checkout exact candidate history
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 3
 
       - name: Download exact successful V1.4.22 Actions authority artifact
         uses: actions/download-artifact@v4
@@ -42,14 +42,38 @@ jobs:
           set -euo pipefail
           authority='3042459e1308006c09f0236ddf23751222cadd59'
           authority_tree='b68d92875125a17982c046f8f4ea4476450d1207'
+          failed_candidate='6b47d9fd790f285df7309ce8bef3a3b3e834701d'
+          failed_candidate_tree='58e76dd0641bc9e0c510562ebc62e9193cc31f68'
           authority_dir="$RUNNER_TEMP/v1422-authority-artifact"
           authority_src="$RUNNER_TEMP/v1422-authority-source"
 
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'main'
-          test "$(git rev-parse HEAD^)" = "$authority"
+          test "$(git rev-parse HEAD^)" = "$failed_candidate"
+          test "$(git rev-parse "$failed_candidate^{tree}")" = "$failed_candidate_tree"
+          test "$(git rev-parse HEAD^^)" = "$authority"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
+          python3 - "$failed_candidate" <<'PY'
+          import subprocess, sys
+          failed = sys.argv[1]
+          expected = {
+              '.github/workflows/build.yml': 'M',
+              'BUILD_WORKFLOW_COPY.yml': 'M',
+              'PACKAGE_MANIFEST_SHA256.txt': 'M',
+          }
+          raw = subprocess.check_output(['git', 'diff', '--name-status', failed, 'HEAD'], text=True).splitlines()
+          actual = {}
+          for line in raw:
+              parts = line.split('\t')
+              actual[parts[-1]] = parts[0][0]
+          if actual != expected:
+              raise SystemExit(f'V1.4.23 V1.1 CORRECTION ALLOWLIST FAIL: actual={actual} expected={expected}')
+          runtime = subprocess.check_output(['git', 'diff', '--name-only', failed, 'HEAD', '--', 'app/src'], text=True).strip()
+          if runtime:
+              raise SystemExit(f'V1.4.23 V1.1 RUNTIME INVARIANCE FAIL: {runtime}')
+          print('V1.4.23 V1.1 INFRASTRUCTURE-ONLY CORRECTION: PASS')
+          PY
           grep -Fq 'versionCode = 28' app/build.gradle.kts
           grep -Fq 'versionName = "1.0-v1.4.23"' app/build.gradle.kts
           grep -Fq 'compileSdk = 37' app/build.gradle.kts
@@ -236,24 +260,47 @@ jobs:
           from pathlib import Path
           import shutil, subprocess, sys, tempfile
           authority, candidate, forward, rollback = map(Path, sys.argv[1:])
-          tracked = subprocess.check_output(['git', '-C', str(candidate), 'ls-files'], text=True).splitlines()
-          def compare(left, right, label):
-              for rel in tracked:
+          candidate_paths = subprocess.check_output(
+              ['git', '-C', str(candidate), 'ls-files'], text=True).splitlines()
+          authority_paths = sorted(
+              p.relative_to(authority).as_posix() for p in authority.rglob('*') if p.is_file())
+
+          if len(candidate_paths) != 26 or len(authority_paths) != 25:
+              raise SystemExit(
+                  f'PATCH PATH-UNIVERSE SETUP FAIL: candidate={len(candidate_paths)} authority={len(authority_paths)}')
+          added = sorted(set(candidate_paths) - set(authority_paths))
+          removed = sorted(set(authority_paths) - set(candidate_paths))
+          if added != ['app/src/main/assets/shaders/flicker_field.frag'] or removed:
+              raise SystemExit(f'PATCH A/D UNIVERSE FAIL: added={added} removed={removed}')
+
+          def actual_paths(root):
+              return sorted(p.relative_to(root).as_posix() for p in root.rglob('*') if p.is_file())
+
+          def compare_state(left, right, expected_paths, label):
+              paths = actual_paths(left)
+              if paths != expected_paths:
+                  missing = sorted(set(expected_paths) - set(paths))
+                  extra = sorted(set(paths) - set(expected_paths))
+                  raise SystemExit(f'{label} PATH SET FAIL: missing={missing} extra={extra}')
+              for rel in expected_paths:
                   a=(left/rel).read_bytes(); b=(right/rel).read_bytes()
-                  if a != b: raise SystemExit(f'{label} BYTE FAIL: {rel}')
+                  if a != b:
+                      raise SystemExit(f'{label} BYTE FAIL: {rel}')
+
           with tempfile.TemporaryDirectory() as td:
               t=Path(td)
               g=t/'git-apply'; shutil.copytree(authority, g)
               subprocess.run(['git','apply',str(forward)],cwd=g,check=True)
-              compare(g,candidate,'GIT FORWARD')
+              compare_state(g,candidate,candidate_paths,'GIT FORWARD')
               subprocess.run(['git','apply',str(rollback)],cwd=g,check=True)
-              compare(g,authority,'GIT ROLLBACK')
+              compare_state(g,authority,authority_paths,'GIT ROLLBACK')
+
               p=t/'gnu-patch'; shutil.copytree(authority,p)
               subprocess.run(['patch','-p1','--fuzz=0','-i',str(forward)],cwd=p,check=True)
-              compare(p,candidate,'GNU FUZZ0 FORWARD')
+              compare_state(p,candidate,candidate_paths,'GNU FUZZ0 FORWARD')
               subprocess.run(['patch','-p1','--fuzz=0','-i',str(rollback)],cwd=p,check=True)
-              compare(p,authority,'GNU FUZZ0 ROLLBACK')
-          print('FORWARD/ROLLBACK PATCH REPLAY: PASS')
+              compare_state(p,authority,authority_paths,'GNU FUZZ0 ROLLBACK')
+          print('FORWARD/ROLLBACK PATCH REPLAY WITH A/D PATH-SET PROOF: PASS')
           PY
           printf '%s\n' "$patch_sha" > "$RUNNER_TEMP/FORWARD_PATCH_SHA256.txt"
           printf '%s\n' "$rollback_sha" > "$RUNNER_TEMP/ROLLBACK_PATCH_SHA256.txt"
@@ -317,6 +364,7 @@ jobs:
           set -euo pipefail
           glslangValidator -l app/src/main/assets/shaders/fullscreen.vert app/src/main/assets/shaders/oes_to_rgb.frag
           glslangValidator -l app/src/main/assets/shaders/fullscreen.vert app/src/main/assets/shaders/copy_2d.frag
+          glslangValidator -l app/src/main/assets/shaders/fullscreen.vert app/src/main/assets/shaders/flicker_field.frag
           glslangValidator -l app/src/main/assets/shaders/fullscreen.vert app/src/main/assets/shaders/hdr_display.frag
 
       - name: Compile modified Java with real project compiler
@@ -501,6 +549,7 @@ jobs:
           096 - V1.4.23 pink-pulse regression: visible SHORT chroma authority is pair-rate and fail-closed; the 200-ms history map may not directly switch displayed chroma.
           097 - V1.4.23 hard-band/halo regression: source ownership occurs exactly once in calibrated scene radiance and final highlight reconstruction is bounded by the valid source endpoints.
           098 - V1.4.23 live/still parity regression: captured still fusion receives the same fast-SHORT guard and one full-frame 16x64 flicker field before tiled GPU fusion.
+          099 - Forward/rollback proof across added/deleted files must compare state-specific exact path sets; rollback must remove flicker_field.frag exactly.
           REGRESSIONS
           sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.23-debug.apk \
                     output/Iris-HDR-Viewfinder-Test-V1.4.23-source-candidate.tar \
