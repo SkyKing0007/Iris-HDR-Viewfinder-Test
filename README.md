@@ -1,33 +1,13 @@
-# Iris HDR Viewfinder Test V1.4.23
+# Iris HDR Viewfinder Test V1.5.0
 
-V1.4.23 is an integrated flicker-safe SHORT search and bounded HDR reconstruction correction on top of successful V1.4.22. It preserves LONG as the natural appearance exposure and keeps V1.4.20+'s GPU-first live/still pipeline.
+V1.5.0 is the first sensor-domain SHORT+LONG still-HDR candidate. It keeps the existing finished live HDR viewfinder but replaces the saved fused-JPEG authority with the matched full-resolution RAW_SENSOR SHORT/LONG pair already captured by Iris.
 
-## Information-gain SHORT search
+The principal goal is WYSIWYG HDR: LONG remains the natural scene/body appearance owner; aligned SHORT supplies recoverable highlight measurements; one CFA-aware fusion occurs before a single demosaic/WB/color transform; then the RAW still and live reconstructed HDR use the same global tone-mapping function. No local tone mapping is introduced.
 
-A darker SHORT is now a probe rather than an automatically accepted tier. Localized LONG-damaged cells must show measurable new usable recovery information before the darker tier is accepted. A no-gain or uncorrectable-flicker probe rolls back to the previously accepted tier and locks further search until the LONG scene changes materially. This prevents both chandelier runaway and stable-scene 1/240↔1/480 oscillation.
+The implementation is designed specifically to prevent the earlier hard-white shelf, fusion-boundary, row/PWM, and pink/green/blue highlight failure classes. SHORT is not broadly mixed into healthy LONG midtones. Saturated or invalid LONG CFA phases can be replaced from valid same-CFA SHORT evidence before demosaic; real motion/radiometry disagreement fails closed.
 
-## Pair-rate rolling/PWM protection
+Real Xiaomi fixture evidence for this architecture measured 311044 of 311119 physically clipped LONG CFA samples (99.975893%) with usable aligned SHORT headroom, well above the 95% recoverable-highlight target for coherent regions.
 
-A new `flicker_field.frag` performs a small 16x64 current-pair analysis before live HDR fusion. It estimates local SHORT/LONG illumination mismatch from same-row overlap, producing separate luma and chroma confidence. Fast/PWM-risk SHORT is normalized only where evidence is sufficient; otherwise that SHORT contribution fails closed locally.
+Current status: **PREPARED / UPLOAD-READY, NOT BUILD-PROVEN**. The package has passed local static/semantic/patch checks, but the pinned real GLSL compiler, real Android Java compiler and full `:app:assembleDebug` must run successfully in GitHub Actions before V1.5.0 is called build-proven.
 
-Visible luma/chroma decisions no longer depend on the slower 32x24 / 200ms history. Flicker-safe/outdoor SHORT bypasses mandatory correction so normal scenes are not altered unnecessarily.
-
-Still capture carries the same fast-SHORT guard. Its full-frame 16x64 field is learned from sparse overlap samples and uploaded once before the existing tiled GLES3 fusion, so full-resolution HDR math remains GPU-owned.
-
-## Bounded single-ownership HDR fusion
-
-LONG and calibrated SHORT remain in one scene-linear radiance domain through ownership. LONG owns valid scene content; safe SHORT owns genuinely lost LONG highlight detail. Source selection happens exactly once in radiance.
-
-The fused radiance and the final mapped highlight are both bounded by their valid LONG/SHORT source endpoints. This removes the old double-ownership behavior that could synthesize hard rings, out-of-range contours or unstable highlight boundaries. Unstable SHORT chroma falls back to LONG chromaticity without discarding trustworthy SHORT luma/detail.
-
-## Preserved architecture
-
-- Adaptive LONG scene-body appearance policy remains unchanged.
-- Exact exposure-generation SHORT/LONG pairing and frozen still controls remain unchanged.
-- Five-knot scene response, GPU-tiled still fusion, parallel DNG/source I/O and EGL lifetime protections remain.
-- 512-row tiled full-resolution still fusion continues to use the shared `hdr_display.frag` path.
-- FOV/cadence, orientation, DNG, sRGB and stable-signing protections remain.
-
-## Runtime logs
-
-`Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_YYYYMMDD_HHMMSS_mmm.txt`
+Runtime authority is successful V1.4.23 V1.1 commit `f340d8de62d41e9c505b3936b2b0af543deb9c53`, Actions run `33591832342`, artifact `9832029897`. Safety backup `backup-v1.4.23-v1.1-before-raw-short-long-hdr` is verified at that same commit.

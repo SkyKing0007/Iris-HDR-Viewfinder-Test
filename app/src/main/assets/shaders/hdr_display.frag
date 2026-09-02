@@ -123,23 +123,19 @@ float longClippedCore(vec3 longRgb, vec3 longScene) {
     return max(multiChannelCore, brightSingleCore);
 }
 
-vec3 mapRecoveredHighlight(vec3 recoveredScene, float ratio) {
-    // V1.4.22 common highlight operator. Both LONG and recovered SHORT are passed
-    // through this same monotonic shoulder before source interpolation, so fusion
-    // never mixes a pre-tonemapped SHORT endpoint with an untreated LONG endpoint.
-    float scenePeak = max3(recoveredScene);
-    if (scenePeak <= 0.82 || scenePeak <= 0.000001) return recoveredScene;
-    float mappedPeak;
-    if (scenePeak <= 1.0) {
-        float t = smoothstep(0.0, 1.0, clamp((scenePeak - 0.82) / 0.18, 0.0, 1.0));
-        mappedPeak = mix(0.82, 0.94, t);
-    } else {
-        float headroomLog2 = max(log2(max(ratio, 1.0001)), 0.0001);
-        float t = smoothstep(0.0, 1.0,
-            clamp(log2(scenePeak) / headroomLog2, 0.0, 1.0));
-        mappedPeak = mix(0.94, 0.995, t);
-    }
-    return recoveredScene * (mappedPeak / scenePeak);
+vec3 globalToneMap(vec3 sceneLinear) {
+    // V1.5.0 one scene-referred GTM shared by live HDR and RAW still rendering.
+    // Preserve the naturally exposed LONG body exactly, then reserve stable display
+    // headroom for radiance recovered from SHORT. The curve is fixed, monotonic,
+    // bounded, bracket-ratio independent, and scales RGB uniformly to preserve hue.
+    float scenePeak = max3(sceneLinear);
+    const float knee = 0.70;
+    const float shoulderStrength = 1.80;
+    if (scenePeak <= knee || scenePeak <= 0.000001) return max(sceneLinear, vec3(0.0));
+    float mappedPeak = 1.0 - (1.0 - knee)
+        / (1.0 + shoulderStrength * (scenePeak - knee));
+    mappedPeak = clamp(mappedPeak, knee, 0.9995);
+    return max(sceneLinear, vec3(0.0)) * (mappedPeak / scenePeak);
 }
 
 float shortPhotoScaleForLuma(float normalizedLuma) {
@@ -250,7 +246,7 @@ void fusionSample(
     colorTrust *= 1.0 - neutralLongClip * mildShortTint;
 
     vec3 longChromaticityAtShortLuma = longScene
-        * (shortSceneLuma / max(guideLuma, 0.0005));
+        * (shortSceneLuma / max(longSceneLuma, 0.0005));
     vec3 trustedShort = mix(longChromaticityAtShortLuma, shortScene, colorTrust);
     // Keep SHORT in calibrated scene-linear radiance here. Display highlight
     // compression is applied symmetrically to both source endpoints later.
@@ -310,23 +306,23 @@ vec3 multiscaleHighlightRecovery(vec2 uv, float ratio) {
     float blurredMask = min(damageSupport, maskAccum / max(weightAccum, 0.0001));
     float ownershipMask = clamp(max(coreMask, blurredMask), 0.0, 1.0);
 
-    // V1.4.23 bounded single-ownership reconstruction. Source selection happens
-    // exactly once in calibrated scene-linear radiance. Only after that do we map
-    // the recovered highlight for display, and that mapping is clamped to the
-    // physical LONG / mapped-SHORT endpoint range so it cannot invent a halo/ring.
+    // V1.5.0 source ownership ends here in scene-linear radiance. Tone mapping is
+    // deliberately outside fusion and is applied exactly once by globalToneMap().
     vec3 fusedRadiance = mix(longCenter, shortCenter, ownershipMask);
-    vec3 boundedRadiance = clamp(
-        fusedRadiance, min(longCenter, shortCenter), max(longCenter, shortCenter));
-    vec3 mappedFused = mapRecoveredHighlight(boundedRadiance, ratio);
-    vec3 mappedShort = mapRecoveredHighlight(shortCenter, ratio);
-    vec3 displayLow = min(longCenter, mappedShort);
-    vec3 displayHigh = max(longCenter, mappedShort);
-    vec3 boundedMapped = clamp(mappedFused, displayLow, displayHigh);
-    float toneWeight = ownershipMask;
-    return mix(boundedRadiance, boundedMapped, toneWeight);
+    return clamp(fusedRadiance, min(longCenter, shortCenter), max(longCenter, shortCenter));
 }
 
 void main() {
+    // Internal offscreen mode used by RAW still fusion. normalTex contains linear
+    // sRGB radiance, so this path performs the exact same GTM/display conversion
+    // used by live HDR without re-running any SHORT/LONG ownership logic.
+    if (mode == 3) {
+        vec3 displayLinear = globalToneMap(texture(normalTex, vUv).rgb);
+        vec3 displayRgb = linearToSrgb(displayLinear);
+        outColor = vec4(clamp(displayRgb, 0.0, 1.0), 1.0);
+        return;
+    }
+
     vec2 uv;
     if (!fitSourceUv(vUv, fullFitScale, uv)) {
         outColor = vec4(0.0, 0.0, 0.0, 1.0);
@@ -364,7 +360,8 @@ void main() {
     }
 
     float ratio = clamp(exposureRatio, 1.0, 65536.0);
-    vec3 displayLinear = multiscaleHighlightRecovery(uv, ratio);
+    vec3 fusedLinear = multiscaleHighlightRecovery(uv, ratio);
+    vec3 displayLinear = globalToneMap(fusedLinear);
     vec3 displayRgb = linearToSrgb(displayLinear);
     outColor = vec4(clamp(displayRgb, 0.0, 1.0), 1.0);
 }

@@ -366,8 +366,9 @@ public final class MainActivity extends Activity implements CameraController.Lis
 
         captureButton.setOnClickListener(v -> {
             if (controller == null) return;
+            HdrGlView.PublishedPairSnapshot publishedPair = glView.snapshotPublishedPair();
             captureButton.setEnabled(false);
-            controller.captureHdrSet(glView.snapshotShortReliabilityMap());
+            controller.captureHdrSet(publishedPair);
         });
     }
 

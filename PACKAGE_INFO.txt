@@ -1,55 +1,56 @@
-Iris HDR Viewfinder Test V1.4.23
+Iris HDR Viewfinder Test V1.5.0
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
-Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
+Status: PREPARED / UPLOAD-READY - NOT BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.4.22 GitHub Actions compiled candidate/artifact
-- Commit: 3042459e1308006c09f0236ddf23751222cadd59
-- Tree: b68d92875125a17982c046f8f4ea4476450d1207
-- Actions run: 33586520503
-- Job: 100111704033
-- Artifact ID: 9830284701
-- Artifact digest: sha256:bc3f9110b3694078d7b02a5fa63af27bc8a02845cefb9f9095cd93baa43bb388
-- APK SHA-256: 12888fd84c8093c177d46952316c9827bad5fff408c597ff5fe12054be28dcc4
-- Source-candidate TAR SHA-256: 2ffaff7142ef0fc62ee49d7db8fca9d2ac2e46e3f447f6e01543c9e60b5932db
-- Runtime manifest SHA-256: e003754dae13f51de722e6a4867ed11911ff49ae4ab87cf807e293d7a78f52c6
-- Repository manifest SHA-256: db7aed1fbf3eed9997ca518843743bba23d162afe31b696be8ec1207e6c719b2
-- Regressions SHA-256: 97cec692954e4c21098747e7c6575cb01149a7a220b54b796169afa9248cae64
+- Exact successful V1.4.23 V1.1 GitHub Actions compiled candidate/artifact
+- Commit: f340d8de62d41e9c505b3936b2b0af543deb9c53
+- Tree: e46a12109d9e0c8e727a21394c1508bd5dbb0724
+- Actions run: 33591832342
+- Job: 100127239193
+- Artifact ID: 9832029897
+- Artifact digest: sha256:829486e209fffae643bb6b5187cc28cb6a556b2ade00227217a217252bcc472f
+- APK SHA-256: 32973e020ee60d40e59cd0d76710c0e02c40ab4ab9c9c00d900009fb8ebf5132
+- Source-candidate TAR SHA-256: 66dc4cb57220ece4aa6ee031eab8c2941a6fcdcb4730af614a0b5ab80b0c9f57
+- Runtime manifest SHA-256: d41f3f66060d91f5be4a579c9ead2b8a11f5efaf9f71f18de11700b846255350
+- Repository manifest SHA-256: 190eb0a1d9f5b9fe01e3a9ea887a12dfbf6428071152bacbc2ec60565fa2b96c
+- Regressions SHA-256: 1b565cdfe309d2f1ae1466b0b16515acfa3b7d2be27ee9a60be46934336be9f8
 
 Verification-mechanics authority:
-- Exact successful V1.4.22 Actions compiler/build/invariance sequence.
-- V1.4.23 preserves the same 16-step order and the same real GLSL, real Java, full assemble, signing, artifact and post-build invariance mechanics.
-- Authority/version/allowlist/hash/regression pins advance from V1.4.22 to V1.4.23 only.
-- No new backup branch is created per project decision; rollback is protected by exact V1.4.22 authority hashes plus deterministic full-index forward/rollback patches.
+- Exact successful V1.4.23 V1.1 16-stage authority-seeded compiler/build/invariance sequence, inherited from the proven strict handoff mechanics.
+- V1.5.0 keeps candidate-first authority reconstruction, exact allowlists, protected-byte proof, pinned real GLSL, real Java, full assemble, stable signing, exactly-one-APK proof, post-build invariance and clean artifact export.
+- Necessary infrastructure delta is limited to V1.5.0 authority/version/allowlist pins, V1.5 RAW regressions, compiling the two new RAW shaders, and running deterministic patch/PRE-BUILD proof after the real language compilers per current project order.
 
-V1.4.23 runtime changed-file allowlist: exactly seven files:
-- app/src/main/assets/shaders/flicker_field.frag (new pair-rate 16x64 flicker field)
+Backup:
+- backup-v1.4.23-v1.1-before-raw-short-long-hdr
+- Exact backup commit: f340d8de62d41e9c505b3936b2b0af543deb9c53
+- Backup is safety-only; workflow never depends on it.
+
+V1.5.0 runtime/build changed-file allowlist: exactly 10 files:
+- app/build.gradle.kts (versionCode 29 / versionName 1.0-v1.5.0 only)
 - app/src/main/assets/shaders/hdr_display.frag
+- app/src/main/assets/shaders/raw_hdr_demosaic.frag (NEW)
+- app/src/main/assets/shaders/raw_hdr_fusion.frag (NEW)
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java (NEW)
 
-Runtime files explicitly unchanged/protected from V1.4.22:
+Runtime files explicitly unchanged/protected from V1.4.23:
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/shaders/copy_2d.frag
+- app/src/main/assets/shaders/flicker_field.frag
 - app/src/main/assets/shaders/fullscreen.vert
 - app/src/main/assets/shaders/oes_to_rgb.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
 
 Infrastructure changed-file list:
 - .github/workflows/build.yml
 - BUILD_WORKFLOW_COPY.yml
 - scripts/verify_orientation.py
-- app/build.gradle.kts (version only; stable signing unchanged)
-
-Infrastructure difference from successful V1.4.22:
-- V1.4.22 authority artifact/run/commit/tree pins
-- V1.4.23 version/build, 13-runtime-file universe and exact seven-file runtime allowlist
-- V1.4.23 runtime/protected hashes and permanent regressions 093-098
-- No compiler, Gradle, signing, assemble, artifact, patch, freeze or invariance mechanism redesign/reordering
 
 Documentation/hash-pin changed files:
 - PACKAGE_INFO.txt
@@ -57,60 +58,56 @@ Documentation/hash-pin changed files:
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-V1.4.23 information-gain SHORT search:
-- LONG remains the adaptive natural scene-body/appearance authority.
-- A darker SHORT is a temporary probe, not an automatically accepted new tier.
-- The probe is accepted only when localized LONG-damaged regions gain measurable usable recovery information.
-- A no-gain probe rolls back once to the previously accepted tier and locks further darkening until a material LONG-scene change.
-- A phase-sensitive fast SHORT with uncorrectable flicker evidence is rejected even if apparent highlight headroom increases.
-- Stable scenes may not oscillate repeatedly between adjacent SHORT tiers.
-- The achieved physical bracket remains hard-bounded after shutter quantization.
+Infrastructure differs from V1.4.23 successful implementation: YES, narrowly and explicitly.
+- Authority advances to successful V1.4.23 V1.1 artifact.
+- Candidate/runtime universe advances from 13 to 16 app/src files because RawHdrFusion + two RAW shaders are new.
+- Real GLSL compile list adds raw_hdr_fusion.frag and raw_hdr_demosaic.frag.
+- V1.5 regression validator replaces obsolete still-JPEG fusion expectations with matched RAW_SENSOR authority, exact-published-pair WYSIWYG, CFA validity, RAW alignment/radiometry, GTM-only, crop/physical-lens and EGL lifetime checks.
+- Deterministic patch proof/PRE-BUILD SAFETY is executed after the real GLSL/Java compilers and before assemble.
+- Gradle version, Android SDK, signing identity, assemble command, artifact upload mechanism and no-APK-push policy are unchanged.
 
-V1.4.23 pair-rate flicker/PWM correction:
-- New flicker_field.frag computes a 16x64 current-pair local illumination field in the live GPU path.
-- The field uses same-row SHORT/LONG overlap evidence and separates luma trust from chroma trust.
-- Fast/PWM-risk SHORT is normalized only where current-pair evidence is sufficient and consistent; unsafe regions fail closed from recovery.
-- Visible SHORT chroma authority is pair-rate and fail-closed. The older 32x24 / 200ms history may continue controller/quality learning but cannot directly switch visible luma or chroma.
-- Flicker-safe/outdoor SHORT bypasses mandatory correction so the new guard does not disturb clean scenes.
-- FrameMeta carries the fast-SHORT guard with the exact exposure-generation pair into still capture.
+Core V1.5.0 architecture:
+- Existing matched full-resolution RAW_SENSOR SHORT + LONG pair becomes sole FUSED_HDR.jpg authority.
+- HAL SHORT/LONG JPEGs remain reference files only; JpegFusion is not called by the capture path and is not a fallback.
+- LONG owns natural scene body/high-SNR content.
+- SHORT supplies highlight evidence only where LONG validity collapses.
+- SHORT is continuously registered into LONG output coordinates with confidence; contradictory motion/disocclusion fails closed.
+- Fusion is CFA-aware before the single demosaic so clipped LONG R/G/B phases cannot invent pink/green/blue color when SHORT measured valid evidence.
+- Per-exposure RAW black/white level and four-phase lens-shading maps are consumed; post-RAW sensitivity boost is excluded from RAW radiometric normalization.
+- One scalar/row photometric correction is learned from mutually valid overlap; independent R/G/B response curves are forbidden.
+- Exact displayed SHORT/LONG generation, LONG WB/color transform, physical lens and viewfinder sensor crop are frozen at shutter.
+- Provisional AUTO SHORT probes cannot be captured before acceptance.
+- Live and RAW still share the same global, bracket-independent GTM in hdr_display.frag; no LTM and no post-fusion Brightness gain.
+- Original SHORT/LONG DNGs remain source-reference DNGs written from immutable copied RAW_SENSOR bytes.
 
-V1.4.23 live/still parity:
-- Live uses the 16x64 flicker field as a small GPU preprocessing pass before the shared HDR shader.
-- Still JPEG learns the equivalent full-frame 16x64 field from about 8K sparse overlap samples, then uploads it once; the heavy full-resolution correction/fusion remains on the tiled offscreen GLES3 path.
-- This avoids restoring full-frame Java HDR processing or huge extra full-resolution GPU history allocations.
-- The existing 512-row tiled still renderer, fusion halo, parallel DNG/source I/O and EGL lifetime protections remain unchanged.
+Real Xiaomi 15 Ultra RAW fixture authority used for V1.5 regressions:
+- IrisHDR_20260902_120448_758_LONG.dng SHA-256 55f247d129b091fd8618202641cd9539192dbc6bcc597d05d2aea51351191579
+- IrisHDR_20260902_120448_758_SHORT.dng SHA-256 c6c6388acf19290508ae1fe724afd361920b0d6b9551a2e8e04c1783f27de0ab
+- LONG 10 ms / ISO 323; SHORT 1.25 ms / ISO 50; ~5.69 EV total exposure separation.
+- 311119 physically clipped LONG CFA samples; 311044 (99.975893%) have aligned SHORT that is unsaturated and >=8 DN above black.
+- Partial-channel clipping is common; real green-clipped/RB-valid cells confirmed the old pink/magenta failure risk and support pre-demosaic per-CFA replacement.
 
-V1.4.23 bounded fusion architecture:
-- Calibrated SHORT and LONG remain in the same scene-linear radiance domain through source ownership.
-- LONG owns ordinary valid scene content. SHORT reaches complete luma/detail authority only where LONG genuinely lost information and SHORT is current-pair safe.
-- Source ownership occurs exactly once: mix(LONG radiance, SHORT radiance, coherent ownership).
-- The resulting radiance is bounded by valid source endpoints before highlight mapping.
-- Final mapped highlight reconstruction is bounded again by the corresponding valid display endpoints, preventing double-ownership, out-of-range rings and hard synthetic contours.
-- Unstable SHORT chroma fails closed to LONG chromaticity while usable SHORT luma/detail can still recover a clipped core.
-
-Permanent V1.4.23 device regressions:
-- 093 chandelier runaway: no information gain => rollback/lock rather than continued 1/960 -> 1/1920 -> 1/3840 darkening.
-- 094 table pulse: stable scene may not oscillate between adjacent SHORT tiers.
-- 095 rolling/PWM: phase-sensitive fast SHORT must current-pair normalize or fail closed from FUSED.
-- 096 pink pulse: visible chroma is pair-rate/fail-closed; slow 200ms history cannot switch displayed color.
-- 097 hard-band/halo: one source ownership in radiance plus bounded final highlight reconstruction.
-- 098 live/still parity: captured still receives the same fast-SHORT guard and one full-frame 16x64 flicker field before tiled GPU fusion.
-
-Candidate runtime manifest digest:
-- d41f3f66060d91f5be4a579c9ead2b8a11f5efaf9f71f18de11700b846255350
+Candidate runtime manifest:
+- app/src file count: 16
+- SHA-256: 4510ca8d99a858aaaa591eddb94c3763a892c078851804eece2f751e8d46702c
 
 Patch/rollback protection:
-- No new backup branch is created for V1.4.23.
-- Exact V1.4.22 authority hashes plus deterministic full-index V1.4.22->V1.4.23 forward and V1.4.23->V1.4.22 rollback patches are required at core.abbrev 7/12/40 with fuzz=0 replay.
+- Deterministic full-index V1.4.23->V1.5.0 forward and V1.5.0->V1.4.23 rollback patches are required at core.abbrev 7/12/40.
+- Local runtime/build draft proof already produced identical patch bytes across 7/12/40 and exact Git/GNU fuzz=0 round trip.
+- Final Actions workflow regenerates and proves the complete committed-candidate patches after real language compilation.
 
 Stable signing:
 - Reuses repository secret IRIS_TEST_SIGNING_KEY_B64; do not regenerate it.
 - Stable keystore SHA-256: 2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e
 - Signing certificate SHA-256: 53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8
-- V1.4.23 versionCode 28 should install as a normal update over successful stable-signed V1.4.22 after successful Actions proof.
+- V1.5.0 versionCode 29 should install as a normal update over stable-signed V1.4.23 after successful Actions proof.
 
 Local compiler status before Actions:
+- Complete GLSL reserved-identifier scan: PASS
+- V1.5 semantic/ownership/orientation regression validator: PASS
+- YAML syntax + workflow-copy equality: PASS
+- Deterministic runtime/build patch proof: PASS
 - Pinned real glslangValidator: NOT RUN locally
 - Real project Java compiler: NOT RUN locally
 - Full :app:assembleDebug: NOT RUN locally
-- Therefore this package may be called PREPARED / UPLOAD-READY only until Actions succeeds.
+- Therefore this package is PREPARED / UPLOAD-READY only until GitHub Actions succeeds.

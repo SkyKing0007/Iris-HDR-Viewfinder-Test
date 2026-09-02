@@ -14,6 +14,8 @@ import android.hardware.camera2.CaptureFailure;
 import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
+import android.hardware.camera2.params.ColorSpaceTransform;
+import android.hardware.camera2.params.RggbChannelVector;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.hardware.camera2.params.TonemapCurve;
 import android.media.Image;
@@ -171,6 +173,12 @@ final class CameraController {
     private long captureBeginRealtimeNs;
     private float displayBrightnessEv;
     private float captureDisplayBrightnessEv;
+    // V1.5.0 WYSIWYG color ownership. The latest accepted LONG preview result is
+    // frozen at shutter and applied identically to SHORT/LONG still requests.
+    private RggbChannelVector captureColorGains;
+    private ColorSpaceTransform captureColorTransform;
+    private String captureExpectedPhysicalId;
+    private Rect captureViewfinderSensorCrop;
     private long shortExposureNs = ONE_SECOND_NS / 480;
     private long longExposureNs = ONE_SECOND_NS / 60;
     private int manualIso = 400;
@@ -424,10 +432,8 @@ final class CameraController {
         cameraHandler.post(() -> processHdrSceneStatsLocked(stats));
     }
 
-    void captureHdrSet(byte[] shortReliabilityMap) {
-        final byte[] frozenReliability = shortReliabilityMap == null
-                ? null : shortReliabilityMap.clone();
-        cameraHandler.post(() -> beginCaptureLocked(frozenReliability));
+    void captureHdrSet(HdrGlView.PublishedPairSnapshot publishedPair) {
+        cameraHandler.post(() -> beginCaptureLocked(publishedPair));
     }
 
     void setJpegOrientationDegrees(int degrees) {
@@ -454,6 +460,10 @@ final class CameraController {
         if (opening || cameraDevice != null || cameraId == null) return;
         try {
             characteristics = cameraManager.getCameraCharacteristics(cameraId);
+            captureColorGains = null;
+            captureColorTransform = null;
+            captureExpectedPhysicalId = null;
+            captureViewfinderSensorCrop = null;
             activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
             Range<Long> expRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
             Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
@@ -715,10 +725,13 @@ final class CameraController {
                 int activeLongIso = activeLongIso();
                 int postRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;
                 long generation = ++previewExposureGeneration;
+                boolean provisionalShortProbe = autoHdrExposure && autoShortProbePending;
                 CaptureRequest shortRequest = buildManualPreviewRequest(
-                        FrameMeta.SHORT, generation, activeShortNs, activeShortIso, postRawBoost);
+                        FrameMeta.SHORT, generation, activeShortNs, activeShortIso, postRawBoost,
+                        provisionalShortProbe);
                 CaptureRequest longRequest = buildManualPreviewRequest(
-                        FrameMeta.LONG, generation, activeLongNs, activeLongIso, postRawBoost);
+                        FrameMeta.LONG, generation, activeLongNs, activeLongIso, postRawBoost,
+                        provisionalShortProbe);
                 captureSession.setRepeatingBurst(
                         Arrays.asList(shortRequest, longRequest),
                         previewCaptureCallback,
@@ -743,8 +756,8 @@ final class CameraController {
     }
 
     private CaptureRequest buildManualPreviewRequest(
-            String kind, long generation, long exposureNs, int iso, int postRawBoost)
-            throws CameraAccessException {
+            String kind, long generation, long exposureNs, int iso, int postRawBoost,
+            boolean provisionalShortProbe) throws CameraAccessException {
         CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
         builder.addTarget(previewSurface);
         configureManualRequest(builder, exposureNs, iso, postRawBoost, true);
@@ -754,7 +767,7 @@ final class CameraController {
             builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, aeFpsRange);
         }
         configurePreviewRotateAndCrop(builder);
-        builder.setTag(new PreviewRequestTag(kind, generation));
+        builder.setTag(new PreviewRequestTag(kind, generation, provisionalShortProbe));
         return builder.build();
     }
 
@@ -826,6 +839,22 @@ final class CameraController {
         configureSrgbTonemap(builder);
     }
 
+    private void configureRawHdrStillState(CaptureRequest.Builder builder) {
+        // RAW-capable devices support lens-shading-map reporting. The returned map
+        // is required to make the RAW rendering match processed-view shading/color.
+        builder.set(
+                CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE,
+                CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON);
+        if (captureColorGains != null && captureColorTransform != null) {
+            builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF);
+            builder.set(
+                    CaptureRequest.COLOR_CORRECTION_MODE,
+                    CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX);
+            builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, captureColorGains);
+            builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, captureColorTransform);
+        }
+    }
+
     private void configurePreviewRotateAndCrop(CaptureRequest.Builder builder) {
         if (Build.VERSION.SDK_INT < 31 || characteristics == null) return;
         int[] modes = characteristics.get(CameraCharacteristics.SCALER_AVAILABLE_ROTATE_AND_CROP_MODES);
@@ -861,10 +890,12 @@ final class CameraController {
                     Object tagObject = request.getTag();
                     String kind;
                     long generation = 0L;
+                    boolean provisionalShortProbe = false;
                     if (tagObject instanceof PreviewRequestTag) {
                         PreviewRequestTag previewTag = (PreviewRequestTag) tagObject;
                         kind = previewTag.kind;
                         generation = previewTag.generation;
+                        provisionalShortProbe = previewTag.provisionalShortProbe;
                     } else if (tagObject instanceof String) {
                         String tag = (String) tagObject;
                         if (TAG_NORMAL.equals(tag)) kind = FrameMeta.NORMAL;
@@ -912,7 +943,13 @@ final class CameraController {
                             && flickerGuardRequiredForShortLocked(exposure, activeLongExposureNs());
                     FrameMeta meta = new FrameMeta(
                             kind, result.getFrameNumber(), timestamp, exposure, iso, generation,
-                            flickerGuardRequired);
+                            flickerGuardRequired, provisionalShortProbe,
+                            result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_ID),
+                            Build.VERSION.SDK_INT >= 35
+                                    ? result.get(CaptureResult.LOGICAL_MULTI_CAMERA_ACTIVE_PHYSICAL_SENSOR_CROP_REGION)
+                                    : null,
+                            result.get(CaptureResult.COLOR_CORRECTION_GAINS),
+                            result.get(CaptureResult.COLOR_CORRECTION_TRANSFORM));
                     listener.onPreviewMeta(meta);
                     previewResultCount++;
                     Long frameDuration = result.get(CaptureResult.SENSOR_FRAME_DURATION);
@@ -945,43 +982,74 @@ final class CameraController {
                 }
             };
 
-    private void beginCaptureLocked(byte[] frozenShortReliabilityMap) {
+    private void beginCaptureLocked(HdrGlView.PublishedPairSnapshot publishedPair) {
         if (capturing || cameraDevice == null || characteristics == null
                 || captureSession == null || previewSurface == null || !previewSurface.isValid()) {
             listener.onStatus(capturing ? "Capture already in progress" : "Camera not ready");
             return;
         }
-        capturing = true;
-        // Freeze the exact adaptive pair before closing the preview session. Live scene
-        // statistics may continue to arrive while the still session is configured, but
-        // from this point forward they cannot mutate this in-flight HDR set.
-                autoMetering = false;
-        captureLongExposureNs = activeLongExposureNs();
-        captureLongIso = activeLongIso();
-        if (autoHdrExposure && autoShortProbePending) {
-            // A darker AUTO tier is never committed to a still capture until the
-            // information-gain/flicker test accepts it. Capture from the last accepted
-            // tier while a probe is pending so one transient PWM phase can never
-            // become the saved HDR source.
-            double longProduct = Math.max(
-                    1.0, (double) captureLongExposureNs * captureLongIso);
-            double baselineProduct = Math.max(
-                    1.0, longProduct / Math.pow(2.0, autoShortProbeBaselineEv));
-            ExposureSetting acceptedShort = solveShortSettingForProductLocked(
-                    baselineProduct, captureLongExposureNs, longProduct,
-                    AUTO_BRACKET_MAX_EV, autoShortProbeBaselineFast);
-            captureShortExposureNs = acceptedShort.exposureNs;
-            captureShortIso = acceptedShort.iso;
-            RuntimeLogger.event(
-                    "SHORT_TIER",
-                    String.format(
-                            Locale.US,
-                            "capture uses accepted %.2fEV while %.2fEV probe pending",
-                            autoShortProbeBaselineEv, autoAdaptiveBracketEv));
-        } else {
-            captureShortExposureNs = activeShortExposureNs();
-            captureShortIso = activeShortIso();
+        if (publishedPair == null || publishedPair.shortMeta == null || publishedPair.longMeta == null
+                || !FrameMeta.SHORT.equals(publishedPair.shortMeta.kind)
+                || !FrameMeta.LONG.equals(publishedPair.longMeta.kind)
+                || publishedPair.shortMeta.exposureGeneration
+                        != publishedPair.longMeta.exposureGeneration) {
+            listener.onStatus("Waiting for a complete displayed SHORT/LONG HDR pair");
+            return;
         }
+        if (publishedPair.longMeta.colorGains == null
+                || publishedPair.longMeta.colorTransform == null) {
+            listener.onStatus("Displayed LONG color state is not ready yet");
+            return;
+        }
+        if (publishedPair.shortMeta.provisionalShortProbe
+                != publishedPair.longMeta.provisionalShortProbe) {
+            listener.onStatus("Displayed HDR probe state is inconsistent");
+            return;
+        }
+        if (publishedPair.longMeta.provisionalShortProbe) {
+            boolean exactCurrentGeneration = publishedPair.longMeta.exposureGeneration
+                    == previewExposureGeneration;
+            boolean exactCurrentExposure = publishedPair.shortMeta.exposureTimeNs
+                            == activeShortExposureNs()
+                    && publishedPair.shortMeta.iso == activeShortIso()
+                    && publishedPair.longMeta.exposureTimeNs == activeLongExposureNs()
+                    && publishedPair.longMeta.iso == activeLongIso();
+            if (autoShortProbePending || !exactCurrentGeneration || !exactCurrentExposure) {
+                listener.onStatus("HDR SHORT probe is still being validated");
+                return;
+            }
+            RuntimeLogger.event(
+                    "SHORT_PROBE_CAPTURE_ACCEPTED",
+                    "generation=" + publishedPair.longMeta.exposureGeneration);
+        }
+        capturing = true;
+        // WYSIWYG authority is the exact SHORT/LONG pair currently published by the
+        // GLSurfaceView, not a newer controller target that may still be in-flight.
+        autoMetering = false;
+        captureShortExposureNs = publishedPair.shortMeta.exposureTimeNs;
+        captureShortIso = publishedPair.shortMeta.iso;
+        captureLongExposureNs = publishedPair.longMeta.exposureTimeNs;
+        captureLongIso = publishedPair.longMeta.iso;
+        captureColorGains = publishedPair.longMeta.colorGains;
+        captureColorTransform = publishedPair.longMeta.colorTransform;
+        captureExpectedPhysicalId = publishedPair.longMeta.activePhysicalId;
+        captureViewfinderSensorCrop = publishedPair.longMeta.physicalSensorCropRegion == null
+                ? null : new Rect(publishedPair.longMeta.physicalSensorCropRegion);
+        if (allowCropped60Fps && targetPreviewFps >= 60
+                && captureViewfinderSensorCrop == null) {
+            capturing = false;
+            listener.onStatus("Cannot prove 60fps viewfinder crop for WYSIWYG still");
+            return;
+        }
+        RuntimeLogger.event(
+                "WYSIWYG_FREEZE",
+                "generation=" + publishedPair.longMeta.exposureGeneration
+                        + " shortFrame=" + publishedPair.shortMeta.frameNumber
+                        + " longFrame=" + publishedPair.longMeta.frameNumber
+                        + " shortFlickerGuard=" + publishedPair.shortMeta.flickerGuardRequired
+                        + " provisionalProbe=" + publishedPair.shortMeta.provisionalShortProbe
+                        + " physical=" + (captureExpectedPhysicalId == null ? "?" : captureExpectedPhysicalId)
+                        + " sensorCrop=" + rectText(captureViewfinderSensorCrop));
         capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;
         captureDisplayBrightnessEv = displayBrightnessEv;
         captureBeginRealtimeNs = System.nanoTime();
@@ -993,6 +1061,7 @@ final class CameraController {
                         + " long=" + exposureText(captureLongExposureNs) + " ISO" + captureLongIso
                         + " boost=" + capturePostRawBoost + "%"
                         + String.format(Locale.US, " brightnessIntent=%+.1fEV", captureDisplayBrightnessEv)
+                        + " frozenColor=" + (captureColorGains != null && captureColorTransform != null)
                         + " mode=" + (autoHdrExposure ? "AUTO" : manualSafetySummaryLocked()));
         listener.onStatus("Capturing matched SHORT/LONG RAW + JPEG set…");
         captureSaver = new CaptureSetSaver(
@@ -1001,10 +1070,10 @@ final class CameraController {
                 cameraId,
                 captureId,
                 jpegOrientationDegrees,
+                jpegSize,
                 captureDisplayBrightnessEv,
-                flickerGuardRequiredForShortLocked(
-                        captureShortExposureNs, captureLongExposureNs),
-                frozenShortReliabilityMap,
+                captureExpectedPhysicalId,
+                captureViewfinderSensorCrop,
                 new CaptureSetSaver.Listener() {
                     @Override
                     public void onInputsAcquired(String id) {
@@ -1028,6 +1097,7 @@ final class CameraController {
             configureManualRequest(
                     shortBuilder, captureShortExposureNs, captureShortIso,
                     capturePostRawBoost, false);
+            configureRawHdrStillState(shortBuilder);
             shortBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) 95);
             shortBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientationDegrees);
             shortBuilder.setTag(TAG_CAPTURE_SHORT);
@@ -1038,6 +1108,7 @@ final class CameraController {
             configureManualRequest(
                     longBuilder, captureLongExposureNs, captureLongIso,
                     capturePostRawBoost, false);
+            configureRawHdrStillState(longBuilder);
             longBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) 95);
             longBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientationDegrees);
             longBuilder.setTag(TAG_CAPTURE_LONG);
@@ -1130,6 +1201,10 @@ final class CameraController {
         }
         characteristics = null;
         activeArray = null;
+        captureColorGains = null;
+        captureColorTransform = null;
+        captureExpectedPhysicalId = null;
+        captureViewfinderSensorCrop = null;
         previewSurfaceConfigured = false;
         RuntimeLogger.event("CAMERA_CLOSE", "camera device closed");
     }
@@ -2367,10 +2442,12 @@ final class CameraController {
     private static final class PreviewRequestTag {
         final String kind;
         final long generation;
+        final boolean provisionalShortProbe;
 
-        PreviewRequestTag(String kind, long generation) {
+        PreviewRequestTag(String kind, long generation, boolean provisionalShortProbe) {
             this.kind = kind;
             this.generation = generation;
+            this.provisionalShortProbe = provisionalShortProbe;
         }
     }
 

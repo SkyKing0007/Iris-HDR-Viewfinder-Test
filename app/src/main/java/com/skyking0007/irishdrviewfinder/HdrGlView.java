@@ -33,6 +33,16 @@ final class HdrGlView extends GLSurfaceView {
         void onSceneStats(SceneStats stats);
     }
 
+    static final class PublishedPairSnapshot {
+        final FrameMeta shortMeta;
+        final FrameMeta longMeta;
+
+        PublishedPairSnapshot(FrameMeta shortMeta, FrameMeta longMeta) {
+            this.shortMeta = shortMeta;
+            this.longMeta = longMeta;
+        }
+    }
+
     static final class SceneStats {
         final long shortFrameNumber;
         final long longFrameNumber;
@@ -136,6 +146,7 @@ final class HdrGlView extends GLSurfaceView {
     private volatile InputSurfaceListener inputSurfaceListener;
     private volatile SceneStatsListener sceneStatsListener;
     private volatile Surface currentInputSurface;
+    private volatile PublishedPairSnapshot publishedPairSnapshot;
 
     HdrGlView(Context context) {
         this(context, null);
@@ -212,6 +223,10 @@ final class HdrGlView extends GLSurfaceView {
 
     byte[] snapshotShortReliabilityMap() {
         return renderer.snapshotShortReliabilityMap();
+    }
+
+    PublishedPairSnapshot snapshotPublishedPair() {
+        return publishedPairSnapshot;
     }
 
     private void publishInputSurface(Surface surface) {
@@ -416,6 +431,7 @@ final class HdrGlView extends GLSurfaceView {
             stagingShortMeta = null;
             lastShortMeta = null;
             lastLongMeta = null;
+            publishedPairSnapshot = null;
             lastStatsNs = 0L;
             shortCalibration = 1.0f;
             Arrays.fill(shortPhotoScale, 1.0f);
@@ -481,6 +497,7 @@ final class HdrGlView extends GLSurfaceView {
             stagingShortMeta = null;
             lastShortMeta = null;
             lastLongMeta = null;
+            publishedPairSnapshot = null;
             lastStatsNs = 0L;
             shortCalibration = 1.0f;
             Arrays.fill(shortPhotoScale, 1.0f);
@@ -596,6 +613,7 @@ final class HdrGlView extends GLSurfaceView {
                     stagingLongTexture = oldLong;
                     lastShortMeta = stagingShortMeta;
                     lastLongMeta = meta;
+                    publishedPairSnapshot = new PublishedPairSnapshot(lastShortMeta, lastLongMeta);
                     haveShort = true;
                     haveLong = true;
                     haveStagingShort = false;
