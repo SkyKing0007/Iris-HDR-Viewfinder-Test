@@ -19,7 +19,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.1 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.2 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -49,7 +49,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.1 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.2 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -323,12 +323,27 @@ require('buildMeterPreviewRequest(), previewCaptureCallback' in camera,
         "AUTO metering must use a contiguous repeating AE phase")
 require('Arrays.asList(shortRequest, longRequest)' in camera,
         "steady AUTO/MANUAL HDR must remain a two-manual-request repeating pair")
-require('AUTO_REMETER_INTERVAL_MS = 5_000L' in camera,
-        "bounded clean AE refresh cadence must remain 5 seconds")
-require('cameraHandler.hasCallbacks(autoRemeterRunnable)' in camera,
-        "AUTO remeter must arm only one pending timer")
+require('AUTO_REMETER_INTERVAL_MS' not in camera
+        and 'autoRemeterRunnable' not in camera
+        and 'scheduleAutoRemeterLocked' not in camera
+        and 'hasFreshAutoAnchorLocked' not in camera,
+        "periodic 5-second AE takeover must remain removed after bootstrap")
+bootstrap = camera[camera.index('private void startAutoMeteringLocked()'):camera.index('private void processAutoMeterResultLocked')]
+require('if (haveAeSample) {' in bootstrap and 'Bootstrap only' in bootstrap,
+        "clean HAL AE must be bootstrap-only once the live HDR pair exists")
+require('STATS_WIDTH = 32' in gl and 'STATS_HEIGHT = 24' in gl
+        and 'STATS_INTERVAL_NS = 200_000_000L' in gl
+        and 'glReadPixels' in gl and 'readLongTextureStats' in gl,
+        "validated 32x24 / 200ms live LONG statistics path missing")
+require('AUTO_LIVE_HYSTERESIS_EV = 0.10' in camera
+        and 'AUTO_LIVE_MAX_STEP_EV = 0.30' in camera
+        and 'AUTO_LIVE_UPDATE_MIN_NS = 180_000_000L' in camera,
+        "validated fast AUTO response bounds missing")
+require('setSceneStatsListener(controller::onHdrSceneStats)' in main
+        and 'processHdrSceneStatsLocked' in camera,
+        "live scene-statistics route to CameraController missing")
 require('FrameMeta.METER.equals(meta.kind)' in gl,
-        "meter frames must remain hidden from display/pair publication")
+        "initial bootstrap meter frames must remain hidden from display/pair publication")
 
 # 025 / 031 - Both manual pair members carry one FPS range; true-60 mode uses exact [60,60].
 manual_builder = camera[camera.index('private CaptureRequest buildManualPreviewRequest'):camera.index('private CaptureRequest buildMeterPreviewRequest')]
@@ -485,10 +500,11 @@ require('configureProcessingControls(builder);' in camera,
         "processed preview/still requests must apply edge/noise ownership")
 
 # 034 - Recorded V1.4.5 HDR FUSED crop/FPS glitch becomes permanent regression.
-require(camera.count('scheduleAutoRemeterLocked();') == 1,
-        "AUTO remeter must be armed only from completed LONG results")
-require('FrameMeta.LONG.equals(kind)' in callback and 'scheduleAutoRemeterLocked();' in callback,
-        "remeter must wait for a completed LONG so a complete pair remains published")
+require('scheduleAutoRemeterLocked' not in camera and 'autoRemeterRunnable' not in camera,
+        "periodic AUTO request takeover must not return")
+require('if (listener == null || !haveLong || lastLongMeta == null) return;' in gl
+        and 'lastLongMeta.frameNumber' in gl and 'lastLongMeta.exposureProduct()' in gl,
+        "continuous AUTO statistics must be sourced only from an actually published LONG")
 start_meter = camera[camera.index('private void startAutoMeteringLocked()'):camera.index('private void processAutoMeterResultLocked')]
 require('resetCaptureResultFpsLocked();' in start_meter,
         "entering hidden AE meter must reset steady-preview FPS evidence")
@@ -543,11 +559,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
 # 038 / 042 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2' in workflow
-        and 'run-id: 33667545707' in workflow,
-        "workflow must download the exact successful V1.4.11 V2 Actions authority")
-require('run-id: 33464019593' not in workflow and 'run-id: 33458017737' not in workflow,
-        "V1.4.11 V2.1 must not silently fall back to V1.4.11 or older authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.1' in workflow
+        and 'run-id: 33675083158' in workflow,
+        "workflow must download the exact successful V1.4.11 V2.1 Actions authority")
+require('run-id: 33667545707' not in workflow
+        and 'run-id: 33464019593' not in workflow
+        and 'run-id: 33458017737' not in workflow,
+        "V1.4.11 V2.2 must not silently fall back to V2/V1.4.11 or older authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -585,6 +603,21 @@ require('brightnessLabelText' in main and 'glView.setDisplayBrightnessEv(display
 require('captureDisplayBrightnessEv = displayBrightnessEv;' in camera
         and 'captureDisplayGamma = displayGamma;' in camera,
         "shutter press must freeze the exact displayed Brightness EV and Gamma")
+live_stats = camera[camera.index('private void processHdrSceneStatsLocked'):camera.index('private void deriveAutoPairFromLiveProductLocked')]
+require('displayBrightnessEv' not in live_stats and 'displayGamma' not in live_stats,
+        "physical AUTO settling must stay independent of presentation Brightness/Gamma")
+require('HDR_BRACKET_RATIO = 8.0' in camera,
+        "V2.2 must preserve V1.4.11 V2 fixed 8x (~3EV) AUTO bracket ownership")
+# Exact fast-transition numerical regression: large scene changes begin correcting on the next live sample
+# but each applied update remains bounded to the validated V1.4.15 0.30EV step.
+def live_step(error_ev):
+    if abs(error_ev) <= 0.10:
+        return 0.0
+    return max(-0.30, min(0.30, error_ev))
+require(math.isclose(live_step(+2.0), +0.30) and math.isclose(live_step(-2.0), -0.30),
+        "large dark/bright scene changes must react immediately with bounded symmetric correction")
+require(math.isclose(live_step(+0.05), 0.0) and math.isclose(live_step(-0.05), 0.0),
+        "small live-stat jitter must remain inside exposure hysteresis")
 require('captureDisplayBrightnessEv' in camera[camera.index('new CaptureSetSaver('):camera.index('stillSessionActive = true;')]
         and 'captureDisplayGamma' in camera[camera.index('new CaptureSetSaver('):camera.index('stillSessionActive = true;')],
         "saved fusion must receive frozen shutter-time Brightness EV and Gamma")
@@ -604,9 +637,7 @@ require('statusText.setSingleLine(true);' in main
         and 'statusText.setMinHeight(dp(20));' in main
         and 'statusText.setMaxHeight(dp(20));' in main
         and 'ViewGroup.LayoutParams.MATCH_PARENT,\n                dp(20)' in main,
-        "5-second remeter status must have invariant one-line 20dp geometry")
-require('AUTO_REMETER_INTERVAL_MS = 5_000L' in camera,
-        "periodic-bounce correction must not redesign the proven 5-second remeter cadence")
+        "V2.1 fixed-height status-row bounce correction must remain intact")
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
@@ -614,9 +645,11 @@ require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('a
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
 still_burst = camera[camera.index('private void issueStillBurstLocked()'):camera.index('private final CameraCaptureSession.CaptureCallback stillCaptureCallback')]
-require('cameraHandler.removeCallbacks(autoRemeterRunnable);' in begin_capture
-        and 'autoMetering = false;' in begin_capture,
-        "shutter press must cancel/ignore in-flight AUTO remeter before snapshotting controls")
+require('autoMetering = false;' in begin_capture,
+        "shutter press must freeze/ignore bootstrap metering before snapshotting controls")
+stats_block = camera[camera.index('private void processHdrSceneStatsLocked'):camera.index('private void deriveAutoPairFromLiveProductLocked')]
+require('stillSessionActive' in stats_block and 'autoMetering' in stats_block,
+        "continuous live statistics must not mutate an in-flight still capture")
 for token in [
     'captureShortExposureNs = activeShortExposureNs();',
     'captureLongExposureNs = activeLongExposureNs();',
@@ -711,4 +744,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.1 REGRESSION PASS: fixed-3EV HDR, -4..+4EV post-fusion Brightness, 0.50..2.00 ratio-preserving Gamma, system-bar-safe UI, fixed-height remeter status, side-by-side app identity, LONG-first highlight color, frozen capture controls, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.11 V2.2 REGRESSION PASS: fixed-3EV HDR, -4..+4EV post-fusion Brightness, 0.50..2.00 ratio-preserving Gamma, system-bar-safe UI, fixed-height status, side-by-side app identity, LONG-first highlight color, frozen capture controls, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")

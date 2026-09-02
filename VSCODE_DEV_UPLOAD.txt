@@ -1,32 +1,19 @@
-Iris HDR Viewfinder Test V1.4.11 V2.1 - FULL candidate upload for vscode.dev + GitHub Actions
+V1.4.11 V2.2 vscode.dev upload
 
-Repository:
-https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
+1. In vscode.dev switch to:
+   experiment-v1.4.11-v2-brightness-4ev
 
-TARGET BRANCH ONLY:
-experiment-v1.4.11-v2-brightness-4ev
+2. Confirm that branch is still at successful V2.1 commit:
+   6057b8e22dbe98a6f386d9026d6ab9dbec65884c
 
-Current branch requirement:
-The target branch must point exactly to the failed V2.1 commit a2242cec37a320adbc52c02e3d32953aca11004d before this correction upload/commit. Its parent must remain successful V1.4.11 V2 authority 23ef58e7fdb96fcafec409b169f35152f93b19b9. Do not reset, merge, or upload these files to main.
+3. Extract the FULL-UPLOAD ZIP locally and upload/replace the extracted CONTENTS into the repository root. Do not upload the ZIP itself.
 
-No new backup branch is required for this narrow UI-layout regression correction.
+4. Source Control should show the guarded V2.2 candidate only. Commit:
+   V1.4.11 V2.2 continuous fast AUTO exposure settling
 
-IMPORTANT:
-Upload ALL CONTENTS of the extracted FULL-UPLOAD ZIP into the repository root while vscode.dev is on experiment-v1.4.11-v2-brightness-4ev. Replace matching files. Do not switch to main.
+5. Push only experiment-v1.4.11-v2-brightness-4ev.
 
-Before committing, confirm BUILD_WORKFLOW_COPY.yml begins exactly with:
-name: Build Iris HDR Viewfinder Test V1.4.11 V2.1
+6. GitHub Actions should start:
+   Build Iris HDR Viewfinder Test V1.4.11 V2.2
 
-and its push branch is exactly:
-branches: [ experiment-v1.4.11-v2-brightness-4ev ]
-
-Suggested commit message:
-V1.4.11 V2.1 fix workflow embedded-Python syntax
-
-After commit/push, open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.11 V2.1.
-Do not call V1.4.11 V2.1 build-proven until the workflow succeeds and its compiled artifact is verified.
-
-The APK application ID remains com.skyking0007.irishdrviewfinder.v1411v2, so V2.1 updates the isolated V2 app and still remains side-by-side with normal Iris.
-
-This correction changes no additional runtime bytes beyond the already-intended MainActivity.java bounce fix. It fixes two malformed embedded-Python heredocs in the failed workflow and adds an exact workflow-heredoc syntax regression preflight.
-The corrected workflow intentionally uses checkout fetch-depth 3 because successful V2 is now the grandparent of the new correction commit.
+Do not merge into main. Do not change the default branch. Do not regenerate signing secrets.

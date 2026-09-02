@@ -1,45 +1,75 @@
-Iris HDR Viewfinder Test V1.4.11 V2.1
-Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
-Target branch: experiment-v1.4.11-v2-brightness-4ev
-Status: CORRECTED PREPARED / UPLOAD-READY - NOT ACTIONS BUILD-PROVEN
+Iris HDR Viewfinder Test V1.4.11 V2.2
 
-Runtime authority: exact successful V1.4.11 V2 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.11-V2
-Authority commit: 23ef58e7fdb96fcafec409b169f35152f93b19b9
-Authority tree: 4f5d854c2abbc83f93485d4a5760defc99992a09
-Authority Actions run: 33667545707
-Authority job: 100372890766
-Authority artifact ID: 9861227245
-Authority artifact digest: sha256:e4b0b2e678fe18951070077cbd65e72a2663e8ae6d8b79a940731839afa659b2
-Authority V2 APK SHA-256: c0e37fa174ee62e0547f1f445e15c8fb3d074da1364fe0dffbceaae7d23c7ad1
-Authority V2 source TAR SHA-256: 3cab1201dc33e466a4704fd03f4fe2a62ec7599a54d41760dbae8d0957bdf09e
-Authority V2 runtime manifest SHA-256: 090c409f4fde6eb9b85d2cc2f9a744625ec426db84aa82bb3d402c6786e5fbe0
-Authority V2 repository manifest SHA-256: 8885d14da8d95526435d09a97321c07123397d3a693cf45a62fd777287ff162f
-Authority V2 regressions SHA-256: 184111fb9adca4a3ec870f3819697d10a854023c73dddeea4fb081742a452b2f
+STATUS BEFORE ACTIONS: PREPARED / UPLOAD-READY - NOT BUILD-PROVEN
+TARGET BRANCH: experiment-v1.4.11-v2-brightness-4ev
 
-Current failed branch HEAD being corrected: a2242cec37a320adbc52c02e3d32953aca11004d
-Its parent is the successful V2 authority commit above. The correction workflow pins this exact two-commit lineage while still reconstructing runtime authority from the successful V2 Actions artifact.
+RUNTIME AUTHORITY
+- Exact successful V1.4.11 V2.1 GitHub Actions compiled candidate.
+- Commit: 6057b8e22dbe98a6f386d9026d6ab9dbec65884c
+- Tree: 3311a9f3e8b679e6a5925520123ab97244e0840e
+- Actions run: 33675083158
+- Artifact ID: 9864093352
+- APK SHA-256: 628cd5e8cbb9c3c9c6462a52eb539c744b67c835eb5db3f7d8d8646a57a0044e
+- Source candidate TAR SHA-256: 66d18a2015b17c2b7392d2341ecd2bdc4270b35c8462b08487efb6dd4ffde74c
+- Runtime manifest SHA-256: a0fb882a151c45e8193b60ad36fb9be5cdf11ec435c1590d636f3008bfe9ddf1
+- Repository manifest SHA-256: 7e18e3b2c30b66e582a1bcf127ddbb41ad24e0e128a5250d2af11f9b66f1ee6d
+- REGRESSIONS SHA-256: 2ab4ea97ffb0f5f34223ce615c360ce66984d323d201db014b67619d1a278ae3
 
-No new backup branch: localized UI-layout/workflow correction. Exact V2 authority plus deterministic forward/rollback patches provide rollback.
+VERIFICATION-MECHANICS AUTHORITY
+- Successful V2.1 workflow order is retained.
+- fetch-depth remains 3 (no reduction from successful V2.1 mechanics).
+- Embedded Python heredoc syntax preflight remains permanent.
+- Infrastructure changes are limited to V2.1 authority/version/artifact pins, exact 3-runtime-file allowlist, protected hashes/manifests and continuous-AE regressions.
 
-Intended runtime changed-file allowlist: exactly one file:
+ARCHITECTURAL REFERENCE
+- Successful V1.4.15 commit: 947824b8f3bb7a9fd08aee4a79a013fbd54ea22c
+- Successful V1.4.15 Actions run: 33528646507
+- V1.4.15 established bootstrap-only clean HAL AE + 32x24 / 200ms live statistics and bounded <=0.30 EV updates.
+- V2.2 ports only this response mechanism; V2.1 HDR fusion/bracket/presentation ownership remains.
+
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST: EXACTLY 3
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
-Infrastructure changed-file list:
+INFRASTRUCTURE CHANGED-FILE LIST
 - .github/workflows/build.yml
 - BUILD_WORKFLOW_COPY.yml
 - scripts/verify_orientation.py
-Plus candidate documentation/version/hash pins:
+
+CANDIDATE METADATA/VERSION/HASH FILES
 - PACKAGE_INFO.txt
 - PACKAGE_MANIFEST_SHA256.txt
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 - app/build.gradle.kts
 
-Infrastructure differs from successful V2 only for V2.1 authority/version/artifact pins, exact one-file runtime allowlist, updated manifest pins, periodic-bounce regression, exact failed-commit lineage pin, checkout fetch-depth 3 so the successful V2 grandparent remains available for git-archive/tree proof, and a new workflow embedded-Python syntax preflight. The previous V2.1 handoff accidentally concatenated a closing dictionary brace with the following for-loop in two embedded Python heredocs; this corrected handoff fixes both and makes that exact class of failure a permanent preflight regression. Runtime compiler/build order remains unchanged.
+INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION: YES, NARROWLY
+- Authority moves from V2 to successful V2.1.
+- Candidate allowlist expands from one runtime file to three runtime files.
+- Continuous-AE regression replaces the now-obsolete five-second-remeter regression.
+- Compiler/build gate order is unchanged.
+- No backup branch is required for this V2.2 continuation, per user instruction.
 
-Functional V2.1 change:
-- Fix 5-second vertical/zoom-like viewfinder bounce by making the status/debug row fixed one-line 20dp geometry with ellipsis.
-- Preserve the existing 5-second clean-AE remeter cadence; do not freeze AUTO exposure adaptation.
-- Preserve V2 Brightness -4..+4 EV, Gamma 0.50..2.00, side-by-side app identity, inset-safe controls, capture, HDR math, FOV, cadence and camera routing byte-for-byte.
+BACKUP
+- No new backup branch required.
+- Successful V2.1 commit 6057b8e22dbe98a6f386d9026d6ab9dbec65884c remains the exact rollback/runtime authority.
 
-Toolchain/build mechanics remain successful V2: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2.
+VERSION
+- versionCode: 19
+- versionName: 1.0-v1.4.11-v2.2
+- applicationId: com.skyking0007.irishdrviewfinder.v1411v2
+
+FUNCTIONAL CHANGE
+- Remove periodic five-second AUTO AE takeover after bootstrap.
+- Sample published LONG at 32x24 every 200ms.
+- Begin AUTO sensor-exposure correction from the next valid sample.
+- Bound updates to +/-0.30EV, 0.10EV hysteresis, >=180ms update spacing.
+- Reject stale older-exposure statistics.
+- Preserve fixed ~3EV bracket and presentation-only Brightness/Gamma.
+
+COMPILER STATUS BEFORE ACTIONS
+- Real pinned GLSL compiler: NOT RUN in this environment (workflow will run exact assets; GLSL bytes unchanged).
+- Real project Java compiler: NOT RUN in this environment.
+- Full :app:assembleDebug: NOT RUN in this environment.
+- Therefore status is PREPARED / UPLOAD-READY only.

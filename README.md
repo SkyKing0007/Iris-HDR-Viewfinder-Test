@@ -1,27 +1,36 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.1
+# Iris HDR Viewfinder Test V1.4.11 V2.2
 
-V1.4.11 V2.1 is a narrow correction built from the exact successful V1.4.11 V2 Actions compiled candidate. It preserves V1.4.11 capture, fixed ~3 EV HDR bracket, SHORT/LONG fusion, LONG-first highlight color ownership, FOV/orientation, cadence, DNG/JPEG and logging behavior.
+V1.4.11 V2.2 is a fast AUTO-exposure transition correction built from the exact successful V1.4.11 V2.1 GitHub Actions compiled candidate. It preserves V1.4.11 V2.1 HDR rendering, fixed ~3 EV AUTO bracket, Brightness/Gamma controls, side-by-side identity, fixed-height status row, FOV/orientation, capture, DNG/JPEG and logging behavior.
 
-**Workflow correction note:** the first V2.1 upload reached commit `a2242cec37a320adbc52c02e3d32953aca11004d` but failed before compilers because two embedded Python heredocs in the workflow had a closing dictionary brace concatenated with the next `for` statement. This corrected package pins that failed commit as the immediate parent, keeps successful V2 as runtime authority, fixes both syntax defects, and preflights every embedded Python heredoc before the authority-reconstruction body proceeds. No additional runtime behavior is changed.
+## Fast dark ↔ bright AUTO settling
 
-## Brightness EV
+V2.1 physically updated HDR AUTO exposure only when the clean-AE remeter took over the preview about every five seconds. That is why moving from a dark scene to a bright scene, or bright to dark, could sit at the old exposure before beginning to settle.
 
-**Brightness** spans `-4.0 EV` to `+4.0 EV` in `0.1 EV` steps. `0.0 EV` is neutral. SHORT/LONG fusion completes first; Brightness is then a scene-linear gain before the existing V1.4.7 HDR highlight display fit. It does not change physical SHORT/LONG exposure, bracket width, highlight admission or fusion weights.
+V2.2 ports the validated V1.4.15 continuous-metering mechanism without importing V1.4.15's later HDR-fusion/bracket experiments:
 
-## Gamma
+- clean HAL AE is used only for the initial converged exposure/flicker anchor;
+- after that bootstrap, the camera remains in the normal repeating SHORT/LONG HDR burst;
+- `HdrGlView` samples the actual published LONG at 32x24 every 200 ms;
+- valid LONG median changes are sent directly to `CameraController`;
+- physical AUTO correction begins from the next valid sample instead of waiting five seconds;
+- each applied correction is bounded to ±0.30 EV with 0.10 EV hysteresis and at least 180 ms between updates;
+- stale statistics from an older exposure pair are rejected.
 
-**Gamma** spans `0.50` to `2.00` in `0.05` steps with `1.00` neutral. Values above 1.00 brighten midtones; values below 1.00 darken midtones. Gamma is presentation-only after HDR exposure/tone fitting. It remaps luminance and applies one common RGB scale, backing off at gamut limits rather than clipping channels independently. The exact Gamma value is frozen at shutter and shared by live HDR and the saved FUSED JPEG.
+This gives rapid response without a new unvalidated multi-stop scene-cut jump.
 
-## Screen fit and Android system bars
+## Preserved V2.1 ownership
 
-The control panel explicitly reserves Android system-bar and gesture-pill insets. Controls remain above the bottom navigation/gesture area. The live viewfinder remains FIT/aspect-ratio preserving and is the flexible-height region that shrinks before controls are allowed to overlap system UI. Portrait uses separate Brightness and Gamma rows; landscape shares one compact tone row.
+- AUTO bracket remains the V1.4.11 fixed ~8x / 3 EV policy when flicker is NONE.
+- Under 50/60-Hz or unknown/PWM lighting, V1.4.11's same-integration safety remains.
+- Brightness remains `-4.0..+4.0 EV` in 0.1-EV steps and is presentation-only after fusion.
+- Gamma remains `0.50..2.00` in 0.05 steps, `1.00` neutral, presentation-only and RGB-ratio preserving.
+- Live exposure statistics are sampled before Brightness/Gamma, so those controls cannot silently change physical sensor exposure.
+- Shutter press freezes the current SHORT/LONG exposure/ISO/post-RAW boost plus Brightness/Gamma; later live-stat updates affect only future captures.
+- The V2.1 one-line fixed 20dp status row remains, so status changes cannot resize the viewfinder.
+- Application ID remains `com.skyking0007.irishdrviewfinder.v1411v2` for side-by-side installation.
 
-## Side-by-side isolation
+## Backup / branch
 
-The V2 APK uses application ID `com.skyking0007.irishdrviewfinder.v1411v2` and label `Iris HDR 1.4.11 V2`, allowing installation alongside the normal Iris HDR Viewfinder. Its Actions push trigger is isolated to branch `experiment-v1.4.11-v2-brightness-4ev`; `main` is not a trigger.
+No new backup branch is required for V2.2. Exact successful V2.1 commit `6057b8e22dbe98a6f386d9026d6ab9dbec65884c` remains the rollback/runtime authority.
 
-Runtime logs remain under `Downloads/IrisHDRViewfinder/Logs/`.
-
-## Periodic viewfinder bounce correction
-
-V2.1 preserves the existing 5-second clean-AE remeter cadence and camera/focus behavior. The visible periodic zoom/bounce was the weighted viewfinder being resized when the changing status/remeter message changed the `wrap_content` panel height. The status/debug row is now invariant one-line 20dp geometry with ellipsis, matching the later validated V1.4.14 correction. Metering text can change without changing viewfinder size.
+Target branch: `experiment-v1.4.11-v2-brightness-4ev`.

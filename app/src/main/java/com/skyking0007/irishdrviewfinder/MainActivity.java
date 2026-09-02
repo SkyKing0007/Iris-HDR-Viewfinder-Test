@@ -148,6 +148,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         buildUi();
         controller = new CameraController(this, this);
         glView.setInputSurfaceListener(controller::setPreviewSurface);
+        glView.setSceneStatsListener(controller::onHdrSceneStats);
         glView.setDisplayBrightnessEv(displayBrightnessEv);
         glView.setDisplayGamma(displayGamma);
         controller.setDisplayBrightnessEv(displayBrightnessEv);

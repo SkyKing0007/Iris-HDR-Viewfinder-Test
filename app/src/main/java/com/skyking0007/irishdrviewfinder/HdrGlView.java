@@ -28,8 +28,25 @@ final class HdrGlView extends GLSurfaceView {
         void onInputSurfaceReady(Surface surface);
     }
 
+    interface SceneStatsListener {
+        void onSceneStats(SceneStats stats);
+    }
+
+    static final class SceneStats {
+        final long longFrameNumber;
+        final double longExposureProduct;
+        final float longMedianLinear;
+
+        SceneStats(long longFrameNumber, double longExposureProduct, float longMedianLinear) {
+            this.longFrameNumber = longFrameNumber;
+            this.longExposureProduct = longExposureProduct;
+            this.longMedianLinear = longMedianLinear;
+        }
+    }
+
     private final HdrRenderer renderer;
     private volatile InputSurfaceListener inputSurfaceListener;
+    private volatile SceneStatsListener sceneStatsListener;
     private volatile Surface currentInputSurface;
 
     HdrGlView(Context context) {
@@ -51,6 +68,10 @@ final class HdrGlView extends GLSurfaceView {
         if (listener != null && surface != null && surface.isValid()) {
             post(() -> listener.onInputSurfaceReady(surface));
         }
+    }
+
+    void setSceneStatsListener(SceneStatsListener listener) {
+        sceneStatsListener = listener;
     }
 
     void republishInputSurface() {
@@ -121,6 +142,10 @@ final class HdrGlView extends GLSurfaceView {
 
     private final class HdrRenderer implements GLSurfaceView.Renderer {
         private static final int PENDING_SLOTS = 6;
+        private static final int STATS_WIDTH = 32;
+        private static final int STATS_HEIGHT = 24;
+        private static final int STATS_PIXELS = STATS_WIDTH * STATS_HEIGHT;
+        private static final long STATS_INTERVAL_NS = 200_000_000L;
 
         private final Context context;
         private final FloatBuffer vertexBuffer;
@@ -147,7 +172,11 @@ final class HdrGlView extends GLSurfaceView {
         private int longTexture;
         private int stagingShortTexture;
         private int stagingLongTexture;
+        private int statsTexture;
         private int framebuffer;
+        private final ByteBuffer longStatsBuffer = ByteBuffer.allocateDirect(STATS_PIXELS * 4)
+                .order(ByteOrder.nativeOrder());
+        private long lastStatsNs;
         private SurfaceTexture surfaceTexture;
         private Surface inputSurface;
         private int frameWidth;
@@ -205,6 +234,8 @@ final class HdrGlView extends GLSurfaceView {
             longTexture = createTexture2d();
             stagingShortTexture = createTexture2d();
             stagingLongTexture = createTexture2d();
+            statsTexture = createTexture2d();
+            allocateRgbTexture(statsTexture, STATS_WIDTH, STATS_HEIGHT);
             for (PendingFrame pending : pendingFrames) {
                 pending.texture = createTexture2d();
                 pending.occupied = false;
@@ -234,6 +265,7 @@ final class HdrGlView extends GLSurfaceView {
             stagingShortMeta = null;
             lastShortMeta = null;
             lastLongMeta = null;
+            lastStatsNs = 0L;
             fpsWindowStartNs = System.nanoTime();
             fpsWindowInputFrames = 0;
             fpsWindowPairs = 0;
@@ -260,6 +292,7 @@ final class HdrGlView extends GLSurfaceView {
                 processLatestCameraFrame();
             }
             reconcilePendingFrames();
+            maybePublishSceneStats();
             drawDisplay();
             updateFps();
         }
@@ -287,6 +320,7 @@ final class HdrGlView extends GLSurfaceView {
             stagingShortMeta = null;
             lastShortMeta = null;
             lastLongMeta = null;
+            lastStatsNs = 0L;
             metaByTimestamp.clear();
         }
 
@@ -429,6 +463,60 @@ final class HdrGlView extends GLSurfaceView {
             bindSampler2d(copyProgram, "sourceTex", sourceTexture, 0);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
+        }
+
+        private void maybePublishSceneStats() {
+            SceneStatsListener listener = sceneStatsListener;
+            if (listener == null || !haveLong || lastLongMeta == null) return;
+            long now = System.nanoTime();
+            if (lastStatsNs != 0L && now - lastStatsNs < STATS_INTERVAL_NS) return;
+            lastStatsNs = now;
+
+            readLongTextureStats(longTexture, longStatsBuffer);
+            float median = longMedianLinear(longStatsBuffer);
+            listener.onSceneStats(new SceneStats(
+                    lastLongMeta.frameNumber,
+                    lastLongMeta.exposureProduct(),
+                    median));
+        }
+
+        private void readLongTextureStats(int sourceTexture, ByteBuffer target) {
+            target.clear();
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+            GLES30.glFramebufferTexture2D(
+                    GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                    GLES30.GL_TEXTURE_2D, statsTexture, 0);
+            GLES30.glViewport(0, 0, STATS_WIDTH, STATS_HEIGHT);
+            GLES30.glUseProgram(copyProgram);
+            bindQuad();
+            bindSampler2d(copyProgram, "sourceTex", sourceTexture, 0);
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+            GLES30.glReadPixels(
+                    0, 0, STATS_WIDTH, STATS_HEIGHT,
+                    GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, target);
+            target.rewind();
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
+        }
+
+        private float longMedianLinear(ByteBuffer pixels) {
+            float[] lumas = new float[STATS_PIXELS];
+            for (int i = 0; i < STATS_PIXELS; i++) {
+                int o = i * 4;
+                float r = srgbToLinear((pixels.get(o) & 0xFF) / 255.0f);
+                float g = srgbToLinear((pixels.get(o + 1) & 0xFF) / 255.0f);
+                float b = srgbToLinear((pixels.get(o + 2) & 0xFF) / 255.0f);
+                lumas[i] = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+            }
+            java.util.Arrays.sort(lumas);
+            int index = Math.max(0, Math.min(lumas.length - 1,
+                    Math.round(0.50f * (lumas.length - 1))));
+            return lumas[index];
+        }
+
+        private static float srgbToLinear(float value) {
+            return value <= 0.04045f
+                    ? value / 12.92f
+                    : (float) Math.pow((value + 0.055f) / 1.055f, 2.4);
         }
 
         private void drawDisplay() {
