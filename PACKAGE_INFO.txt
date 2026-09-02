@@ -1,35 +1,34 @@
-Iris HDR Viewfinder Test V1.4.11 V2.2
+Iris HDR Viewfinder Test V1.4.11 V2.3
 
 STATUS BEFORE ACTIONS: PREPARED / UPLOAD-READY - NOT BUILD-PROVEN
 TARGET BRANCH: experiment-v1.4.11-v2-brightness-4ev
 
 RUNTIME AUTHORITY
-- Exact successful V1.4.11 V2.1 GitHub Actions compiled candidate.
-- Commit: 6057b8e22dbe98a6f386d9026d6ab9dbec65884c
-- Tree: 3311a9f3e8b679e6a5925520123ab97244e0840e
-- Actions run: 33675083158
-- Artifact ID: 9864093352
-- APK SHA-256: 628cd5e8cbb9c3c9c6462a52eb539c744b67c835eb5db3f7d8d8646a57a0044e
-- Source candidate TAR SHA-256: 66d18a2015b17c2b7392d2341ecd2bdc4270b35c8462b08487efb6dd4ffde74c
-- Runtime manifest SHA-256: a0fb882a151c45e8193b60ad36fb9be5cdf11ec435c1590d636f3008bfe9ddf1
-- Repository manifest SHA-256: 7e18e3b2c30b66e582a1bcf127ddbb41ad24e0e128a5250d2af11f9b66f1ee6d
-- REGRESSIONS SHA-256: 2ab4ea97ffb0f5f34223ce615c360ce66984d323d201db014b67619d1a278ae3
+- Exact successful V1.4.11 V2.2 GitHub Actions compiled candidate.
+- Commit: 816889039c110607304746b9036389c36db2a8e6
+- Tree: bb8b16032e35e874fc0f07eaeb6bc0ee2ebb3c2e
+- Actions run: 33678538693
+- Artifact ID: 9865357740
+- APK SHA-256: f64bc6ccad3c4028fa416ecf90ef5f02b7a740c501bc7e3be33895a8ef2b91b4
+- Source candidate TAR SHA-256: f6618945d6c90f1c76abda5eb458f3564baeafc0008f439ad8bf8740755ff4aa
+- Runtime manifest SHA-256: 837b515f0e0e8b83ec05eaa1a23aa362379787cb037e53c0cb6c86498f86eb98
+- Repository manifest SHA-256: 89d169fc062279e73638454a06182a38dc7fa8f33ddf279b6145185cc53ffebf
+- REGRESSIONS SHA-256: d0ecb4ccea29a75ce0d87bd67d618eccc19017da449744303016d57404c15b4c
 
 VERIFICATION-MECHANICS AUTHORITY
-- Successful V2.1 workflow order is retained.
-- fetch-depth remains 3 (no reduction from successful V2.1 mechanics).
-- Embedded Python heredoc syntax preflight remains permanent.
-- Infrastructure changes are limited to V2.1 authority/version/artifact pins, exact 3-runtime-file allowlist, protected hashes/manifests and continuous-AE regressions.
+- Exact successful V2.2 workflow order retained.
+- fetch-depth remains 3.
+- Embedded Python heredoc syntax preflight retained.
+- Pinned real GLSL compiler, real project Java compiler and full assemble order retained.
+- Deterministic full-index forward/rollback proof retained at core.abbrev 7/12/40 with fuzz=0.
+- No backup branch required, per user instruction.
 
-ARCHITECTURAL REFERENCE
-- Successful V1.4.15 commit: 947824b8f3bb7a9fd08aee4a79a013fbd54ea22c
-- Successful V1.4.15 Actions run: 33528646507
-- V1.4.15 established bootstrap-only clean HAL AE + 32x24 / 200ms live statistics and bounded <=0.30 EV updates.
-- V2.2 ports only this response mechanism; V2.1 HDR fusion/bracket/presentation ownership remains.
-
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST: EXACTLY 3
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST: EXACTLY 7
+- app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
 INFRASTRUCTURE CHANGED-FILE LIST
@@ -45,31 +44,30 @@ CANDIDATE METADATA/VERSION/HASH FILES
 - app/build.gradle.kts
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION: YES, NARROWLY
-- Authority moves from V2 to successful V2.1.
-- Candidate allowlist expands from one runtime file to three runtime files.
-- Continuous-AE regression replaces the now-obsolete five-second-remeter regression.
+- Authority pins advance from V2.1 to exact successful V2.2.
+- Exact allowlist/manifests/protected hashes advance to V2.3.
+- No new shader file is added. The off-screen still GPU pass reuses the existing V2.2 hdr_display.frag, which remains under the existing pinned real GLSL compiler gate.
+- New permanent regressions cover scene-cut AUTO, GPU-primary still fusion, reliable real-SHORT texture recovery and V2.2-only lineage.
 - Compiler/build gate order is unchanged.
-- No backup branch is required for this V2.2 continuation, per user instruction.
-
-BACKUP
-- No new backup branch required.
-- Successful V2.1 commit 6057b8e22dbe98a6f386d9026d6ab9dbec65884c remains the exact rollback/runtime authority.
 
 VERSION
-- versionCode: 19
-- versionName: 1.0-v1.4.11-v2.2
+- versionCode: 20
+- versionName: 1.0-v1.4.11-v2.3
 - applicationId: com.skyking0007.irishdrviewfinder.v1411v2
 
 FUNCTIONAL CHANGE
-- Remove periodic five-second AUTO AE takeover after bootstrap.
-- Sample published LONG at 32x24 every 200ms.
-- Begin AUTO sensor-exposure correction from the next valid sample.
-- Bound updates to +/-0.30EV, 0.10EV hysteresis, >=180ms update spacing.
-- Reject stale older-exposure statistics.
-- Preserve fixed ~3EV bracket and presentation-only Brightness/Gamma.
+- Large >=0.70EV dark/bright scene changes jump to the measured V2.2 live-stat target on the first fresh statistic, up to +/-6EV.
+- Ordinary exposure drift retains V2.2's 0.10EV hysteresis and +/-0.30EV smoothing.
+- LONG statistics interval changes from 200ms to 100ms.
+- Saved FUSED HDR uses the existing V2.2 GLES3 context as the primary full-resolution fusion executor.
+- Actual normalized SHORT pixels own bright regions only when SHORT signal and SHORT/LONG radiometric agreement prove reliability; darker/unreliable regions remain LONG-owned.
+- CPU JpegFusion remains only as explicit GL-failure fallback and mirrors the same ownership rule.
+- Brightness changes from -4..+4EV to -16..+1EV, 0.1EV steps.
+- Gamma remains unchanged.
 
 COMPILER STATUS BEFORE ACTIONS
-- Real pinned GLSL compiler: NOT RUN in this environment (workflow will run exact assets; GLSL bytes unchanged).
-- Real project Java compiler: NOT RUN in this environment.
-- Full :app:assembleDebug: NOT RUN in this environment.
-- Therefore status is PREPARED / UPLOAD-READY only.
+- Complete GLSL reserved-identifier scan: PASS locally.
+- Pinned real glslangValidator: NOT RUN locally; Actions required.
+- Real project Java compiler: NOT RUN locally; Actions required.
+- Full :app:assembleDebug: NOT RUN locally; Actions required.
+- Therefore status is PREPARED / UPLOAD-READY only after final package replay.

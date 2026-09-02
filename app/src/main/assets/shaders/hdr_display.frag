@@ -103,6 +103,10 @@ float linearLuma(vec3 rgb) {
     return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
 }
 
+float encodedLuma(vec3 rgb) {
+    return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+}
+
 vec3 applyDisplayGamma(vec3 rgb, float gammaValue) {
     float y = linearLuma(rgb);
     if (y <= 0.000001) return rgb;
@@ -161,6 +165,21 @@ vec3 highlightColorOwnership(
     return clamp(vec3(targetY) + chroma * clamp(gamutScale, 0.0, 1.0), 0.0, 1.0);
 }
 
+float reliableShortTextureWeight(
+        vec3 shortRgb, vec3 longRgb, vec3 shortScene, vec3 longScene) {
+    // V2.3 still-only SHORT texture recovery, derived only from V2.2 JPEG inputs.
+    // Mode 2 live HDR stays byte-for-byte equivalent in ownership math; mode 3 is
+    // the off-screen still pass. SHORT is admitted only with useful signal, a bright
+    // LONG region, and radiometric agreement after exposure normalization.
+    float shortSignal = smoothstep(0.10, 0.18, encodedLuma(shortRgb));
+    float brightLong = smoothstep(0.45, 0.62, encodedLuma(longRgb));
+    float shortY = max(linearLuma(shortScene), 0.000001);
+    float longY = max(linearLuma(longScene), 0.000001);
+    float exposureAgreementRatio = max(shortY / longY, longY / shortY);
+    float agreement = 1.0 - smoothstep(1.2746, 1.6818, exposureAgreementRatio);
+    return clamp(shortSignal * brightLong * agreement, 0.0, 1.0);
+}
+
 void main() {
     vec2 uv;
     if (!fitSourceUv(vUv, fullFitScale, uv)) {
@@ -214,17 +233,23 @@ void main() {
         0.995,
         longEncodedPeak) * shortConfidence;
 
+    // mode==3 is the V2.3 off-screen still pass. Live HDR remains mode==2 and
+    // therefore retains V2.2's original SHORT admission/ownership behavior.
+    float textureRecoveryWeight = mode == 3
+        ? reliableShortTextureWeight(shortRgb, longRgb, shortScene, longScene)
+        : 0.0;
+    float shortWeight = max(highlightWeight, textureRecoveryWeight);
+
     // HDR reconstruction completes before display brightness is applied. The slider
     // cannot change capture, bracket width, SHORT admission, or fusion ownership.
-    vec3 mergedScene = mix(longScene, shortScene, highlightWeight);
-    float brightnessGain = exp2(clamp(displayBrightnessEv, -4.0, 4.0));
+    vec3 mergedScene = mix(longScene, shortScene, shortWeight);
+    float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
     vec3 displayLinear = adaptiveHdrToneMap(mergedScene * brightnessGain, ratio, bracketStops);
     displayLinear = applyDisplayGamma(displayLinear, displayGamma);
 
-    // Preserve the recovered HDR luminance but keep LONG chroma through the handoff.
-    // SHORT color is admitted only for true multi-channel LONG clipping. No spatial
-    // operator is used, preserving foliage/sky and thin-edge boundaries.
-    if (highlightWeight > 0.0005) {
+    // Retain V2.2's conservative highlight chroma fallback for live HDR and for
+    // still pixels where SHORT did not independently prove reliable texture/color.
+    if (highlightWeight > 0.0005 && textureRecoveryWeight < 0.50) {
         displayLinear = highlightColorOwnership(
                 displayLinear, longScene, shortScene, longRgb, shortRgb, highlightWeight);
     }

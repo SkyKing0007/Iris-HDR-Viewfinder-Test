@@ -43,6 +43,7 @@ final class CaptureSetSaver {
     private final int dngOrientation;
     private final float displayBrightnessEv;
     private final float displayGamma;
+    private final HdrGlView stillFusionView;
     private final Listener listener;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Map<Long, String> labelByTimestamp = new HashMap<>();
@@ -66,14 +67,16 @@ final class CaptureSetSaver {
             int captureOrientationDegrees,
             float displayBrightnessEv,
             float displayGamma,
+            HdrGlView stillFusionView,
             Listener listener) {
         this.context = context.getApplicationContext();
         this.characteristics = characteristics;
         this.cameraId = cameraId;
         this.captureId = captureId;
         this.dngOrientation = dngOrientationForDegrees(captureOrientationDegrees);
-        this.displayBrightnessEv = Math.max(-4.0f, Math.min(4.0f, displayBrightnessEv));
+        this.displayBrightnessEv = Math.max(-16.0f, Math.min(1.0f, displayBrightnessEv));
         this.displayGamma = Math.max(0.50f, Math.min(2.00f, displayGamma));
+        this.stillFusionView = stillFusionView;
         this.listener = listener;
     }
 
@@ -219,15 +222,45 @@ final class CaptureSetSaver {
         byte[] shortJpeg = shortData.jpegBytes;
         byte[] longJpeg = longData.jpegBytes;
         double ratio = exposureRatio(shortData.result, longData.result);
+        if (stillFusionView == null) {
+            submitCpuFusionFallback(shortJpeg, longJpeg, ratio,
+                    new IllegalStateException("GPU fusion view unavailable"));
+            return;
+        }
+        stillFusionView.fuseStillJpegs(
+                shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma,
+                (fused, error) -> {
+                    if (error != null || fused == null) {
+                        submitCpuFusionFallback(shortJpeg, longJpeg, ratio, error);
+                        return;
+                    }
+                    submitFusedBytes(fused);
+                });
+    }
+
+    private void submitCpuFusionFallback(
+            byte[] shortJpeg, byte[] longJpeg, double ratio, Throwable gpuError) {
+        RuntimeLogger.error(
+                "GPU_STILL_FUSION_FALLBACK",
+                gpuError == null ? new IllegalStateException("unknown GPU fusion failure") : gpuError);
         io.execute(() -> {
             try {
                 byte[] fused = JpegFusion.fuse(
                         shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma);
+                submitFusedBytes(fused);
+            } catch (Throwable t) {
+                synchronized (CaptureSetSaver.this) {
+                    failLocked(t);
+                }
+            }
+        });
+    }
+
+    private void submitFusedBytes(byte[] fused) {
+        io.execute(() -> {
+            try {
                 MediaStoreWriter.writeBytes(
-                        context,
-                        captureId + "_FUSED_HDR.jpg",
-                        "image/jpeg",
-                        fused);
+                        context, captureId + "_FUSED_HDR.jpg", "image/jpeg", fused);
                 synchronized (CaptureSetSaver.this) {
                     fusionSaved = true;
                     checkCompleteLocked();
@@ -251,7 +284,7 @@ final class CaptureSetSaver {
                 JSONObject root = new JSONObject();
                 root.put("captureId", captureId);
                 root.put("cameraId", cameraId);
-                root.put("fusion", "V1.4 sRGB-linearized highlight-aware JPEG-domain exposure fusion");
+                root.put("fusion", "V2.3 V2.2-derived GLES3 still fusion with reliable SHORT texture recovery; CPU fallback only on GL failure");
                 root.put("short", resultJson(shortResult));
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));

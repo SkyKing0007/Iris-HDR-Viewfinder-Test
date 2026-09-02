@@ -19,7 +19,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.2 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.3 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -49,7 +49,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.2 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.3 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -219,7 +219,7 @@ require('double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0)
 
 # 013 / 030 / 036 / 043 - Live and saved fusion preserve V1.4.7 sRGB math,
 # exact exposure normalization, LONG-owned shadows, and the same HDR display policy.
-for text, owner in ((hdr_shader, 'live shader'), (fusion, 'JPEG fusion')):
+for text, owner in ((hdr_shader, 'shared live/GPU shader'), (fusion, 'CPU fallback fusion')):
     require('0.04045' in text and '12.92' in text and '0.0031308' in text and '2.4' in text,
             f"{owner} must use the piecewise sRGB transfer function")
 require('adaptiveClipStart' in hdr_shader and 'bracketStops' in hdr_shader,
@@ -228,9 +228,11 @@ require('0.90 + 0.01 * (bracketStops - 1.0)' in hdr_shader and '0.995' in hdr_sh
         "live SHORT admission must stay near LONG saturation")
 require('shortConfidence' in hdr_shader and 'shortScenePeak / longScenePeak' in hdr_shader,
         "live clipped-highlight SHORT plausibility guard missing")
-require('vec3 mergedScene = mix(longScene, shortScene, highlightWeight);' in hdr_shader,
-        "live fusion must finish before display brightness")
-require('float brightnessGain = exp2(clamp(displayBrightnessEv, -4.0, 4.0));' in hdr_shader
+require('float textureRecoveryWeight = mode == 3' in hdr_shader
+        and 'float shortWeight = max(highlightWeight, textureRecoveryWeight);' in hdr_shader
+        and 'vec3 mergedScene = mix(longScene, shortScene, shortWeight);' in hdr_shader,
+        "shared shader must keep live mode at V2.2 highlight ownership and finish fusion before display brightness")
+require('float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));' in hdr_shader
         and 'adaptiveHdrToneMap(mergedScene * brightnessGain' in hdr_shader,
         "live Brightness EV must apply after fusion and before HDR display fitting")
 require('displayBrightnessEv' in gl and 'glUniform1f' in gl,
@@ -244,11 +246,16 @@ require('float requestedScale = mappedY / y;' in hdr_shader
         and 'return rgb * min(requestedScale, gamutScale);' in hdr_shader,
         "live Gamma must be luminance-driven, RGB-ratio preserving and gamut-safe")
 require('0.90f + 0.01f * (bracketStops - 1.0f)' in fusion and 'HDR_CLIP_END = 0.995f' in fusion,
-        "saved JPEG SHORT admission must match live near-clipping policy")
-require('float mr = lr + (sr - lr) * highlightWeight;' in fusion
-        and 'float mg = lg + (sg - lg) * highlightWeight;' in fusion
-        and 'float mb = lb + (sb - lb) * highlightWeight;' in fusion,
-        "saved fusion must finish full-RGB handoff before brightness")
+        "CPU fallback must retain V2.2 near-clipping SHORT admission")
+require('float shortWeight = Math.max(highlightWeight, textureRecoveryWeight);' in fusion
+        and 'float mr = lr + (sr - lr) * shortWeight;' in fusion
+        and 'float mg = lg + (sg - lg) * shortWeight;' in fusion
+        and 'float mb = lb + (sb - lb) * shortWeight;' in fusion,
+        "CPU fallback must use the same reliable-SHORT texture ownership as GPU fusion")
+require('float shortWeight = max(highlightWeight, textureRecoveryWeight);' in hdr_shader
+        and 'vec3 mergedScene = mix(longScene, shortScene, shortWeight);' in hdr_shader
+        and 'mode == 3' in hdr_shader,
+        "shared V2.2 shader must use actual normalized SHORT pixels only in still mode when reliability proves them")
 require('brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
         and 'boostedPeak = scenePeak * brightnessGain;' in fusion,
         "saved Brightness EV must be one per-image linear exposure gain after fusion")
@@ -265,8 +272,8 @@ require('whiteAnchor + 0.14' in hdr_shader and 'whiteAnchor + 0.14f' in fusion,
         "live/save V1.4.7 display-ceiling policy must be restored")
 require('adaptiveAppearanceLift' not in hdr_shader and 'appearanceLiftScale' not in fusion,
         "V1.4.8-V1.4.10 global appearance lift must not survive")
-require('65_536.0' in fusion and '65_536.0' in saver and '65_536.0' in gl,
-        "widened exposure normalization must remain consistent live/save/metadata")
+require('65_536.0' in fusion and '65_536.0' in saver and '65_536.0' in gl and '65536.0' in hdr_shader,
+        "widened exposure normalization must remain consistent live/GPU/fallback/metadata")
 
 # 016 / 022 - V1.4.2 on-device sideways preview: producer transform owns live orientation.
 require('SCALER_AVAILABLE_ROTATE_AND_CROP_MODES' in camera,
@@ -332,13 +339,15 @@ bootstrap = camera[camera.index('private void startAutoMeteringLocked()'):camera
 require('if (haveAeSample) {' in bootstrap and 'Bootstrap only' in bootstrap,
         "clean HAL AE must be bootstrap-only once the live HDR pair exists")
 require('STATS_WIDTH = 32' in gl and 'STATS_HEIGHT = 24' in gl
-        and 'STATS_INTERVAL_NS = 200_000_000L' in gl
+        and 'STATS_INTERVAL_NS = 100_000_000L' in gl
         and 'glReadPixels' in gl and 'readLongTextureStats' in gl,
-        "validated 32x24 / 200ms live LONG statistics path missing")
+        "V2.3 32x24 / 100ms live LONG statistics path missing")
 require('AUTO_LIVE_HYSTERESIS_EV = 0.10' in camera
         and 'AUTO_LIVE_MAX_STEP_EV = 0.30' in camera
-        and 'AUTO_LIVE_UPDATE_MIN_NS = 180_000_000L' in camera,
-        "validated fast AUTO response bounds missing")
+        and 'AUTO_LIVE_SCENE_CUT_EV = 0.70' in camera
+        and 'AUTO_LIVE_SCENE_CUT_MAX_STEP_EV = 6.0' in camera
+        and 'AUTO_LIVE_UPDATE_MIN_NS = 80_000_000L' in camera,
+        "V2.3 fast scene-cut AUTO response bounds missing")
 require('setSceneStatsListener(controller::onHdrSceneStats)' in main
         and 'processHdrSceneStatsLocked' in camera,
         "live scene-statistics route to CameraController missing")
@@ -559,13 +568,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
 # 038 / 042 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.1' in workflow
-        and 'run-id: 33675083158' in workflow,
-        "workflow must download the exact successful V1.4.11 V2.1 Actions authority")
-require('run-id: 33667545707' not in workflow
-        and 'run-id: 33464019593' not in workflow
-        and 'run-id: 33458017737' not in workflow,
-        "V1.4.11 V2.2 must not silently fall back to V2/V1.4.11 or older authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.2' in workflow
+        and 'run-id: 33678538693' in workflow,
+        "workflow must download the exact successful V1.4.11 V2.2 Actions authority")
+require('run-id: 33675083158' not in workflow
+        and 'run-id: 33667545707' not in workflow
+        and 'run-id: 33464019593' not in workflow,
+        "V1.4.11 V2.3 must never fall back to V2.1/V2/V1.4.11 authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -588,10 +597,16 @@ require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
         "no spatial/cross-edge chroma filtering is permitted")
 
 # Brightness and Gamma are explicit WYSIWYG controls with frozen shutter-time ownership.
-require('DISPLAY_BRIGHTNESS_MIN_EV = -4.0f' in main
-        and 'DISPLAY_BRIGHTNESS_MAX_EV = 4.0f' in main
+require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in main
+        and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in main
         and 'DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10' in main,
-        "Brightness slider must be -4..+4 EV in 0.1 EV increments")
+        "Brightness slider must be -16..+1 EV in 0.1 EV increments")
+require('Math.max(-16.0f, Math.min(1.0f, ev))' in camera
+        and 'Math.max(-16.0f, Math.min(1.0f, displayBrightnessEv))' in saver
+        and 'Math.max(-16.0f, Math.min(1.0f, ev))' in gl
+        and 'clamp(displayBrightnessEv, -16.0, 1.0)' in hdr_shader
+        and 'clamp(displayBrightnessEv, -16.0f, 1.0f)' in fusion,
+        "-16..+1EV Brightness clamp must be identical live/GPU/fallback/save")
 require('DISPLAY_GAMMA_MIN = 0.50f' in main
         and 'DISPLAY_GAMMA_MAX = 2.00f' in main
         and 'DISPLAY_GAMMA_STEPS_PER_UNIT = 20' in main
@@ -608,25 +623,72 @@ require('displayBrightnessEv' not in live_stats and 'displayGamma' not in live_s
         "physical AUTO settling must stay independent of presentation Brightness/Gamma")
 require('HDR_BRACKET_RATIO = 8.0' in camera,
         "V2.2 must preserve V1.4.11 V2 fixed 8x (~3EV) AUTO bracket ownership")
-# Exact fast-transition numerical regression: large scene changes begin correcting on the next live sample
-# but each applied update remains bounded to the validated V1.4.15 0.30EV step.
+# Exact V2.3 scene-cut regression derived only from V2.2 live-stat math.
 def live_step(error_ev):
     if abs(error_ev) <= 0.10:
         return 0.0
-    return max(-0.30, min(0.30, error_ev))
-require(math.isclose(live_step(+2.0), +0.30) and math.isclose(live_step(-2.0), -0.30),
-        "large dark/bright scene changes must react immediately with bounded symmetric correction")
+    max_step = 6.0 if abs(error_ev) >= 0.70 else 0.30
+    return max(-max_step, min(max_step, error_ev))
+require(math.isclose(live_step(+2.0), +2.0) and math.isclose(live_step(-2.0), -2.0),
+        "large dark/bright scene cuts must apply the measured correction on the first fresh sample")
+require(math.isclose(live_step(+0.50), +0.30) and math.isclose(live_step(-0.50), -0.30),
+        "ordinary exposure drift must retain V2.2's smooth 0.30EV bound")
 require(math.isclose(live_step(+0.05), 0.0) and math.isclose(live_step(-0.05), 0.0),
         "small live-stat jitter must remain inside exposure hysteresis")
 require('captureDisplayBrightnessEv' in camera[camera.index('new CaptureSetSaver('):camera.index('stillSessionActive = true;')]
         and 'captureDisplayGamma' in camera[camera.index('new CaptureSetSaver('):camera.index('stillSessionActive = true;')],
         "saved fusion must receive frozen shutter-time Brightness EV and Gamma")
 require('displayBrightnessEv' in saver and 'displayGamma' in saver
+        and 'stillFusionView.fuseStillJpegs' in saver
         and 'shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma' in saver.replace('\n', ' '),
-        "CaptureSetSaver must pass frozen Brightness EV and Gamma into JPEG fusion")
+        "CaptureSetSaver must route frozen SHORT/LONG + Brightness/Gamma to GPU still fusion")
+require('controller.setStillFusionView(glView);' in main
+        and 'GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "mode"), 3);' in gl
+        and 'stillFusionProgram' not in gl
+        and 'still_fusion.frag' not in gl
+        and 'GLUtils.texImage2D' in gl
+        and 'GLES30.glReadPixels' in gl
+        and 'GPU_STILL_FUSION' in gl,
+        "V2.3 primary full-resolution still fusion must run through the existing V2.2 GLES3 context")
+fallback_block = saver[saver.index('private void submitCpuFusionFallback'):saver.index('private void submitFusedBytes')]
+require('submitCpuFusionFallback' in saver and 'GPU_STILL_FUSION_FALLBACK' in saver
+        and saver.count('JpegFusion.fuse(') == 1
+        and 'JpegFusion.fuse(' in fallback_block
+        and 'stillFusionView.fuseStillJpegs' in saver,
+        "CPU fusion may exist only inside the explicit GL-failure fallback helper")
+require(not (ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java').exists()
+        and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_demosaic.frag').exists()
+        and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_fusion.frag').exists(),
+        "V2.3 must be derived only from V2.2; non-V2.2 RAW-fusion files are forbidden")
+require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
+        "V2.3 must preserve V2.2 tracked-file universe; no new still shader asset is permitted")
 require('root.put("displayBrightnessEv", displayBrightnessEv);' in saver
         and 'root.put("displayGamma", displayGamma);' in saver,
         "capture metadata must record the applied Brightness EV and Gamma")
+
+# V2.3 SHORT texture recovery is fail-closed and pixel-local.
+require('reliableShortTextureWeight' in hdr_shader
+        and 'smoothstep(0.10, 0.18' in hdr_shader
+        and 'smoothstep(0.45, 0.62' in hdr_shader
+        and 'smoothstep(1.2746, 1.6818' in hdr_shader
+        and 'textureRecoveryWeight < 0.50' in hdr_shader
+        and 'textureRecoveryWeight = mode == 3' in hdr_shader,
+        "GPU still fusion reliable-SHORT gate missing")
+require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
+        "SHORT texture recovery must remain pixel-local; no neighborhood hallucination/fill operator")
+def smoothstep(a, b, x):
+    t = max(0.0, min(1.0, (x - a) / (b - a)))
+    return t * t * (3.0 - 2.0 * t)
+def reliable_short(short_encoded_y, long_encoded_y, normalized_ratio):
+    signal = smoothstep(0.10, 0.18, short_encoded_y)
+    bright = smoothstep(0.45, 0.62, long_encoded_y)
+    agreement_ratio = max(normalized_ratio, 1.0 / normalized_ratio)
+    agreement = 1.0 - smoothstep(1.2746, 1.6818, agreement_ratio)
+    return signal * bright * agreement
+require(reliable_short(0.24, 0.67, 0.99) > 0.90,
+        "office-window fixture must strongly select real SHORT texture")
+require(reliable_short(0.10, 0.34, 0.90) < 0.01,
+        "dark office fixture must remain LONG-owned rather than importing SHORT noise")
 require('applySafeSystemBarInsets(root, panel);' in main
         and 'WindowInsets.Type.systemBars()' in main
         and 'panelBottom + bottom' in main,
@@ -673,7 +735,7 @@ require('CAPTURE_INPUTS' in camera and 'acquiredMs=' in camera and 'totalMs=' in
 # 041 / 043 / V2 - Full-resolution fusion stays allocation-light. Brightness pow and
 # Gamma LUT are computed once per image; highlight color uses one reusable scratch vector.
 inner = fusion[fusion.index('for (int i = 0; i < count; i++)'):fusion.index('output.setPixels')]
-for forbidden in ['Math.exp(', 'Math.pow(', 'Math.sqrt(', 'new float[']:
+for forbidden in ['Math.exp(', 'Math.pow(', 'Math.sqrt(', 'Math.log(', 'new float[']:
     require(forbidden not in inner, f"expensive/per-pixel saved-fusion operation returned: {forbidden}")
 require('float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
         and fusion.index('float brightnessGain = (float) Math.pow') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
@@ -744,4 +806,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.2 REGRESSION PASS: fixed-3EV HDR, -4..+4EV post-fusion Brightness, 0.50..2.00 ratio-preserving Gamma, system-bar-safe UI, fixed-height status, side-by-side app identity, LONG-first highlight color, frozen capture controls, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.11 V2.3 REGRESSION PASS: V2.2-only lineage, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, GLES3-primary still fusion, reliable real-SHORT bright texture, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")

@@ -46,7 +46,7 @@ final class JpegFusion {
         int[] outPixels = new int[width * rowsPerStrip];
         float[] colorOwned = new float[3];
 
-        float clampedBrightnessEv = clamp(displayBrightnessEv, -4.0f, 4.0f);
+        float clampedBrightnessEv = clamp(displayBrightnessEv, -16.0f, 1.0f);
         float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);
         float clampedGamma = clamp(displayGamma, 0.50f, 2.00f);
         float[] gammaLut = Math.abs(clampedGamma - 1.0f) < 0.0001f
@@ -94,12 +94,27 @@ final class JpegFusion {
                         clipStart,
                         HDR_CLIP_END,
                         longEncodedPeak) * shortConfidence;
+                float shortEncodedY = linearLuma(
+                        sr8 / 255.0f, sg8 / 255.0f, sb8 / 255.0f);
+                float longEncodedY = linearLuma(
+                        lr8 / 255.0f, lg8 / 255.0f, lb8 / 255.0f);
+                float shortSceneY = Math.max(0.000001f, linearLuma(sr, sg, sb));
+                float longSceneY = Math.max(0.000001f, linearLuma(lr, lg, lb));
+                float exposureAgreementRatio = Math.max(
+                        shortSceneY / longSceneY, longSceneY / shortSceneY);
+                float shortSignal = smoothstep(0.10f, 0.18f, shortEncodedY);
+                float brightLong = smoothstep(0.45f, 0.62f, longEncodedY);
+                float agreement = 1.0f - smoothstep(1.2746f, 1.6818f, exposureAgreementRatio);
+                float textureRecoveryWeight = clamp(
+                        shortSignal * brightLong * agreement, 0.0f, 1.0f);
+                float shortWeight = Math.max(highlightWeight, textureRecoveryWeight);
 
-                // Full-RGB handoff: LONG remains the clean shadow/midtone owner and
-                // normalized SHORT enters only near LONG saturation.
-                float mr = lr + (sr - lr) * highlightWeight;
-                float mg = lg + (sg - lg) * highlightWeight;
-                float mb = lb + (sb - lb) * highlightWeight;
+                // V2.3 remains a V2.2 JPEG-domain fusion. In bright regions where
+                // exposure-normalized SHORT and LONG agree and SHORT has real signal,
+                // actual SHORT pixels own texture instead of LONG's processed blotches.
+                float mr = lr + (sr - lr) * shortWeight;
+                float mg = lg + (sg - lg) * shortWeight;
+                float mb = lb + (sb - lb) * shortWeight;
 
                 float scenePeak = Math.max(mr, Math.max(mg, mb));
 
@@ -143,7 +158,7 @@ final class JpegFusion {
                 // chroma errors from creating red/orange/pink speckles. LONG owns color
                 // throughout the handoff unless LONG has lost at least two highlight
                 // channels and SHORT has usable signal. This is strictly pixel-local.
-                if (highlightWeight > 0.0005f) {
+                if (highlightWeight > 0.0005f && textureRecoveryWeight < 0.50f) {
                     applyHighlightColorOwnership(
                             tr, tg, tb,
                             lr, lg, lb,
@@ -167,16 +182,12 @@ final class JpegFusion {
         recycle(shortBitmap);
         recycle(longBitmap);
 
-        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        boolean ok = output.compress(Bitmap.CompressFormat.JPEG, 95, bytes);
+        byte[] encoded = encodeJpeg(output);
         output.recycle();
-        if (!ok) {
-            throw new IllegalStateException("JPEG encoder rejected fused bitmap");
-        }
-        return bytes.toByteArray();
+        return encoded;
     }
 
-    private static Bitmap decodeUpright(byte[] jpeg) throws Exception {
+    static Bitmap decodeUpright(byte[] jpeg) throws Exception {
         Bitmap decoded = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.length);
         if (decoded == null) {
             throw new IllegalStateException("Unable to decode capture JPEG");
@@ -340,6 +351,19 @@ final class JpegFusion {
             lut[i] = (int) Math.round(255.0 * encoded);
         }
         return lut;
+    }
+
+    static byte[] encodeJpeg(Bitmap bitmap) {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        boolean ok = bitmap.compress(Bitmap.CompressFormat.JPEG, 95, bytes);
+        if (!ok) {
+            throw new IllegalStateException("JPEG encoder rejected fused bitmap");
+        }
+        return bytes.toByteArray();
+    }
+
+    static void recycleBitmap(Bitmap bitmap) {
+        recycle(bitmap);
     }
 
     private static void recycle(Bitmap bitmap) {

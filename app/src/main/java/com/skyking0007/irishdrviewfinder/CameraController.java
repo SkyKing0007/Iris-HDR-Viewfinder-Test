@@ -91,11 +91,13 @@ final class CameraController {
     private static final int AUTO_METER_MAX_FRAMES = 12;
     private static final int AUTO_METER_STABLE_FRAMES = 3;
     private static final double AUTO_METER_STABLE_EV = 0.18;
-    // Exact V1.4.15 response cadence: clean HAL AE is bootstrap-only, then
-    // a 32x24 LONG statistic updates AUTO without replacing the HDR burst.
+    // V2.2 live-stat ownership: clean HAL AE is bootstrap-only, then a 32x24
+    // LONG statistic updates AUTO without replacing the HDR burst.
     private static final double AUTO_LIVE_HYSTERESIS_EV = 0.10;
     private static final double AUTO_LIVE_MAX_STEP_EV = 0.30;
-    private static final long AUTO_LIVE_UPDATE_MIN_NS = 180_000_000L;
+    private static final double AUTO_LIVE_SCENE_CUT_EV = 0.70;
+    private static final double AUTO_LIVE_SCENE_CUT_MAX_STEP_EV = 6.0;
+    private static final long AUTO_LIVE_UPDATE_MIN_NS = 80_000_000L;
     private static final int DEFAULT_POST_RAW_BOOST = 100;
     private static final int MAX_SRGB_CURVE_POINTS = 64;
     private static final double FOV_MAX_REPORTED_SCALE = 1.03;
@@ -116,6 +118,7 @@ final class CameraController {
     private ImageReader jpegReader;
     private CameraCharacteristics characteristics;
     private CaptureSetSaver captureSaver;
+    private HdrGlView stillFusionView;
     private Surface previewSurface;
     private String cameraId;
     private PreviewMode previewMode = PreviewMode.HDR;
@@ -234,6 +237,10 @@ final class CameraController {
         return out;
     }
 
+    void setStillFusionView(HdrGlView view) {
+        stillFusionView = view;
+    }
+
     void setPreviewSurface(Surface surface) {
         cameraHandler.post(() -> {
             if (previewSurface == surface) return;
@@ -278,7 +285,7 @@ final class CameraController {
     }
 
     void setDisplayBrightnessEv(float ev) {
-        displayBrightnessEv = Math.max(-4.0f, Math.min(4.0f, ev));
+        displayBrightnessEv = Math.max(-16.0f, Math.min(1.0f, ev));
         RuntimeLogger.event("DISPLAY_BRIGHTNESS", String.format(Locale.US, "%.1fEV", displayBrightnessEv));
     }
 
@@ -880,6 +887,7 @@ final class CameraController {
                 jpegOrientationDegrees,
                 captureDisplayBrightnessEv,
                 captureDisplayGamma,
+                stillFusionView,
                 new CaptureSetSaver.Listener() {
                     @Override
                     public void onInputsAcquired(String id) {
@@ -1446,12 +1454,16 @@ final class CameraController {
 
         double errorEv = Math.log(autoLiveTargetMedianLinear / stats.longMedianLinear) / Math.log(2.0);
         if (Math.abs(errorEv) <= AUTO_LIVE_HYSTERESIS_EV) return;
+        boolean sceneCut = Math.abs(errorEv) >= AUTO_LIVE_SCENE_CUT_EV;
         long now = System.nanoTime();
-        if (lastAutoLiveUpdateNs != 0L
+        if (!sceneCut && lastAutoLiveUpdateNs != 0L
                 && now - lastAutoLiveUpdateNs < AUTO_LIVE_UPDATE_MIN_NS) return;
 
-        double stepEv = Math.max(-AUTO_LIVE_MAX_STEP_EV,
-                Math.min(AUTO_LIVE_MAX_STEP_EV, errorEv));
+        // V2.3 is derived only from V2.2's live-stat ownership. Small changes retain
+        // V2.2's smooth 0.30-EV step, while a real dark<->bright scene cut applies
+        // the measured correction immediately on the first fresh LONG statistic.
+        double maxStep = sceneCut ? AUTO_LIVE_SCENE_CUT_MAX_STEP_EV : AUTO_LIVE_MAX_STEP_EV;
+        double stepEv = Math.max(-maxStep, Math.min(maxStep, errorEv));
         autoLiveLongProduct = Math.max(1.0, autoLiveLongProduct * Math.pow(2.0, stepEv));
         long oldLongNs = autoLongExposureNs;
         int oldLongIso = autoLongIso;
@@ -1468,8 +1480,8 @@ final class CameraController {
         RuntimeLogger.event(
                 "AUTO_LIVE_ADAPT",
                 String.format(Locale.US,
-                        "median=%.4f target=%.4f err=%+.2fEV step=%+.2fEV short=%s ISO%d long=%s ISO%d bracket=%.2fEV",
-                        stats.longMedianLinear, autoLiveTargetMedianLinear, errorEv, stepEv,
+                        "median=%.4f target=%.4f err=%+.2fEV step=%+.2fEV sceneCut=%s short=%s ISO%d long=%s ISO%d bracket=%.2fEV",
+                        stats.longMedianLinear, autoLiveTargetMedianLinear, errorEv, stepEv, sceneCut,
                         exposureText(autoShortExposureNs), autoShortIso,
                         exposureText(autoLongExposureNs), autoLongIso, bracketEv));
         listener.onAutoHdrSettings(

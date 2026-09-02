@@ -1,9 +1,11 @@
 package com.skyking0007.irishdrviewfinder;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.SurfaceTexture;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES30;
+import android.opengl.GLUtils;
 import android.opengl.GLSurfaceView;
 import android.util.AttributeSet;
 import android.view.Surface;
@@ -30,6 +32,10 @@ final class HdrGlView extends GLSurfaceView {
 
     interface SceneStatsListener {
         void onSceneStats(SceneStats stats);
+    }
+
+    interface StillFusionCallback {
+        void onComplete(byte[] jpegBytes, Throwable error);
     }
 
     static final class SceneStats {
@@ -100,13 +106,32 @@ final class HdrGlView extends GLSurfaceView {
     }
 
     void setDisplayBrightnessEv(float ev) {
-        renderer.displayBrightnessEv = Math.max(-4.0f, Math.min(4.0f, ev));
+        renderer.displayBrightnessEv = Math.max(-16.0f, Math.min(1.0f, ev));
         requestRender();
     }
 
     void setDisplayGamma(float gamma) {
         renderer.displayGamma = Math.max(0.50f, Math.min(2.00f, gamma));
         requestRender();
+    }
+
+    void fuseStillJpegs(
+            byte[] shortJpeg,
+            byte[] longJpeg,
+            double exposureRatio,
+            float brightnessEv,
+            float gamma,
+            StillFusionCallback callback) {
+        if (callback == null) return;
+        queueEvent(() -> {
+            try {
+                byte[] fused = renderer.fuseStillJpegs(
+                        shortJpeg, longJpeg, exposureRatio, brightnessEv, gamma);
+                callback.onComplete(fused, null);
+            } catch (Throwable t) {
+                callback.onComplete(null, t);
+            }
+        });
     }
 
     void setProducerOwnedOrientationDegrees(int degrees) {
@@ -145,7 +170,7 @@ final class HdrGlView extends GLSurfaceView {
         private static final int STATS_WIDTH = 32;
         private static final int STATS_HEIGHT = 24;
         private static final int STATS_PIXELS = STATS_WIDTH * STATS_HEIGHT;
-        private static final long STATS_INTERVAL_NS = 200_000_000L;
+        private static final long STATS_INTERVAL_NS = 100_000_000L;
 
         private final Context context;
         private final FloatBuffer vertexBuffer;
@@ -552,6 +577,142 @@ final class HdrGlView extends GLSurfaceView {
                     GLES30.glGetUniformLocation(displayProgram, "displayGamma"),
                     displayGamma);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+        }
+
+        private byte[] fuseStillJpegs(
+                byte[] shortJpeg,
+                byte[] longJpeg,
+                double exposureRatio,
+                float brightnessEv,
+                float gamma) throws Exception {
+            long startedNs = System.nanoTime();
+            Bitmap shortBitmap = JpegFusion.decodeUpright(shortJpeg);
+            Bitmap longBitmap = JpegFusion.decodeUpright(longJpeg);
+            if (shortBitmap == null || longBitmap == null) {
+                JpegFusion.recycleBitmap(shortBitmap);
+                JpegFusion.recycleBitmap(longBitmap);
+                throw new IllegalStateException("Unable to decode capture JPEGs for GPU fusion");
+            }
+            if (shortBitmap.getWidth() != longBitmap.getWidth()
+                    || shortBitmap.getHeight() != longBitmap.getHeight()) {
+                JpegFusion.recycleBitmap(shortBitmap);
+                JpegFusion.recycleBitmap(longBitmap);
+                throw new IllegalStateException("Short/long JPEG dimensions do not match for GPU fusion");
+            }
+
+            int width = shortBitmap.getWidth();
+            int height = shortBitmap.getHeight();
+            int[] maxTexture = new int[1];
+            GLES30.glGetIntegerv(GLES30.GL_MAX_TEXTURE_SIZE, maxTexture, 0);
+            if (width > maxTexture[0] || height > maxTexture[0]) {
+                JpegFusion.recycleBitmap(shortBitmap);
+                JpegFusion.recycleBitmap(longBitmap);
+                throw new IllegalStateException(
+                        "Still dimensions exceed GL_MAX_TEXTURE_SIZE " + width + "x" + height
+                                + " max=" + maxTexture[0]);
+            }
+
+            RuntimeLogger.event(
+                    "GPU_STILL_FUSION",
+                    String.format(java.util.Locale.US,
+                            "start %dx%d ratio=%.3f brightness=%+.1fEV gamma=%.2f",
+                            width, height, exposureRatio, brightnessEv, gamma));
+
+            int shortTexture = 0;
+            int longTexture = 0;
+            int outputTexture = 0;
+            Bitmap output = null;
+            try {
+                shortTexture = createTexture2d();
+                longTexture = createTexture2d();
+                outputTexture = createTexture2d();
+
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shortTexture);
+                GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, shortBitmap, 0);
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, longTexture);
+                GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, longBitmap, 0);
+                allocateRgbTexture(outputTexture, width, height);
+                JpegFusion.recycleBitmap(shortBitmap);
+                shortBitmap = null;
+                JpegFusion.recycleBitmap(longBitmap);
+                longBitmap = null;
+
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+                GLES30.glFramebufferTexture2D(
+                        GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                        GLES30.GL_TEXTURE_2D, outputTexture, 0);
+                int fbStatus = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
+                if (fbStatus != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                    throw new IllegalStateException("GPU still framebuffer incomplete: 0x"
+                            + Integer.toHexString(fbStatus));
+                }
+                GLES30.glViewport(0, 0, width, height);
+                // Reuse V2.2's existing display shader/program for the off-screen still
+                // pass. mode=3 enables still-only reliable SHORT texture recovery while
+                // mode=2 live HDR retains V2.2 ownership behavior. No new shader asset
+                // or new compiler/patch mechanism is introduced.
+                GLES30.glUseProgram(displayProgram);
+                bindQuad();
+                bindSampler2d(displayProgram, "normalTex", longTexture, 0);
+                bindSampler2d(displayProgram, "shortTex", shortTexture, 1);
+                bindSampler2d(displayProgram, "longTex", longTexture, 2);
+                GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "mode"), 3);
+                GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "rotationQuarterTurns"), 0);
+                GLES30.glUniform2f(GLES30.glGetUniformLocation(displayProgram, "fullFitScale"), 1.0f, 1.0f);
+                GLES30.glUniform2f(GLES30.glGetUniformLocation(displayProgram, "splitFitScale"), 1.0f, 1.0f);
+                GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveNormal"), 0);
+                GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveShort"), 1);
+                GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveLong"), 1);
+                GLES30.glUniform1f(
+                        GLES30.glGetUniformLocation(displayProgram, "exposureRatio"),
+                        (float) Math.max(1.0, Math.min(65_536.0, exposureRatio)));
+                GLES30.glUniform1f(
+                        GLES30.glGetUniformLocation(displayProgram, "displayBrightnessEv"),
+                        Math.max(-16.0f, Math.min(1.0f, brightnessEv)));
+                GLES30.glUniform1f(
+                        GLES30.glGetUniformLocation(displayProgram, "displayGamma"),
+                        Math.max(0.50f, Math.min(2.00f, gamma)));
+                GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+
+                ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4)
+                        .order(ByteOrder.nativeOrder());
+                GLES30.glReadPixels(
+                        0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, rgba);
+                rgba.rewind();
+                int[] pixels = new int[width * height];
+                for (int i = 0; i < pixels.length; i++) {
+                    int r = rgba.get() & 0xFF;
+                    int g = rgba.get() & 0xFF;
+                    int b = rgba.get() & 0xFF;
+                    rgba.get();
+                    pixels[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+                }
+                output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                // GL texture upload and glReadPixels have opposite vertical origins,
+                // so the two inversions cancel and the sequential rows are upright.
+                output.setPixels(pixels, 0, width, 0, 0, width, height);
+                byte[] encoded = JpegFusion.encodeJpeg(output);
+                long elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L;
+                RuntimeLogger.event(
+                        "GPU_STILL_FUSION",
+                        "complete ms=" + elapsedMs + " outputBytes=" + encoded.length);
+                return encoded;
+            } finally {
+                JpegFusion.recycleBitmap(shortBitmap);
+                JpegFusion.recycleBitmap(longBitmap);
+                JpegFusion.recycleBitmap(output);
+                int[] textures = {shortTexture, longTexture, outputTexture};
+                for (int texture : textures) {
+                    if (texture != 0) {
+                        int[] one = {texture};
+                        GLES30.glDeleteTextures(1, one, 0);
+                    }
+                }
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
+                if (surfaceWidth > 0 && surfaceHeight > 0) {
+                    GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight);
+                }
+            }
         }
 
         private void bindQuad() {

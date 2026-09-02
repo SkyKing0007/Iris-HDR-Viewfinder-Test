@@ -1,36 +1,55 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.2
+# Iris HDR Viewfinder Test V1.4.11 V2.3
 
-V1.4.11 V2.2 is a fast AUTO-exposure transition correction built from the exact successful V1.4.11 V2.1 GitHub Actions compiled candidate. It preserves V1.4.11 V2.1 HDR rendering, fixed ~3 EV AUTO bracket, Brightness/Gamma controls, side-by-side identity, fixed-height status row, FOV/orientation, capture, DNG/JPEG and logging behavior.
+V2.3 is derived **only** from the exact successful V1.4.11 V2.2 compiled candidate. No other Iris build is used as a runtime or algorithm source.
 
-## Fast dark ↔ bright AUTO settling
+## Changes from V2.2
 
-V2.1 physically updated HDR AUTO exposure only when the clean-AE remeter took over the preview about every five seconds. That is why moving from a dark scene to a bright scene, or bright to dark, could sit at the old exposure before beginning to settle.
+### Faster dark ↔ bright AUTO response
 
-V2.2 ports the validated V1.4.15 continuous-metering mechanism without importing V1.4.15's later HDR-fusion/bracket experiments:
+V2.2 already owns physical AUTO exposure through its live 32x24 LONG statistics after the initial clean HAL-AE bootstrap. V2.3 keeps that ownership and changes only the response policy:
 
-- clean HAL AE is used only for the initial converged exposure/flicker anchor;
-- after that bootstrap, the camera remains in the normal repeating SHORT/LONG HDR burst;
-- `HdrGlView` samples the actual published LONG at 32x24 every 200 ms;
-- valid LONG median changes are sent directly to `CameraController`;
-- physical AUTO correction begins from the next valid sample instead of waiting five seconds;
-- each applied correction is bounded to ±0.30 EV with 0.10 EV hysteresis and at least 180 ms between updates;
-- stale statistics from an older exposure pair are rejected.
+- statistics interval: 100 ms;
+- ordinary drift: unchanged 0.10 EV hysteresis and ±0.30 EV smoothing;
+- scene cut: when the measured error is at least 0.70 EV, apply the measured correction immediately on the first fresh statistic, capped at ±6 EV for safety;
+- stale statistics from the previous exposure pair remain rejected;
+- fixed ~8x / 3 EV SHORT↔LONG bracket remains unchanged.
 
-This gives rapid response without a new unvalidated multi-stop scene-cut jump.
+### GPU-primary saved fusion
 
-## Preserved V2.1 ownership
+V2.2 saved `FUSED_HDR.jpg` by decoding both still JPEGs and running the full-resolution fusion loop on the CPU. V2.3 moves that same V2.2-domain job onto the existing GLES3 context:
 
-- AUTO bracket remains the V1.4.11 fixed ~8x / 3 EV policy when flicker is NONE.
-- Under 50/60-Hz or unknown/PWM lighting, V1.4.11's same-integration safety remains.
-- Brightness remains `-4.0..+4.0 EV` in 0.1-EV steps and is presentation-only after fusion.
-- Gamma remains `0.50..2.00` in 0.05 steps, `1.00` neutral, presentation-only and RGB-ratio preserving.
-- Live exposure statistics are sampled before Brightness/Gamma, so those controls cannot silently change physical sensor exposure.
-- Shutter press freezes the current SHORT/LONG exposure/ISO/post-RAW boost plus Brightness/Gamma; later live-stat updates affect only future captures.
-- The V2.1 one-line fixed 20dp status row remains, so status changes cannot resize the viewfinder.
-- Application ID remains `com.skyking0007.irishdrviewfinder.v1411v2` for side-by-side installation.
+- SHORT and LONG still JPEGs are decoded and uploaded as GPU textures;
+- the full-resolution HDR fusion, brightness, Gamma and tone-fit math reuse V2.2's existing `hdr_display.frag` in an off-screen still-only mode;
+- only the final GPU readback and JPEG encoding remain CPU-side;
+- the old CPU `JpegFusion` path remains only as an explicit failure fallback and uses the same fusion ownership rules.
 
-## Backup / branch
+### Real SHORT texture recovery
 
-No new backup branch is required for V2.2. Exact successful V2.1 commit `6057b8e22dbe98a6f386d9026d6ab9dbec65884c` remains the rollback/runtime authority.
+The V2.2 saved path admitted SHORT primarily when LONG was already near encoded clipping. In the supplied office capture, the outdoor ground is bright and the exposure-normalized SHORT and LONG agree, but LONG is not close enough to clipping to trigger that handoff. The result is therefore overwhelmingly LONG-owned and preserves LONG's peach/orange processed blotches instead of the pine-needle/grass/dirt texture present in SHORT.
+
+V2.3 adds a fail-closed, pixel-local SHORT reliability gate using only information already present in the V2.2 SHORT/LONG pair:
+
+- SHORT must have real encoded signal;
+- LONG must be a genuinely bright region;
+- exposure-normalized SHORT and LONG luminance must agree closely;
+- otherwise LONG remains owner.
+
+No neighborhood fill, texture synthesis, sharpening or cross-edge operator is introduced.
+
+### Brightness range
+
+Brightness is now **-16.0 EV through +1.0 EV** in 0.1 EV steps. It remains presentation-only after SHORT/LONG fusion and cannot alter sensor exposure or the fixed HDR bracket. Gamma remains 0.50..2.00 with 1.00 neutral.
+
+## Preserved V2.2 behavior
+
+- side-by-side application ID `com.skyking0007.irishdrviewfinder.v1411v2`;
+- fixed ~3 EV AUTO HDR bracket;
+- AUTO/MANUAL ownership;
+- FOV-safe 30 fps and explicit cropped 60 fps mode;
+- producer-owned orientation/FIT geometry;
+- fixed-height status-row bounce correction;
+- shutter-time freeze of SHORT/LONG exposure/ISO/post-RAW boost/Brightness/Gamma;
+- RAW DNG and individual SHORT/LONG JPEG saves;
+- existing live HDR display fusion behavior except the requested Brightness clamp expansion.
 
 Target branch: `experiment-v1.4.11-v2-brightness-4ev`.
