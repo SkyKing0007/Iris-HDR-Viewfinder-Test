@@ -1,31 +1,40 @@
-# Iris HDR Viewfinder Test V1.4.21
+# Iris HDR Viewfinder Test V1.4.22
 
-V1.4.21 is a narrow HDR fusion-boundary correction on top of successful V1.4.20. It preserves V1.4.20 GPU-first still fusion, parallel capture saving, temporal radiance/PWM stabilization, adaptive LONG/SHORT exposure policy, exact-generation pairing and full clipped-core SHORT recovery.
+V1.4.22 is an AUTO-SHORT headroom and same-domain HDR fusion correction on top of successful V1.4.21. It preserves V1.4.21's LONG appearance policy, GPU-first live/still fusion, coherent boundary ownership, temporal/PWM protections, capture-performance architecture and exact exposure-generation pairing.
 
-## Validity-guided boundary
+## LONG appearance, SHORT recoverability
 
-The chandelier regression showed that SHORT and LONG were already registered to about 0.26 pixel, yet FUSED created cyan/bright contours around clipped bulbs that were not present in either source. The remaining defect was therefore fusion reconstruction rather than gross alignment.
+LONG remains responsible for the natural scene-body exposure. SHORT is now treated as a highlight-recovery measurement rather than merely a fixed EV-gap partner.
 
-V1.4.20 reconstructed one low-frequency band with a broader `coarseMask` and a detail band with a different `fineMask`. Where those masks disagreed, fusion could combine SHORT base tone with LONG detail (or vice versa) and synthesize a perimeter outside the center values represented by either exposure.
+The existing 32x24 paired scene analysis records localized cells where LONG has genuinely lost highlight information. AUTO then asks whether SHORT retains usable signal and headroom in those same cells. This lets a small chandelier bulb, shelf LED, television highlight or reflection request more SHORT headroom even when it occupies too little area to influence a global clip percentage.
 
-V1.4.21 removes that split ownership. A single edge-aware ownership mask now controls the center reconstruction, and final linear RGB is a convex interpolation between LONG and recovered SHORT. True recoverable clipped cores still reach complete SHORT authority; only the transition perimeter changes.
+AUTO bracket headroom may expand to 7 EV, with repeated evidence required to widen and slower hysteretic release. The displayed EV gap is therefore a result of recoverability needs rather than the primary objective.
 
-## Edge guide ownership
+## 50/60-Hz lighting
 
-The boundary guide is now validity-aware. LONG luminance defines edges while LONG retains scene information. As LONG enters true clipping or a strongly damaged highlight shoulder, calibrated exposure-normalized SHORT luminance progressively takes over the edge guide. This lets SHORT preserve glass/filament/foliage boundaries that clipped LONG can no longer describe.
+Known mains flicker remains conservative by default. SHORT stays on full flicker-safe periods while the requested headroom is achievable there. If localized evidence repeatedly proves that a minimum-ISO full-period SHORT is still saturated, AUTO may use binary subdivisions of the detected period while keeping ISO at sensor minimum. LONG remains the stable flicker-safe appearance reference.
 
-The bilateral ownership mask remains bounded by LONG damage support, so neighboring SHORT highlight authority cannot leak across intact dark LONG structure.
+This allows a direct emitter to move from, for example, about 1/120 ISO-min toward 1/240, 1/480 or 1/960 when the data proves that is necessary. Existing temporal SHORT-only modulation rejection remains active; V1.4.22 does not claim to reconstruct illumination that was physically absent during an extreme PWM off-phase.
 
-## Preserved V1.4.20 behavior
+## Same-domain fusion
 
-- Offscreen GLES3 tiled still fusion continues to use the exact live HDR shader.
-- DNG/source-JPEG I/O and GPU fusion remain parallel.
-- The GPU still worker never terminates the process EGL display.
-- Scene-learned five-knot SHORT response remains pair-rate smoothed.
-- Stable LONG + SHORT-only PWM/modulation samples remain excluded from global response learning.
-- LONG/SHORT exposure generation, manual sliders, Brightness ownership and camera-control bytes are unchanged.
-- Chroma reliability/neutral-highlight anti-pink protections remain unchanged.
-- Orientation, FOV/cadence, DNG, sRGB and stable-signing protections remain intact.
+V1.4.21 made source ownership spatially coherent, but SHORT highlight compression still happened before mixing with untreated LONG. V1.4.22 removes that domain mismatch.
+
+Recovered SHORT now remains calibrated scene-linear radiance through the ownership decision. The same monotonic highlight operator is evaluated for both LONG and SHORT endpoints, and one coherent ownership field blends the display result only where LONG has actually lost information.
+
+Bright-but-valid areas no longer independently invite SHORT. A narrow validity-guided feather may extend only around a real clipped core. Ordinary LONG remains unchanged outside that recovery region, while a truly recoverable clipped core retains complete SHORT detail authority.
+
+High-luma single-channel clipping remains recoverable for colored emitters/reflections; low-luma skin-like single-channel saturation remains excluded.
+
+## Preserved architecture
+
+- Shared live/still `hdr_display.frag` processing remains GPU-owned.
+- Offscreen GLES3 still fusion remains tiled and memory-bounded.
+- DNG/source-JPEG saving and GPU fusion remain concurrent.
+- The still EGL worker never terminates the process EGL display.
+- Pair-rate visible photometric smoothing and five-knot scene response remain intact.
+- Chroma reliability and neutral-highlight anti-pink protections remain intact.
+- Exact exposure-generation pairing, frozen capture controls, orientation, FOV/cadence, DNG, sRGB and stable-signing protections remain intact.
 
 ## Runtime logs
 

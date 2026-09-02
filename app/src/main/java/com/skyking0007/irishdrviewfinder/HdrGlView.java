@@ -47,6 +47,14 @@ final class HdrGlView extends GLSurfaceView {
         final float longP98Linear;
         final float longMeaningfulClipFraction;
         final float shortMeaningfulClipFraction;
+        // V1.4.22: localized recoverability evidence. AUTO SHORT must protect the
+        // exact regions where LONG has lost highlight information; a tiny bulb or
+        // reflection must not be diluted by the full-frame clipping fraction.
+        final int longRecoveryCells;
+        final int shortRecoveryNearClipCells;
+        final float shortRecoveryNearClipFraction;
+        final float shortRecoveryPeak;
+        final float shortRecoverySignalFraction;
         final float shortDarkFraction;
         final float calibration;
         final float overlapErrorEv;
@@ -68,6 +76,11 @@ final class HdrGlView extends GLSurfaceView {
                 float longP98Linear,
                 float longMeaningfulClipFraction,
                 float shortMeaningfulClipFraction,
+                int longRecoveryCells,
+                int shortRecoveryNearClipCells,
+                float shortRecoveryNearClipFraction,
+                float shortRecoveryPeak,
+                float shortRecoverySignalFraction,
                 float shortDarkFraction,
                 float calibration,
                 float overlapErrorEv,
@@ -87,6 +100,11 @@ final class HdrGlView extends GLSurfaceView {
             this.longP98Linear = longP98Linear;
             this.longMeaningfulClipFraction = longMeaningfulClipFraction;
             this.shortMeaningfulClipFraction = shortMeaningfulClipFraction;
+            this.longRecoveryCells = longRecoveryCells;
+            this.shortRecoveryNearClipCells = shortRecoveryNearClipCells;
+            this.shortRecoveryNearClipFraction = shortRecoveryNearClipFraction;
+            this.shortRecoveryPeak = shortRecoveryPeak;
+            this.shortRecoverySignalFraction = shortRecoverySignalFraction;
             this.shortDarkFraction = shortDarkFraction;
             this.calibration = calibration;
             this.overlapErrorEv = overlapErrorEv;
@@ -194,6 +212,14 @@ final class HdrGlView extends GLSurfaceView {
         private static final long STATS_INTERVAL_NS = 200_000_000L;
         private static final float MEANINGFUL_CLIP_CHANNEL = 0.992f;
         private static final float MEANINGFUL_CLIP_LUMA = 0.72f;
+        // V1.4.22 localized SHORT-headroom meter. These are encoded-signal
+        // validity thresholds, not scene/exposure presets. LONG-damaged cells are
+        // evaluated separately so small emitters/reflections can own SHORT headroom.
+        private static final float RECOVERY_LONG_PEAK = 0.990f;
+        private static final float RECOVERY_LONG_SECOND = 0.975f;
+        private static final float RECOVERY_LONG_LUMA = 0.60f;
+        private static final float RECOVERY_SHORT_NEAR_CLIP = 0.900f;
+        private static final float RECOVERY_SHORT_SIGNAL = 0.020f;
         // V1.4.18 temporal continuity: luma/detail trust releases gradually so one
         // marginal SHORT sample cannot make a recoverable highlight blink off. Chroma
         // releases faster so unstable processed-ISP tint is rejected before detail.
@@ -692,6 +718,10 @@ final class HdrGlView extends GLSurfaceView {
             int overlapCount = 0;
             int longClipped = 0;
             int shortClipped = 0;
+            int longRecoveryCells = 0;
+            int shortRecoveryNearClipCells = 0;
+            int shortRecoverySignalCells = 0;
+            float shortRecoveryPeak = 0.0f;
             int shortDark = 0;
 
             for (int i = 0; i < STATS_PIXELS; i++) {
@@ -724,6 +754,25 @@ final class HdrGlView extends GLSurfaceView {
                 if (shortMax >= MEANINGFUL_CLIP_CHANNEL
                         && (shortLuma >= MEANINGFUL_CLIP_LUMA || shortSecond >= 0.985f)) {
                     shortClipped++;
+                }
+
+                // Local recoverability contract: only ask SHORT for more headroom
+                // where LONG has actually lost highlight information. This avoids
+                // making the entire SHORT frame chase an arbitrary EV bracket while
+                // still allowing a small bulb/TV/reflection to demand protection.
+                boolean longRecoveryCell = longMax >= RECOVERY_LONG_PEAK
+                        && (longSecond >= RECOVERY_LONG_SECOND
+                                || longLuma >= RECOVERY_LONG_LUMA);
+                if (longRecoveryCell) {
+                    longRecoveryCells++;
+                    float recoveryPeak = Math.max(shortSecond, shortLuma);
+                    shortRecoveryPeak = Math.max(shortRecoveryPeak, recoveryPeak);
+                    if (recoveryPeak >= RECOVERY_SHORT_NEAR_CLIP) {
+                        shortRecoveryNearClipCells++;
+                    }
+                    if (shortLuma >= RECOVERY_SHORT_SIGNAL) {
+                        shortRecoverySignalCells++;
+                    }
                 }
                 if (shortLuma < 0.008f) shortDark++;
 
@@ -867,12 +916,18 @@ final class HdrGlView extends GLSurfaceView {
             boolean shortTemporalReliable = temporalHighlightCells == 0
                     || unstableFraction <= 0.25f;
 
+            float recoveryNearClipFraction = longRecoveryCells == 0 ? 0.0f
+                    : shortRecoveryNearClipCells / (float) longRecoveryCells;
+            float recoverySignalFraction = longRecoveryCells == 0 ? 0.0f
+                    : shortRecoverySignalCells / (float) longRecoveryCells;
             return new SceneStats(
                     shortMeta.frameNumber, longMeta.frameNumber,
                     shortMeta.exposureProduct(), longMeta.exposureProduct(), ratio,
                     longMeta.exposureGeneration, p25, p35, median, p90, p98,
                     longClipped / (float) STATS_PIXELS,
                     shortClipped / (float) STATS_PIXELS,
+                    longRecoveryCells, shortRecoveryNearClipCells,
+                    recoveryNearClipFraction, shortRecoveryPeak, recoverySignalFraction,
                     shortDark / (float) STATS_PIXELS,
                     calibration, overlapError, overlapCount,
                     shortTemporalReliable, unstableFraction);

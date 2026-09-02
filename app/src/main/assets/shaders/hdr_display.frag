@@ -102,9 +102,9 @@ float longHighlightShoulder(vec3 longRgb, vec3 longScene) {
     float longPeak = max3(longRgb);
     float longSecond = second3(longRgb);
     float longLuma = luma3(longScene);
-    float multiChannel = smoothstep(0.925, 0.985, longSecond);
-    float brightSingleChannel = smoothstep(0.970, 0.997, longPeak)
-        * smoothstep(0.55, 0.82, longLuma);
+    float multiChannel = smoothstep(0.955, 0.988, longSecond);
+    float brightSingleChannel = smoothstep(0.985, 0.998, longPeak)
+        * smoothstep(0.62, 0.84, longLuma);
     return max(multiChannel, brightSingleChannel);
 }
 
@@ -116,24 +116,26 @@ float longClippedCore(vec3 longRgb, vec3 longScene) {
     float longSecond = second3(longRgb);
     float longLuma = luma3(longScene);
     float multiChannelCore = smoothstep(0.980, 0.990, longSecond);
-    float brightSingleCore = smoothstep(0.992, 0.998, longPeak)
+    float brightSingleCore = smoothstep(0.990, 0.997, longPeak)
         * smoothstep(0.50, 0.78, longLuma);
     return max(multiChannelCore, brightSingleCore);
 }
 
 vec3 mapRecoveredHighlight(vec3 recoveredScene, float ratio) {
-    // This curve is applied only inside the SHORT mask. Recovered detail therefore
-    // has a useful 0.72-0.995 display range instead of being squeezed near pure white.
+    // V1.4.22 common highlight operator. Both LONG and recovered SHORT are passed
+    // through this same monotonic shoulder before source interpolation, so fusion
+    // never mixes a pre-tonemapped SHORT endpoint with an untreated LONG endpoint.
     float scenePeak = max3(recoveredScene);
-    if (scenePeak <= 0.72 || scenePeak <= 0.000001) return recoveredScene;
+    if (scenePeak <= 0.82 || scenePeak <= 0.000001) return recoveredScene;
     float mappedPeak;
     if (scenePeak <= 1.0) {
-        float t = clamp((scenePeak - 0.72) / 0.28, 0.0, 1.0);
-        mappedPeak = mix(0.72, 0.90, t);
+        float t = smoothstep(0.0, 1.0, clamp((scenePeak - 0.82) / 0.18, 0.0, 1.0));
+        mappedPeak = mix(0.82, 0.94, t);
     } else {
         float headroomLog2 = max(log2(max(ratio, 1.0001)), 0.0001);
-        float t = clamp(log2(scenePeak) / headroomLog2, 0.0, 1.0);
-        mappedPeak = mix(0.90, 0.995, t);
+        float t = smoothstep(0.0, 1.0,
+            clamp(log2(scenePeak) / headroomLog2, 0.0, 1.0));
+        mappedPeak = mix(0.94, 0.995, t);
     }
     return recoveredScene * (mappedPeak / scenePeak);
 }
@@ -198,21 +200,16 @@ void fusionSample(
     float corePermission = smoothstep(0.25, 0.55, shortUsable);
     coreMask = clippedCore * corePermission;
 
-    float radianceEvidence = smoothstep(
-        1.01, 1.10,
-        max3(shortScene) / max(max3(longScene), 0.0005));
     float agreement = validChannelAgreement(longRgb, longScene, shortScene);
-    // Visible luma fusion is owned by this exact complete SHORT/LONG pair. The
-    // 5-Hz history no longer gates luma, eliminating its remaining periodic pulse.
-    float shoulderRaw = shoulderNeed * lumaSafe * signalSafe
-        * radianceEvidence * agreement;
-    float shoulderMask = smoothstep(0.04, 0.58, shoulderRaw) * (1.0 - clippedCore);
-    rawMask = max(coreMask, shoulderMask);
-    // One-sided protection: multiscale mask filtering may smooth only inside a
-    // LONG-damaged region; it cannot leak SHORT across an intact dark edge.
+    // V1.4.22 source ownership begins only from genuine LONG information loss.
+    // Bright-but-valid reflections/TV/table highlights no longer independently
+    // invite SHORT. The neighboring-core blur below provides the narrow feather.
+    rawMask = coreMask;
+    // One-sided boundary support is intentionally narrow and exists only so a
+    // clipped-core mask can feather into near-clipped pixels on the same surface.
     damageSupport = max(
         coreMask,
-        smoothstep(0.02, 0.50, shoulderNeed * lumaSafe * signalSafe));
+        smoothstep(0.38, 0.86, shoulderNeed * lumaSafe * signalSafe));
 
     // V1.4.21 validity-aware boundary guide. LONG defines edges while it still
     // carries scene information. As LONG loses highlight structure, the calibrated
@@ -237,7 +234,9 @@ void fusionSample(
     vec3 longChromaticityAtShortLuma = longScene
         * (shortSceneLuma / max(guideLuma, 0.0005));
     vec3 trustedShort = mix(longChromaticityAtShortLuma, shortScene, colorTrust);
-    recoveredShort = mapRecoveredHighlight(trustedShort, ratio);
+    // Keep SHORT in calibrated scene-linear radiance here. Display highlight
+    // compression is applied symmetrically to both source endpoints later.
+    recoveredShort = trustedShort;
 }
 
 void addFusionNeighbor(
@@ -292,7 +291,14 @@ vec3 multiscaleHighlightRecovery(vec2 uv, float ratio) {
 
     float blurredMask = min(damageSupport, maskAccum / max(weightAccum, 0.0001));
     float ownershipMask = clamp(max(coreMask, blurredMask), 0.0, 1.0);
-    return mix(longCenter, shortCenter, ownershipMask);
+
+    // Same-domain fusion: apply the identical highlight operator to BOTH endpoints,
+    // then interpolate with one ownership field. Fade that common shoulder in with
+    // ownership so untouched LONG pixels remain appearance authority.
+    vec3 mappedLong = mapRecoveredHighlight(longCenter, ratio);
+    vec3 mappedShort = mapRecoveredHighlight(shortCenter, ratio);
+    vec3 recoveredDisplay = mix(mappedLong, mappedShort, ownershipMask);
+    return mix(longCenter, recoveredDisplay, ownershipMask);
 }
 
 void main() {

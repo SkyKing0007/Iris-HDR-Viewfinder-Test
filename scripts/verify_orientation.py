@@ -18,7 +18,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.21 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.22 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -167,7 +167,7 @@ require('TONEMAP_MODE_PRESET_CURVE' not in camera and 'TONEMAP_PRESET_CURVE_SRGB
 # SHORT/LONG pair never yields to periodic AE; displayed-pair statistics continuously
 # adjust LONG appearance and independently choose only as much SHORT headroom as needed.
 require('AUTO_BRACKET_DEFAULT_EV = 3.0' in camera
-        and 'AUTO_BRACKET_MAX_EV = 5.0' in camera
+        and 'AUTO_BRACKET_MAX_EV = 7.0' in camera
         and 'MANUAL_BRACKET_MAX_EV = 6.0' in camera,
         "adaptive AUTO/MANUAL bracket limits missing")
 require('LONG_CLIP_TRIGGER_FRACTION = 0.005' in camera
@@ -198,9 +198,16 @@ require('achievedLongProduct / Math.pow(2.0, autoAdaptiveBracketEv)' in camera,
 require('baseShortProduct * requestedGain' not in camera
         and 'baseLongProduct * achievedPairGain' not in camera,
         "V1.4.14 whole-pair Brightness coupling must remain removed")
-require('shortDarkFraction > 0.94f' in camera and 'overlapErrorEv > 0.50f' in camera
-        and '!stats.shortTemporalReliable' in camera,
-        "SHORT quality/overlap/temporal guard missing")
+require('manualShortFragile = stats.shortDarkFraction > 0.94f' in camera
+        and 'overlapErrorEv > 0.50f' in camera and '!stats.shortTemporalReliable' in camera,
+        "MANUAL SHORT quality/overlap/temporal guard missing")
+require('longRecoveryCells' in gl and 'shortRecoveryPeak' in gl
+        and 'shortRecoveryNearClipFraction' in gl and 'shortRecoverySignalFraction' in gl,
+        "localized LONG-damage / SHORT-recoverability evidence missing")
+require('AUTO_SHORT_RECOVERY_TARGET_PEAK = 0.90' in camera
+        and 'AUTO_SHORT_RECOVERY_RELEASE_PEAK = 0.72' in camera
+        and 'AUTO_SHORT_RECOVERY_MIN_SIGNAL_FRACTION = 0.50' in camera,
+        "localized AUTO SHORT recoverability targets missing")
 require('robustSceneBodyMid' in camera and 'adaptiveSceneBodyTargetLocked' in camera,
         "adaptive LONG scene-body meter missing")
 require('longP25Linear' in camera and 'longP35Linear' in camera
@@ -224,6 +231,12 @@ require(camera.count('bodyRaiseEvidence = 0;') >= 8
 require('BRACKET_CONFIRM_UP_SAMPLES = 2' in camera
         and 'BRACKET_CONFIRM_DOWN_SAMPLES = 3' in camera,
         "adaptive bracket hysteresis evidence counters missing")
+require('autoFastShortRecovery' in camera
+        and 'while (fast > desired && fast > 1L)' in camera
+        and 'return new ExposureSetting(fast, minIso);' in camera,
+        "localized unresolved AUTO highlights must be able to cross the flicker-period floor at minimum ISO")
+require('AUTO_BRACKET_MAX_EV = 7.0' in camera,
+        "AUTO localized recoverability must have sufficient headroom ceiling")
 require('double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);' in camera,
         "actual adaptive bracket must remain reported")
 
@@ -284,7 +297,7 @@ require('longHighlightShoulder' in hdr_shader and 'longClippedCore' in hdr_shade
         "shared LONG-base full-core/edge-guided highlight compositor missing")
 require('float corePermission = smoothstep(0.25, 0.55, shortUsable);' in hdr_shader
         and 'coreMask = clippedCore * corePermission;' in hdr_shader
-        and 'rawMask = max(coreMask, shoulderMask);' in hdr_shader,
+        and 'rawMask = coreMask;' in hdr_shader,
         "clipped core must use current SHORT safety for complete detail authority")
 require('temporalTrust.r' not in hdr_shader,
         "5-Hz temporal luma state must never gate visible luma fusion")
@@ -301,7 +314,10 @@ require('guideEdgeWeight' in hdr_shader and 'addFusionNeighbor' in hdr_shader
         and 'guideLuma = mix(longSceneLuma, shortSceneLuma, shortGuideAuthority);' in hdr_shader
         and 'float blurredMask = min(damageSupport' in hdr_shader
         and 'float ownershipMask = clamp(max(coreMask, blurredMask), 0.0, 1.0);' in hdr_shader
-        and 'return mix(longCenter, shortCenter, ownershipMask);' in hdr_shader,
+        and 'vec3 mappedLong = mapRecoveredHighlight(longCenter, ratio);' in hdr_shader
+        and 'vec3 mappedShort = mapRecoveredHighlight(shortCenter, ratio);' in hdr_shader
+        and 'vec3 recoveredDisplay = mix(mappedLong, mappedShort, ownershipMask);' in hdr_shader
+        and 'return mix(longCenter, recoveredDisplay, ownershipMask);' in hdr_shader,
         "shared validity-guided coherent ownership transition missing")
 require('vec3 lowBand = mix(longLow, shortLow, coarseMask);' not in hdr_shader
         and 'vec3 detailBand = mix(longCenter - longLow, shortCenter - shortLow, fineMask);' not in hdr_shader,
@@ -445,10 +461,15 @@ require('flickerPeriodNs' in camera and '10_000_000L' in camera and '8_333_333L'
         "50/60-Hz safe integration periods missing")
 require('solveLongSettingForProductLocked' in camera and 'solveShortSettingForProductLocked' in camera,
         "separate LONG/SHORT timing solvers missing")
-require('A stable white clip is preferable to revealing LED/PWM phase' in camera,
-        "known 50/60-Hz SHORT must stop at a stable integration boundary")
-require('Unknown/PWM: keep SHORT on the same integration as LONG' in camera,
-        "unknown/PWM SHORT must prefer stable integration over extra headroom")
+require('Stay on whole flicker periods whenever the required headroom is' in camera
+        and 'if (allowFastRecovery)' in camera
+        and 'Use exact binary subdivisions of the measured mains period' in camera
+        and 'return new ExposureSetting(fast, minIso);' in camera
+        and 'No proven local need: keep the stable full-period SHORT.' in camera,
+        "known 50/60-Hz SHORT must stay flicker-safe until localized unresolved clipping proves fast minimum-ISO recovery is required")
+require('Unknown/PWM without localized unresolved clipping: preserve LONG timing' in camera
+        and 'return new ExposureSetting(desired, minIso);' in camera,
+        "unknown/PWM SHORT must preserve LONG timing unless localized unresolved clipping proves fast minimum-ISO recovery is required")
 require('Unknown/PWM: preserve the clean-AE integration in both directions' in camera,
         "unknown/PWM LONG must not invent a new modulation phase")
 require('targetPreviewFps >= 60 ? SIXTY_FPS_DURATION_NS' in camera,
@@ -592,22 +613,34 @@ require('FOV SAFE: fixed 30 fps preview avoids live sensor-crop/FPS transitions'
 require('60 FPS CROP ON: request fixed 60/60 preview' in main,
         "UI must state explicit force-60 semantics")
 
-# Adaptive-policy math: tiny speculars may clip; meaningful regions drive SHORT only
-# after stable consecutive evidence. This state is control history, not image stacking.
+# Adaptive-policy math: V1.4.22 AUTO SHORT is driven by localized recoverability,
+# not by a minimum full-frame clipping area. Two consecutive samples are still
+# required before increasing headroom; release remains slower. MANUAL retains the
+# prior global clipping contract and user SHORT-ceiling behavior.
 def adapt_bracket_sequence(current_ev, samples, manual=False, floor=2.0):
     min_ev=max(floor,3.25) if manual else 3.0
-    max_ev=6.0 if manual else 5.0
-    short_target=0.0015 if manual else 0.0025
+    max_ev=6.0 if manual else 7.0
     up=down=0
     out=current_ev
-    for long_clip, short_clip, short_reliable in samples:
-        meaningful=long_clip>=0.005
-        wants_up=meaningful and short_clip>short_target and short_reliable
-        wants_down=(not meaningful) and short_clip<=0.0005 and out>min_ev
+    for sample in samples:
+        if manual:
+            long_clip, short_clip, short_reliable = sample
+            meaningful=long_clip>=0.005
+            wants_up=meaningful and short_clip>0.0015 and short_reliable
+            wants_down=(not meaningful) and short_clip<=0.0005 and out>min_ev
+            peak=0.0
+        else:
+            long_cells, near_fraction, peak, signal_fraction = sample
+            local_damage=long_cells>0
+            wants_up=(local_damage and signal_fraction>=0.50
+                      and (peak>0.90 or near_fraction>0.20))
+            wants_down=(out>min_ev and (not local_damage
+                        or (peak<0.72 and near_fraction<=0.05)))
         if wants_up:
             up+=1; down=0
             if up>=2:
-                out=min(max_ev,out+0.30); up=0
+                step=0.75 if (not manual and peak>=0.98) else 0.50
+                out=min(max_ev,out+step); up=0
         elif wants_down:
             down+=1; up=0
             if down>=3:
@@ -615,16 +648,51 @@ def adapt_bracket_sequence(current_ev, samples, manual=False, floor=2.0):
         else:
             up=down=0
     return max(min_ev,min(max_ev,out))
-require(math.isclose(adapt_bracket_sequence(3.0,[(0.001,0.001,True)]),3.0),
-        "tiny clipped-area budget must not force darker SHORT")
-require(math.isclose(adapt_bracket_sequence(3.0,[(0.02,0.01,True)]),3.0),
-        "one transient clipping sample must not widen the bracket")
-require(adapt_bracket_sequence(3.0,[(0.02,0.01,True),(0.02,0.01,True)])>3.0,
-        "two stable meaningful-clipping samples must increase AUTO headroom")
-require(math.isclose(adapt_bracket_sequence(3.0,[(0.02,0.01,False),(0.02,0.01,False)]),3.0),
-        "temporally unstable SHORT must never gain more authority/headroom")
+
+# Tiny-but-real direct emitters must now be allowed to own SHORT headroom.
+require(math.isclose(adapt_bracket_sequence(3.0,[(1,1.0,0.995,1.0)]),3.0),
+        "one localized clipped sample must not widen AUTO SHORT")
+require(adapt_bracket_sequence(3.0,[(1,1.0,0.995,1.0),(1,1.0,0.995,1.0)])>=3.75,
+        "two localized unresolved highlight samples must darken AUTO SHORT")
+require(math.isclose(adapt_bracket_sequence(3.0,[(1,1.0,0.995,0.0),(1,1.0,0.995,0.0)]),3.0),
+        "LONG-damaged cells without usable SHORT signal must not chase darker exposure")
+require(adapt_bracket_sequence(4.0,[(0,0.0,0.0,0.0)]*3) < 4.0,
+        "AUTO headroom must release slowly after localized LONG damage disappears")
 require(adapt_bracket_sequence(3.25,[(0.02,0.01,True),(0.02,0.01,True)],manual=True,floor=3.0)>3.25,
-        "MANUAL must adapt like AUTO with extra headroom")
+        "MANUAL must retain adaptive extra headroom")
+
+# 60-Hz direct-light regression from the chandelier set. At 1/120 + sensor-min ISO
+# the current build can still clip. Once localized evidence confirms that failure,
+# AUTO may cross the full-period anti-flicker floor using binary period subdivisions
+# while keeping ISO at sensor minimum rather than brightening the probe back up.
+def solve_auto_short(long_ns,long_iso,bracket_ev,min_iso=50,period_ns=8_333_333,fast=False):
+    target=(long_ns*long_iso)/(2.0**bracket_ev)
+    if target >= long_ns*min_iso:
+        iso=max(min_iso,round(target/long_ns))
+        return long_ns,iso
+    desired=max(1,round(target/min_iso))
+    if desired>=period_ns:
+        periods=max(1,desired//period_ns)
+        safe=periods*period_ns
+        iso=max(min_iso,round(target/safe))
+        return safe,iso
+    if fast:
+        e=period_ns
+        while e>desired and e>1:
+            e=max(1,e//2)
+        return e,min_iso
+    return period_ns,min_iso
+
+ch_long=round(1e9/120); ch_iso=343
+e0,i0=solve_auto_short(ch_long,ch_iso,3.0,fast=False)
+require(abs(e0-8_333_333)<=2 and i0==50,
+        f"pre-confirm chandelier SHORT must remain 1/120 ISO-min: {e0},{i0}")
+e1,i1=solve_auto_short(ch_long,ch_iso,3.75,fast=True)
+require(4_100_000 <= e1 <= 4_200_000 and i1==50,
+        f"confirmed unresolved chandelier must step to about 1/240 ISO-min: {e1},{i1}")
+achieved=math.log2((ch_long*ch_iso)/(e1*i1))
+require(achieved>3.70,
+        f"fast recoverability probe must create real additional headroom: {achieved}")
 
 # V1.4.16 office data is regression evidence, not a universal +EV calibration.
 # The robust body + scene-shape controller should autonomously demand a large correction
@@ -668,30 +736,37 @@ def long_highlight(linear_rgb, encoded_rgb):
     luma=0.2126*linear_rgb[0]+0.7152*linear_rgb[1]+0.0722*linear_rgb[2]
     ordered=sorted(encoded_rgb)
     second=ordered[1]; peak=ordered[2]
-    return max(smoothstep_local(0.965,0.992,second),
-               smoothstep_local(0.62,0.78,luma)*smoothstep_local(0.985,0.998,peak))
+    return max(smoothstep_local(0.955,0.988,second),
+               smoothstep_local(0.62,0.84,luma)*smoothstep_local(0.985,0.998,peak))
+
+def long_clipped_core(linear_rgb, encoded_rgb):
+    luma=0.2126*linear_rgb[0]+0.7152*linear_rgb[1]+0.0722*linear_rgb[2]
+    ordered=sorted(encoded_rgb)
+    second=ordered[1]; peak=ordered[2]
+    return max(smoothstep_local(0.980,0.990,second),
+               smoothstep_local(0.990,0.997,peak)*smoothstep_local(0.50,0.78,luma))
 
 def short_safe(encoded_rgb):
     return 1.0-smoothstep_local(0.965,0.985,max(encoded_rgb))
 
-red_skin_like=long_highlight((1.0,0.30,0.12),(0.995,0.58,0.38))
-neutral_highlight=long_highlight((1.0,0.96,0.93),(0.995,0.985,0.975))
-bright_green=long_highlight((0.16,1.0,0.08),(0.44,0.995,0.31))
+red_skin_like=long_clipped_core((1.0,0.30,0.12),(0.995,0.58,0.38))
+neutral_highlight=long_clipped_core((1.0,0.96,0.93),(0.995,0.985,0.975))
+bright_green=long_clipped_core((0.16,1.0,0.08),(0.44,0.995,0.31))
 require(red_skin_like < 0.01,
         f"single saturated skin-red channel must not admit SHORT: {red_skin_like}")
 require(neutral_highlight > 0.75 and bright_green > 0.70,
-        f"real neutral/bright-luma highlights must remain recoverable: neutral={neutral_highlight} green={bright_green}")
+        f"real neutral/bright-luma clipped highlights must remain recoverable: neutral={neutral_highlight} green={bright_green}")
 require(short_safe((247/255,1.0,1.0)) < 0.01,
         "V1.4.15 white-car failure: a SHORT with clipped G/B must not create a red-only fill")
 
 # 056 / 074 / 080 - Exact current pre-handoff authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.20' in workflow
-        and 'run-id: 33580258447' in workflow,
-        "workflow must download the exact successful V1.4.20 Actions authority")
-require('5d5fd64c7a9a7789f71aabf5f11d168bd6b5d6aa' in workflow,
-        "V1.4.20 authority commit pin missing")
-require('backup-v1.4.21' not in workflow,
-        "V1.4.21 must not invent a new backup-branch dependency")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.21' in workflow
+        and 'run-id: 33583413795' in workflow,
+        "workflow must download the exact successful V1.4.21 Actions authority")
+require('23d3c1d5d4498f8548d45ba81f1d5c02f95e76a5' in workflow,
+        "V1.4.21 authority commit pin missing")
+require('backup-v1.4.22' not in workflow,
+        "V1.4.22 must not invent a new backup-branch dependency")
 
 # 048 / 049 / 052 / 054 - Brightness remains user LONG intent in AUTO and MANUAL.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -5.0f' in main
@@ -716,8 +791,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 26' in gradle and 'versionName = "1.0-v1.4.21"' in gradle,
-        "V1.4.21 version/build pin missing")
+require('versionCode = 27' in gradle and 'versionName = "1.0-v1.4.22"' in gradle,
+        "V1.4.22 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -817,43 +892,39 @@ require(not short_only_modulated(0.30, 0.32),
 require(0.35 / 30.0 < 0.012,
         "normal visible response smoothing must remain sub-0.012 EV per 30fps pair")
 
-def v1419_recovery_mask(long_second, long_peak, long_luma, short_second,
-                       short_luma, radiance_ratio, agreement=1.0):
-    shoulder=max(smoothstep_local(0.925,0.985,long_second),
-                 smoothstep_local(0.970,0.997,long_peak)
-                 * smoothstep_local(0.55,0.82,long_luma))
+def v1422_recovery_mask(long_second, long_peak, long_luma, short_second, short_luma):
+    shoulder=max(smoothstep_local(0.955,0.988,long_second),
+                 smoothstep_local(0.985,0.998,long_peak)
+                 * smoothstep_local(0.62,0.84,long_luma))
     core=max(smoothstep_local(0.980,0.990,long_second),
-             smoothstep_local(0.992,0.998,long_peak)
+             smoothstep_local(0.990,0.997,long_peak)
              * smoothstep_local(0.50,0.78,long_luma))
     luma_safe=1.0-smoothstep_local(0.975,0.997,short_second)
     signal=smoothstep_local(0.008,0.025,short_luma)
     usable=min(luma_safe,signal)
-    permission=smoothstep_local(0.25,0.55,usable)
-    core_mask=core*permission
-    shoulder_raw=shoulder*luma_safe*signal*good_radiance(radiance_ratio)*agreement
-    shoulder_mask=smoothstep_local(0.04,0.58,shoulder_raw)*(1.0-core)
-    damage=max(core_mask,smoothstep_local(0.02,0.50,shoulder*luma_safe*signal))
-    return max(core_mask,shoulder_mask),core,damage
+    core_mask=core*smoothstep_local(0.25,0.55,usable)
+    # V1.4.22 raw ownership seed is ONLY the genuine clipped core. Shoulder is
+    # boundary support for neighboring-core feathering, never independent authority.
+    raw=core_mask
+    support=max(core_mask,smoothstep_local(0.38,0.86,shoulder*luma_safe*signal))
+    return raw,core,support
 
-def good_radiance(value):
-    return smoothstep_local(1.01,1.10,value)
-
-mask,core,damage=v1419_recovery_mask(1.0,1.0,0.95,0.70,0.25,1.2,1.0)
+mask,core,damage=v1422_recovery_mask(1.0,1.0,0.95,0.70,0.25)
 require(core > 0.999 and mask > 0.999 and damage > 0.999,
-        f"recoverable LONG-clipped core must receive complete current-SHORT detail authority: {core},{mask},{damage}")
-mask_bad,_,_=v1419_recovery_mask(1.0,1.0,0.95,0.999,0.25,1.2,1.0)
+        f"recoverable LONG-clipped core must retain complete current-SHORT detail authority: {core},{mask},{damage}")
+mask_bad,_,_=v1422_recovery_mask(1.0,1.0,0.95,0.999,0.25)
 require(mask_bad < 0.05,
         f"SHORT that is itself multi-channel clipped must not be recoverable: {mask_bad}")
-mask_mid,_,damage_mid=v1419_recovery_mask(0.70,0.80,0.30,0.40,0.20,1.2,1.0)
+mask_mid,_,damage_mid=v1422_recovery_mask(0.70,0.80,0.30,0.40,0.20)
 require(mask_mid < 0.01 and damage_mid < 0.01,
         f"ordinary scene body must remain literal LONG: mask={mask_mid} damage={damage_mid}")
-mask_disagree,_,_=v1419_recovery_mask(0.97,0.985,0.70,0.70,0.25,1.2,0.0)
-require(mask_disagree < 0.25,
-        f"current-pair disagreement must suppress a non-core transition instead of averaging mismatched detail: {mask_disagree}")
+# Table/TV regression: merely bright-but-valid LONG cannot independently invite SHORT.
+mask_bright,_,support_bright=v1422_recovery_mask(0.970,0.990,0.70,0.70,0.25)
+require(mask_bright < 1e-6,
+        f"bright-but-not-clipped LONG must have zero independent SHORT ownership: {mask_bright}")
 
-# V1.4.21 chandelier-edge regression. The old coarse/fine Laplacian ownership can
-# synthesize a contour outside both registered center samples when base/detail masks
-# disagree. The coherent-mask compositor must remain a convex interpolation instead.
+# V1.4.21 chandelier-edge regression remains permanent. Coherent source ownership
+# must stay convex and one-sided.
 def old_split_band(long_center, short_center, long_low, short_low, coarse, fine):
     return (long_low + (short_low-long_low)*coarse
             + (long_center-long_low)*(1.0-fine)
@@ -865,16 +936,24 @@ for ownership in [0.0,0.15,0.50,0.85,1.0]:
     coherent=0.30+(0.80-0.30)*ownership
     require(0.30-1e-9 <= coherent <= 0.80+1e-9,
             f"coherent ownership must never leave source endpoint range: {ownership},{coherent}")
-
-# The bilateral ownership mask may smooth only inside LONG damage support; a
-# neighboring SHORT region can never leak across an intact LONG edge.
 center_mask=0.8; neighbor_mask=1.0; core_mask=0.0; damage_support=0.35
 blurred=min(damage_support,(center_mask*4.0+neighbor_mask)/5.0)
 ownership=max(core_mask,blurred)
 require(ownership <= damage_support + 1e-9,
         f"one-sided damage support must bound coherent source authority: {ownership}")
 
-# Validity-aware guide must use calibrated SHORT where LONG has actually lost edge
+# Same-domain fusion regression: source-specific pre-tone mapping is forbidden.
+require('recoveredShort = trustedShort;' in hdr_shader
+        and 'recoveredShort = mapRecoveredHighlight' not in hdr_shader,
+        "SHORT must remain calibrated scene-linear radiance until common display mapping")
+require('vec3 mappedLong = mapRecoveredHighlight(longCenter, ratio);' in hdr_shader
+        and 'vec3 mappedShort = mapRecoveredHighlight(shortCenter, ratio);' in hdr_shader
+        and 'vec3 recoveredDisplay = mix(mappedLong, mappedShort, ownershipMask);' in hdr_shader,
+        "LONG/SHORT endpoints must receive the same highlight operator before interpolation")
+require('rawMask = coreMask;' in hdr_shader and 'shoulderMask' not in hdr_shader,
+        "bright shoulder must not independently own SHORT outside a genuine clipped core")
+
+# Validity-aware guide must continue to use calibrated SHORT where LONG has lost edge
 # structure while remaining LONG-owned in ordinary scene body.
 def validity_guide(long_luma, short_luma, clipped_core, shoulder_need, short_usable):
     short_authority=max(clipped_core, smoothstep_local(0.20,0.85,shoulder_need*short_usable))
@@ -944,4 +1023,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.21 REGRESSION PASS: GPU-tiled shared-shader still fusion, parallel DNG/source I/O, SHORT-only modulation rejection, pair-rate visible photometric smoothing, adaptive scene-body LONG independent of bootstrap AE, scene-learned five-knot SHORT response, current-pair luma fusion without 5-Hz gating, validity-guided coherent ownership transition, full clipped-core SHORT authority, protected chroma trust, exact exposure-generation pairs, adaptive AUTO+MANUAL HDR, LONG-owned Brightness -5..+2EV, stable signing, frozen capture pair, orientation/FOV/cadence/sRGB protections")
+print("V1.4.22 REGRESSION PASS: GPU-tiled shared-shader still fusion, parallel DNG/source I/O, SHORT-only modulation rejection, pair-rate visible photometric smoothing, adaptive scene-body LONG independent of bootstrap AE, scene-learned five-knot SHORT response, current-pair luma fusion without 5-Hz gating, localized SHORT recoverability, fast minimum-ISO highlight probes, same-domain validity-guided coherent ownership, full clipped-core SHORT authority, protected chroma trust, exact exposure-generation pairs, adaptive AUTO+MANUAL HDR, LONG-owned Brightness -5..+2EV, stable signing, frozen capture pair, orientation/FOV/cadence/sRGB protections")

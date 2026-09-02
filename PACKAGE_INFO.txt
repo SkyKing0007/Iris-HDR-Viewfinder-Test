@@ -1,39 +1,39 @@
-Iris HDR Viewfinder Test V1.4.21
+Iris HDR Viewfinder Test V1.4.22
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED CANDIDATE - NOT BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.4.20 GitHub Actions compiled candidate/artifact
-- Commit: 5d5fd64c7a9a7789f71aabf5f11d168bd6b5d6aa
-- Tree: e208289842ea762d6d51ed698d7c809c536decbb
-- Actions run: 33580258447
-- Job: 100092854252
-- Artifact ID: 9828155218
-- Artifact digest: sha256:4b1b56c598c76302fd9d716b8a02bc2213a2ab9e84bf1e53685be496d5a2f635
-- APK SHA-256: 1ba65c055e5cd39849ac3b1dff28669fe15cc75796d3c541fc7580c2ef8190d0
-- Source-candidate TAR SHA-256: 1fceb6f4af3fd476256df6f2b9bf378b2c962a337fb1db559f627870bd95e5ab
-- Runtime manifest SHA-256: 0f62bf059e36a43b44ef8159d1c970d418e75448876e1e2801b134525a42848b
-- Repository manifest SHA-256: 9f377a25959acf819b914c4b6ad4f1a0089c88cc3063c7fc2357b312214e5377
-- Regressions SHA-256: 1d138a6001048cdab29764c65470742a0ab8280595f63276f82775a5b315c828
+- Exact successful V1.4.21 GitHub Actions compiled candidate/artifact
+- Commit: 23d3c1d5d4498f8548d45ba81f1d5c02f95e76a5
+- Tree: 1b92ba130189ab1c7592bee305515889fda06358
+- Actions run: 33583413795
+- Job: 100102373921
+- Artifact ID: 9829233710
+- Artifact digest: sha256:9af5823b0ea6b900987e9eb0ca041f5d93269dce335de7fdee4a570e42fe4ccf
+- APK SHA-256: ebca7bac8314c834ff28b08fd729ee0fdceca49277f449ba51fc4cbb75e124b3
+- Source-candidate TAR SHA-256: 985e02ef9b2571da84297deb550ff7183e84717ea79d848655fd5144eb8908ca
+- Runtime manifest SHA-256: ebccf259b2535c4d5b91f0b72c6026e931db43841fdef17f79786fa157e721a1
+- Repository manifest SHA-256: 401d5aa98836e0059b67c19b95628a0b14b4b66748e527ef4ccd344d7dd4d865
+- Regressions SHA-256: 2868df0e62770731f236c80ea4c95f102c8b045b6dadbe3ce4c087a0b16ce6a1
 
 Verification-mechanics authority:
-- Exact successful V1.4.20 Actions compiler/build/invariance sequence.
-- V1.4.21 preserves the same step order and real GLSL, real Java, full assemble, signing and post-build invariance mechanics.
-- Authority download/pins, version, strict allowlists and V1.4.21 regressions advance to V1.4.20 -> V1.4.21.
-- Per project decision, no new backup branch is created; rollback uses exact V1.4.20 artifact hashes plus deterministic forward/rollback patches.
+- Exact successful V1.4.21 Actions compiler/build/invariance sequence.
+- V1.4.22 preserves the same 16-step order and real GLSL, real Java, full assemble, signing and post-build invariance mechanics.
+- Authority download/pins, version, strict allowlists, runtime hashes and V1.4.22 regressions advance from V1.4.21 to V1.4.22 only.
+- Per project decision, no new backup branch is created; rollback uses exact V1.4.21 artifact hashes plus deterministic full-index forward/rollback patches.
 
-V1.4.21 runtime changed-file allowlist: exactly two files:
+V1.4.22 runtime changed-file allowlist: exactly four files:
 - app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java (metadata version string only)
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java (fusion metadata version string only)
 
-Runtime files explicitly unchanged/protected from V1.4.20:
+Runtime files explicitly unchanged/protected from V1.4.21:
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/fullscreen.vert
 - app/src/main/assets/shaders/oes_to_rgb.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
@@ -44,36 +44,56 @@ Infrastructure changed-file list:
 - scripts/verify_orientation.py
 - app/build.gradle.kts (version only; stable signing unchanged)
 
-Documentation/hash pins:
+Infrastructure difference from successful V1.4.21:
+- V1.4.21 authority artifact/run/commit/tree pins
+- V1.4.22 version/build and exact runtime allowlist
+- V1.4.22 runtime/protected hashes and permanent regressions
+- No compiler, Gradle, signing, assemble, artifact, patch, freeze or invariance mechanism redesign/reordering
+
+Documentation/hash-pin changed files:
 - PACKAGE_INFO.txt
 - PACKAGE_MANIFEST_SHA256.txt
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-V1.4.21 validity-guided coherent-mask boundary correction:
-- V1.4.20 and V1.4.21 use the same GPU still/live fusion architecture and the same full clipped-core SHORT recovery contract.
-- The device chandelier sample showed good SHORT/LONG registration (~0.26px residual) but abnormal cyan/bright contours existed only in FUSED, proving fusion-boundary synthesis rather than gross misalignment.
-- V1.4.20 used different coarse and fine source-ownership masks in a one-level Laplacian reconstruction. When those masks disagreed, the reconstructed edge could combine one exposure's low-frequency base with the other exposure's detail and leave the range represented by either center sample.
-- V1.4.21 removes that split ownership. One edge-aware ownership mask controls the entire center-pixel reconstruction and final RGB is a convex mix between LONG and recovered SHORT.
-- The ownership mask remains one-sided inside LONG damage support; neighboring SHORT authority cannot spill across intact dark LONG structure.
-- Edge guidance is validity-aware: LONG luminance owns the guide while LONG retains information, then calibrated SHORT luminance takes over as LONG enters true clipping/strong damaged shoulder.
-- True recoverable clipped cores retain complete SHORT authority; this correction changes only the transition perimeter, not highlight completeness.
-- Existing scene-learned response, pair-rate temporal radiance smoothing, SHORT-only PWM rejection, chroma protection, exact-generation pairing and LONG/SHORT exposure policy are unchanged.
+V1.4.22 AUTO SHORT recoverability correction:
+- LONG remains the adaptive scene-body/appearance exposure authority from V1.4.21.
+- AUTO SHORT is no longer governed only by a global target EV gap. The existing 32x24 scene analysis now records localized LONG-damaged cells and evaluates SHORT headroom specifically in those cells.
+- Small direct emitters/reflections may therefore demand darker SHORT even when their clipped area is too small to move the full-frame clipping fraction.
+- AUTO can widen to 7 EV total headroom. Widening requires repeated localized evidence; release is slower and hysteretic.
+- With known 50/60-Hz lighting, SHORT remains on full flicker-safe periods unless minimum-ISO SHORT still leaves localized unresolved clipping. Only then may AUTO use binary period subdivisions (for example about 1/240, 1/480, 1/960 at 60 Hz), keeping sensor ISO at minimum so captured headroom is not given back through gain.
+- LONG remains flicker-safe; MANUAL SAFE behavior remains on its prior safety path.
+- This does not claim that software can reconstruct photons absent during extreme LED/PWM off-phases; existing SHORT-only modulation rejection remains preserved.
 
-Permanent V1.4.20 chandelier regression:
-- The actual source pair was well registered, so a visible perimeter present only in FUSED is a fusion-math failure.
-- The regression suite reproduces the old split-band condition that creates a value outside both center endpoints and requires the new coherent compositor to stay within source endpoint bounds.
-- Fully clipped LONG must hand guide authority to calibrated SHORT; ordinary scene body must remain LONG-guided.
+V1.4.22 same-domain fusion correction:
+- Source ownership begins from genuine LONG information loss; bright-but-valid TV/table reflections no longer independently invite SHORT.
+- The transition support is a narrow one-sided feather around a real clipped core using the V1.4.21 validity-aware guide.
+- Recovered SHORT stays in calibrated scene-linear radiance through source selection.
+- The same monotonic highlight operator is applied to both LONG and recovered SHORT endpoints before coherent display interpolation, eliminating the previous pre-tonemapped-SHORT vs untreated-LONG domain mismatch.
+- Ordinary LONG outside recovery ownership remains literal LONG appearance.
+- Full recoverable clipped-core SHORT authority remains protected.
+- High-luma single-channel clipping (colored emitters/reflections) remains recoverable while skin-like single-channel saturation is excluded by the luma condition.
+
+Preserved V1.4.21/V1.4.20 architecture:
+- Offscreen GLES3 tiled still fusion uses the exact live HDR shader.
+- DNG/source-JPEG I/O and GPU fusion remain parallel.
+- GPU worker EGL lifetime protection remains unchanged.
+- Scene-learned five-knot SHORT response and pair-rate visible response smoothing remain unchanged.
+- Stable LONG + SHORT-only temporal/PWM modulation remains excluded from global response learning.
+- Exact exposure-generation pairing, frozen still pair, chroma/neutral anti-pink protection, FOV/cadence/orientation/DNG/sRGB and stable signing remain unchanged unless explicitly listed above.
+
+Candidate runtime manifest digest:
+- e003754dae13f51de722e6a4867ed11911ff49ae4ab87cf807e293d7a78f52c6
 
 Patch/rollback protection:
-- No new backup branch is created for V1.4.21.
-- Exact V1.4.20 authority hashes plus deterministic full-index V1.4.20->V1.4.21 forward and V1.4.21->V1.4.20 rollback patches are required at core.abbrev 7/12/40 with fuzz=0 replay.
+- No new backup branch is created for V1.4.22.
+- Exact V1.4.21 authority hashes plus deterministic full-index V1.4.21->V1.4.22 forward and V1.4.22->V1.4.21 rollback patches are required at core.abbrev 7/12/40 with fuzz=0 replay.
 
-Stable updates:
+Stable signing:
 - Reuses repository secret IRIS_TEST_SIGNING_KEY_B64; do not regenerate it.
 - Stable keystore SHA-256: 2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e
 - Signing certificate SHA-256: 53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8
-- V1.4.21 versionCode 26 should install as a normal update over successful stable-signed V1.4.20 after successful Actions proof.
+- V1.4.22 versionCode 27 should install as a normal update over successful stable-signed V1.4.21 after successful Actions proof.
 
 Local compiler status before Actions:
 - Pinned real glslangValidator: NOT RUN locally

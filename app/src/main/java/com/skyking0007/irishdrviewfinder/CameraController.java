@@ -94,14 +94,19 @@ final class CameraController {
     private static final double AUTO_METER_STABLE_EV = 0.18;
     private static final double AUTO_BRACKET_DEFAULT_EV = 3.0;
     private static final double AUTO_BRACKET_MIN_EV = 2.0;
-    private static final double AUTO_BRACKET_MAX_EV = 5.0;
+    private static final double AUTO_BRACKET_MAX_EV = 7.0;
     private static final double MANUAL_BRACKET_MAX_EV = 6.0;
     private static final double MANUAL_EXTRA_HEADROOM_EV = 0.25;
     private static final double LONG_CLIP_TRIGGER_FRACTION = 0.005;
     private static final double AUTO_SHORT_CLIP_TARGET = 0.0025;
     private static final double MANUAL_SHORT_CLIP_TARGET = 0.0015;
     private static final double SHORT_CLIP_RELEASE_FRACTION = 0.0005;
-    private static final double BRACKET_STEP_UP_EV = 0.30;
+    // V1.4.22 AUTO SHORT is a recoverability exposure, not a fixed bracket target.
+    // The controller drives local LONG-damaged cells away from SHORT saturation.
+    private static final double AUTO_SHORT_RECOVERY_TARGET_PEAK = 0.90;
+    private static final double AUTO_SHORT_RECOVERY_RELEASE_PEAK = 0.72;
+    private static final double AUTO_SHORT_RECOVERY_MIN_SIGNAL_FRACTION = 0.50;
+    private static final double BRACKET_STEP_UP_EV = 0.50;
     private static final double BRACKET_STEP_DOWN_EV = 0.15;
     private static final int BRACKET_CONFIRM_UP_SAMPLES = 2;
     private static final int BRACKET_CONFIRM_DOWN_SAMPLES = 3;
@@ -188,6 +193,7 @@ final class CameraController {
     private long lastAdaptivePairUpdateNs;
     private int bracketIncreaseEvidence;
     private int bracketDecreaseEvidence;
+    private boolean autoFastShortRecovery;
     private int bodyRaiseEvidence;
     private int bodyLowerEvidence;
     private long previewExposureGeneration;
@@ -344,6 +350,7 @@ final class CameraController {
             lastAdaptivePairUpdateNs = 0L;
             bracketIncreaseEvidence = 0;
             bracketDecreaseEvidence = 0;
+            autoFastShortRecovery = false;
             bodyRaiseEvidence = 0;
             bodyLowerEvidence = 0;
             if (enabled) {
@@ -1236,6 +1243,7 @@ final class CameraController {
         bodyRaiseEvidence = 0;
         bodyLowerEvidence = 0;
         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
+        autoFastShortRecovery = false;
         lastAdaptiveStatsFrame = -1L;
         lastAdaptivePairUpdateNs = 0L;
         autoMetering = false;
@@ -1277,6 +1285,7 @@ final class CameraController {
         bodyRaiseEvidence = 0;
         bodyLowerEvidence = 0;
         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
+        autoFastShortRecovery = false;
         lastAdaptiveStatsFrame = -1L;
         lastAdaptivePairUpdateNs = 0L;
         autoMetering = false;
@@ -1449,6 +1458,7 @@ final class CameraController {
         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
         bracketIncreaseEvidence = 0;
         bracketDecreaseEvidence = 0;
+        autoFastShortRecovery = false;
         deriveAdaptiveAutoPairLocked();
         publishAutoHdrSettingsLocked("AUTO_ANCHOR", finishMeter || firstAnchor);
 
@@ -1614,34 +1624,75 @@ final class CameraController {
                 : AUTO_BRACKET_DEFAULT_EV;
         double maxEv = manual ? MANUAL_BRACKET_MAX_EV : AUTO_BRACKET_MAX_EV;
         double shortTarget = manual ? MANUAL_SHORT_CLIP_TARGET : AUTO_SHORT_CLIP_TARGET;
+
+        // V1.4.22 AUTO: localized recoverability owns additional SHORT headroom.
+        // A tiny clipped bulb/TV/reflection is allowed to demand a darker SHORT even
+        // when it occupies far less than the old 0.5% full-frame LONG-clip trigger.
+        boolean localLongDamage = stats.longRecoveryCells > 0;
+        boolean localShortHasSignal = stats.shortRecoverySignalFraction
+                >= AUTO_SHORT_RECOVERY_MIN_SIGNAL_FRACTION;
+        boolean autoNeedsMore = !manual
+                && localLongDamage
+                && localShortHasSignal
+                && (stats.shortRecoveryPeak > AUTO_SHORT_RECOVERY_TARGET_PEAK
+                        || stats.shortRecoveryNearClipFraction > 0.20f);
+
+        // MANUAL SAFE retains its prior global clipping contract. The user's SHORT
+        // slider remains the integration ceiling and may already intentionally cross
+        // the flicker-safe period.
         boolean meaningfulLongClip = stats.longMeaningfulClipFraction >= LONG_CLIP_TRIGGER_FRACTION;
-        boolean shortFragile = stats.shortDarkFraction > 0.94f
+        boolean manualShortFragile = stats.shortDarkFraction > 0.94f
                 || stats.overlapSamples < 12
                 || stats.overlapErrorEv > 0.50f
                 || !stats.shortTemporalReliable;
-
-        boolean wantsMoreHeadroom = meaningfulLongClip
+        boolean manualNeedsMore = manual
+                && meaningfulLongClip
                 && stats.shortMeaningfulClipFraction > shortTarget
-                && !shortFragile;
-        boolean wantsLessHeadroom = !meaningfulLongClip
+                && !manualShortFragile;
+
+        boolean wantsMoreHeadroom = autoNeedsMore || manualNeedsMore;
+        boolean autoCanRelease = !manual && currentEv > minEv
+                && (!localLongDamage
+                        || (stats.shortRecoveryPeak < AUTO_SHORT_RECOVERY_RELEASE_PEAK
+                                && stats.shortRecoveryNearClipFraction <= 0.05f));
+        boolean manualCanRelease = manual
+                && !meaningfulLongClip
                 && stats.shortMeaningfulClipFraction <= SHORT_CLIP_RELEASE_FRACTION
                 && currentEv > minEv;
+        boolean wantsLessHeadroom = autoCanRelease || manualCanRelease;
 
         if (wantsMoreHeadroom) {
             bracketIncreaseEvidence++;
             bracketDecreaseEvidence = 0;
             if (bracketIncreaseEvidence >= BRACKET_CONFIRM_UP_SAMPLES) {
                 bracketIncreaseEvidence = 0;
-                return clampDouble(
-                        Math.min(maxEv, currentEv + BRACKET_STEP_UP_EV), minEv, maxEv);
+                if (!manual) autoFastShortRecovery = true;
+                double stepEv = !manual && stats.shortRecoveryPeak >= 0.98f
+                        ? 0.75 : BRACKET_STEP_UP_EV;
+                double next = clampDouble(
+                        Math.min(maxEv, currentEv + stepEv), minEv, maxEv);
+                RuntimeLogger.event(
+                        manual ? "MANUAL_SHORT_HEADROOM" : "AUTO_SHORT_HEADROOM",
+                        String.format(
+                                Locale.US,
+                                "localLongCells=%d shortNear=%d nearFrac=%.3f shortPeak=%.3f signalFrac=%.3f bracket=%.2f->%.2fEV fast=%s",
+                                stats.longRecoveryCells, stats.shortRecoveryNearClipCells,
+                                stats.shortRecoveryNearClipFraction, stats.shortRecoveryPeak,
+                                stats.shortRecoverySignalFraction, currentEv, next,
+                                autoFastShortRecovery));
+                return next;
             }
         } else if (wantsLessHeadroom) {
             bracketDecreaseEvidence++;
             bracketIncreaseEvidence = 0;
             if (bracketDecreaseEvidence >= BRACKET_CONFIRM_DOWN_SAMPLES) {
                 bracketDecreaseEvidence = 0;
-                return clampDouble(
+                double next = clampDouble(
                         Math.max(minEv, currentEv - BRACKET_STEP_DOWN_EV), minEv, maxEv);
+                if (!manual && !localLongDamage && next <= AUTO_BRACKET_DEFAULT_EV + 0.05) {
+                    autoFastShortRecovery = false;
+                }
+                return next;
             }
         } else {
             bracketIncreaseEvidence = 0;
@@ -1666,7 +1717,7 @@ final class CameraController {
         double targetShortProduct = Math.max(1.0,
                 achievedLongProduct / Math.pow(2.0, autoAdaptiveBracketEv));
         ExposureSetting shortSetting = solveShortSettingForProductLocked(
-                targetShortProduct, autoLongExposureNs);
+                targetShortProduct, autoLongExposureNs, autoFastShortRecovery);
         autoShortExposureNs = shortSetting.exposureNs;
         autoShortIso = shortSetting.iso;
     }
@@ -1699,7 +1750,7 @@ final class CameraController {
     }
 
     private ExposureSetting solveShortSettingForProductLocked(
-            double targetProduct, long longExposureNs) {
+            double targetProduct, long longExposureNs, boolean allowFastRecovery) {
         int minIso = sensorMinIsoLocked();
         long maxAllowed = Math.min(
                 clampExposure(longExposureNs),
@@ -1715,19 +1766,35 @@ final class CameraController {
         desired = Math.min(desired, maxAllowed);
         long period = flickerPeriodNs(sceneFlicker);
         if (period > 0L) {
-            // A stable white clip is preferable to revealing LED/PWM phase. When a
-            // known 50/60-Hz source cannot be protected at one full safe period and
-            // sensor-minimum ISO, stop there and intentionally leave residual clipping.
-            long safe = Math.min(maxAllowed, clampExposure(period));
             if (desired >= period) {
+                // Stay on whole flicker periods whenever the required headroom is
+                // achievable there.
                 long periods = Math.max(1L, desired / period);
-                safe = Math.min(maxAllowed, clampExposure(periods * period));
+                long safe = Math.min(maxAllowed, clampExposure(periods * period));
+                return new ExposureSetting(safe, solveIsoForProduct(targetProduct, safe));
             }
+            if (allowFastRecovery) {
+                // V1.4.22: once localized LONG-damage evidence proves the 1-period
+                // minimum-ISO SHORT is still saturated, preserving information wins.
+                // Use exact binary subdivisions of the measured mains period and keep
+                // sensor ISO at minimum; do not brighten the fast probe back up with ISO.
+                long fast = period;
+                while (fast > desired && fast > 1L) {
+                    fast = Math.max(1L, fast / 2L);
+                }
+                fast = Math.min(maxAllowed, clampExposure(fast));
+                return new ExposureSetting(fast, minIso);
+            }
+            // No proven local need: keep the stable full-period SHORT.
+            long safe = Math.min(maxAllowed, clampExposure(period));
             return new ExposureSetting(safe, solveIsoForProduct(targetProduct, safe));
         }
         if (sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
-            // Unknown/PWM: keep SHORT on the same integration as LONG and obtain only
-            // the headroom available from lower ISO. Beyond that, leave a clean clip.
+            if (allowFastRecovery) {
+                return new ExposureSetting(desired, minIso);
+            }
+            // Unknown/PWM without localized unresolved clipping: preserve LONG timing
+            // and obtain headroom from lower ISO only.
             return new ExposureSetting(maxAllowed, solveIsoForProduct(targetProduct, maxAllowed));
         }
         return new ExposureSetting(desired, minIso);
@@ -1815,7 +1882,7 @@ final class CameraController {
         double targetShortProduct = Math.max(1.0,
                 achievedLongProduct / Math.pow(2.0, manualAdaptiveBracketEv));
         ExposureSetting shortSetting = solveShortSettingForProductLocked(
-                targetShortProduct, manualEffectiveLongExposureNs);
+                targetShortProduct, manualEffectiveLongExposureNs, false);
 
         // In MANUAL SAFE the Short slider is a headroom ceiling, not a lock. The
         // adaptive engine may go darker/shorter when highlights require it, but never
