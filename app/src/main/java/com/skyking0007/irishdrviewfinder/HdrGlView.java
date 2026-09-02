@@ -79,7 +79,12 @@ final class HdrGlView extends GLSurfaceView {
     }
 
     void setDisplayBrightnessEv(float ev) {
-        renderer.displayBrightnessEv = Math.max(-1.0f, Math.min(1.0f, ev));
+        renderer.displayBrightnessEv = Math.max(-4.0f, Math.min(4.0f, ev));
+        requestRender();
+    }
+
+    void setDisplayGamma(float gamma) {
+        renderer.displayGamma = Math.max(0.50f, Math.min(2.00f, gamma));
         requestRender();
     }
 
@@ -126,6 +131,7 @@ final class HdrGlView extends GLSurfaceView {
 
         volatile Mode mode = Mode.HDR;
         volatile float displayBrightnessEv = 0.0f;
+        volatile float displayGamma = 1.0f;
         volatile int rotationQuarterTurns = 0;
         volatile boolean producerAxisSwap;
         volatile long droppedFrames = 0;
@@ -454,6 +460,9 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "displayBrightnessEv"),
                     displayBrightnessEv);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "displayGamma"),
+                    displayGamma);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 

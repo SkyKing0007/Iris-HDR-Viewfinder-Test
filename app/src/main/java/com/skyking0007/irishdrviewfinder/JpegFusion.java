@@ -21,7 +21,8 @@ final class JpegFusion {
             byte[] shortJpeg,
             byte[] longJpeg,
             double exposureRatio,
-            float displayBrightnessEv) throws Exception {
+            float displayBrightnessEv,
+            float displayGamma) throws Exception {
         Bitmap shortBitmap = decodeUpright(shortJpeg);
         Bitmap longBitmap = decodeUpright(longJpeg);
         if (shortBitmap == null || longBitmap == null) {
@@ -45,8 +46,12 @@ final class JpegFusion {
         int[] outPixels = new int[width * rowsPerStrip];
         float[] colorOwned = new float[3];
 
-        float clampedBrightnessEv = clamp(displayBrightnessEv, -1.0f, 1.0f);
+        float clampedBrightnessEv = clamp(displayBrightnessEv, -4.0f, 4.0f);
         float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);
+        float clampedGamma = clamp(displayGamma, 0.50f, 2.00f);
+        float[] gammaLut = Math.abs(clampedGamma - 1.0f) < 0.0001f
+                ? null
+                : buildGammaLut(clampedGamma);
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
         float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 1.0f, 6.0f);
         float clipStart = clamp(0.90f + 0.01f * (bracketStops - 1.0f), 0.90f, 0.95f);
@@ -118,6 +123,21 @@ final class JpegFusion {
                 float tr = mr * brightnessGain * toneScale;
                 float tg = mg * brightnessGain * toneScale;
                 float tb = mb * brightnessGain * toneScale;
+
+                // Gamma is a presentation-only midtone remap after HDR exposure/tone
+                // fitting. It preserves RGB ratios and uses a per-image LUT so the
+                // full-resolution inner loop has no per-pixel pow/exp/sqrt.
+                float gammaY = linearLuma(tr, tg, tb);
+                if (gammaLut != null && gammaY > 0.000001f) {
+                    float mappedGammaY = gammaMap(gammaY, gammaLut);
+                    float requestedGammaScale = mappedGammaY / gammaY;
+                    float gammaPeak = Math.max(tr, Math.max(tg, tb));
+                    float gammaGamutScale = 1.0f / Math.max(gammaPeak, 0.000001f);
+                    float gammaScale = Math.min(requestedGammaScale, gammaGamutScale);
+                    tr *= gammaScale;
+                    tg *= gammaScale;
+                    tb *= gammaScale;
+                }
 
                 // Preserve V1.4.7 HDR luminance while preventing normalized SHORT JPEG
                 // chroma errors from creating red/orange/pink speckles. LONG owns color
@@ -260,6 +280,24 @@ final class JpegFusion {
         if (chroma > 0.000001f) return Math.min(current, (1.0f - targetY) / chroma);
         if (chroma < -0.000001f) return Math.min(current, targetY / (-chroma));
         return current;
+    }
+
+    private static float gammaMap(float linearLuma, float[] lut) {
+        float scaled = clamp(linearLuma, 0.0f, 1.0f) * (lut.length - 1);
+        int lo = (int) scaled;
+        int hi = Math.min(lut.length - 1, lo + 1);
+        float t = scaled - lo;
+        return lut[lo] + (lut[hi] - lut[lo]) * t;
+    }
+
+    private static float[] buildGammaLut(float gamma) {
+        float[] lut = new float[4096];
+        double exponent = 1.0 / gamma;
+        for (int i = 0; i < lut.length; i++) {
+            double linear = i / (double) (lut.length - 1);
+            lut[i] = (float) Math.pow(linear, exponent);
+        }
+        return lut;
     }
 
     private static int encode(float linear) {

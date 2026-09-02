@@ -131,6 +131,8 @@ final class CameraController {
     private long captureBeginRealtimeNs;
     private float displayBrightnessEv;
     private float captureDisplayBrightnessEv;
+    private float displayGamma = 1.0f;
+    private float captureDisplayGamma = 1.0f;
     private long shortExposureNs = ONE_SECOND_NS / 480;
     private long longExposureNs = ONE_SECOND_NS / 60;
     private int manualIso = 400;
@@ -272,8 +274,13 @@ final class CameraController {
     }
 
     void setDisplayBrightnessEv(float ev) {
-        displayBrightnessEv = Math.max(-1.0f, Math.min(1.0f, ev));
+        displayBrightnessEv = Math.max(-4.0f, Math.min(4.0f, ev));
         RuntimeLogger.event("DISPLAY_BRIGHTNESS", String.format(Locale.US, "%.1fEV", displayBrightnessEv));
+    }
+
+    void setDisplayGamma(float gamma) {
+        displayGamma = Math.max(0.50f, Math.min(2.00f, gamma));
+        RuntimeLogger.event("DISPLAY_GAMMA", String.format(Locale.US, "%.2f", displayGamma));
     }
 
     void setAutoHdrExposure(boolean enabled) {
@@ -847,6 +854,7 @@ final class CameraController {
         captureLongIso = activeLongIso();
         capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;
         captureDisplayBrightnessEv = displayBrightnessEv;
+        captureDisplayGamma = displayGamma;
         captureBeginRealtimeNs = System.nanoTime();
         String captureId = "IrisHDR_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date());
         RuntimeLogger.event(
@@ -855,7 +863,8 @@ final class CameraController {
                         + " frozen short=" + exposureText(captureShortExposureNs) + " ISO" + captureShortIso
                         + " long=" + exposureText(captureLongExposureNs) + " ISO" + captureLongIso
                         + " boost=" + capturePostRawBoost + "%"
-                        + String.format(Locale.US, " brightness=%+.1fEV", captureDisplayBrightnessEv)
+                        + String.format(Locale.US, " brightness=%+.1fEV gamma=%.2f",
+                                captureDisplayBrightnessEv, captureDisplayGamma)
                         + " mode=" + (autoHdrExposure ? "AUTO" : manualSafetySummaryLocked()));
         listener.onStatus("Capturing matched SHORT/LONG RAW + JPEG set…");
         captureSaver = new CaptureSetSaver(
@@ -865,6 +874,7 @@ final class CameraController {
                 captureId,
                 jpegOrientationDegrees,
                 captureDisplayBrightnessEv,
+                captureDisplayGamma,
                 new CaptureSetSaver.Listener() {
                     @Override
                     public void onInputsAcquired(String id) {

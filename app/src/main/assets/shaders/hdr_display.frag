@@ -12,6 +12,7 @@ uniform int haveShort;
 uniform int haveLong;
 uniform float exposureRatio;
 uniform float displayBrightnessEv;
+uniform float displayGamma;
 uniform vec2 fullFitScale;
 uniform vec2 splitFitScale;
 
@@ -100,6 +101,18 @@ vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
 
 float linearLuma(vec3 rgb) {
     return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+}
+
+vec3 applyDisplayGamma(vec3 rgb, float gammaValue) {
+    float y = linearLuma(rgb);
+    if (y <= 0.000001) return rgb;
+    float gamma = clamp(gammaValue, 0.50, 2.00);
+    float mappedY = pow(clamp(y, 0.0, 1.0), 1.0 / gamma);
+    float requestedScale = mappedY / y;
+    float gamutScale = 1.0 / max(max3(rgb), 0.000001);
+    // Gamma is fail-closed for saturated colors: preserve RGB ratios rather than
+    // independently clipping channels when a positive midtone lift hits gamut.
+    return rgb * min(requestedScale, gamutScale);
 }
 
 float secondLargest3(vec3 rgb) {
@@ -204,8 +217,9 @@ void main() {
     // HDR reconstruction completes before display brightness is applied. The slider
     // cannot change capture, bracket width, SHORT admission, or fusion ownership.
     vec3 mergedScene = mix(longScene, shortScene, highlightWeight);
-    float brightnessGain = exp2(clamp(displayBrightnessEv, -1.0, 1.0));
+    float brightnessGain = exp2(clamp(displayBrightnessEv, -4.0, 4.0));
     vec3 displayLinear = adaptiveHdrToneMap(mergedScene * brightnessGain, ratio, bracketStops);
+    displayLinear = applyDisplayGamma(displayLinear, displayGamma);
 
     // Preserve the recovered HDR luminance but keep LONG chroma through the handoff.
     // SHORT color is admitted only for true multi-channel LONG clipping. No spatial

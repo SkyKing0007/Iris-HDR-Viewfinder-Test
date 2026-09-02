@@ -42,6 +42,7 @@ final class CaptureSetSaver {
     private final String captureId;
     private final int dngOrientation;
     private final float displayBrightnessEv;
+    private final float displayGamma;
     private final Listener listener;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final Map<Long, String> labelByTimestamp = new HashMap<>();
@@ -64,13 +65,15 @@ final class CaptureSetSaver {
             String captureId,
             int captureOrientationDegrees,
             float displayBrightnessEv,
+            float displayGamma,
             Listener listener) {
         this.context = context.getApplicationContext();
         this.characteristics = characteristics;
         this.cameraId = cameraId;
         this.captureId = captureId;
         this.dngOrientation = dngOrientationForDegrees(captureOrientationDegrees);
-        this.displayBrightnessEv = Math.max(-1.0f, Math.min(1.0f, displayBrightnessEv));
+        this.displayBrightnessEv = Math.max(-4.0f, Math.min(4.0f, displayBrightnessEv));
+        this.displayGamma = Math.max(0.50f, Math.min(2.00f, displayGamma));
         this.listener = listener;
     }
 
@@ -218,7 +221,8 @@ final class CaptureSetSaver {
         double ratio = exposureRatio(shortData.result, longData.result);
         io.execute(() -> {
             try {
-                byte[] fused = JpegFusion.fuse(shortJpeg, longJpeg, ratio, displayBrightnessEv);
+                byte[] fused = JpegFusion.fuse(
+                        shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma);
                 MediaStoreWriter.writeBytes(
                         context,
                         captureId + "_FUSED_HDR.jpg",
@@ -252,6 +256,7 @@ final class CaptureSetSaver {
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));
                 root.put("displayBrightnessEv", displayBrightnessEv);
+                root.put("displayGamma", displayGamma);
                 Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
                 if (sensorOrientation != null) root.put("sensorOrientation", sensorOrientation);
                 JSONArray physicalIds = new JSONArray();

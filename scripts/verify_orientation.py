@@ -17,7 +17,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -162,7 +162,7 @@ require('TONEMAP_MODE_PRESET_CURVE' not in camera and 'TONEMAP_PRESET_CURVE_SRGB
         "retired PRESET_CURVE sRGB path returned")
 
 # 012 / 029 / 037 / 043 - Absolute AUTO brightness remains clean-AE owned.
-# V1.4.11 intentionally restores the proven V1.4.7 8x (~3 EV) AUTO bracket;
+# V1.4.11 V2 preserves the proven V1.4.11/V1.4.7 8x (~3 EV) AUTO bracket;
 # aperture-derived widening from V1.4.8+ must not survive this controlled experiment.
 require('HDR_BRACKET_RATIO = 8.0' in camera,
         "fixed V1.4.7 8x AUTO bracket missing")
@@ -197,11 +197,19 @@ require('shortConfidence' in hdr_shader and 'shortScenePeak / longScenePeak' in 
         "live clipped-highlight SHORT plausibility guard missing")
 require('vec3 mergedScene = mix(longScene, shortScene, highlightWeight);' in hdr_shader,
         "live fusion must finish before display brightness")
-require('float brightnessGain = exp2(clamp(displayBrightnessEv, -1.0, 1.0));' in hdr_shader
+require('float brightnessGain = exp2(clamp(displayBrightnessEv, -4.0, 4.0));' in hdr_shader
         and 'adaptiveHdrToneMap(mergedScene * brightnessGain' in hdr_shader,
         "live Brightness EV must apply after fusion and before HDR display fitting")
 require('displayBrightnessEv' in gl and 'glUniform1f' in gl,
         "live Brightness EV uniform plumbing missing")
+require('uniform float displayGamma;' in hdr_shader
+        and 'applyDisplayGamma(displayLinear, displayGamma)' in hdr_shader
+        and 'displayGamma' in gl and 'glUniform1f' in gl,
+        "live Gamma uniform/plumbing missing")
+require('float requestedScale = mappedY / y;' in hdr_shader
+        and 'float gamutScale = 1.0 / max(max3(rgb), 0.000001);' in hdr_shader
+        and 'return rgb * min(requestedScale, gamutScale);' in hdr_shader,
+        "live Gamma must be luminance-driven, RGB-ratio preserving and gamut-safe")
 require('0.90f + 0.01f * (bracketStops - 1.0f)' in fusion and 'HDR_CLIP_END = 0.995f' in fusion,
         "saved JPEG SHORT admission must match live near-clipping policy")
 require('float mr = lr + (sr - lr) * highlightWeight;' in fusion
@@ -211,6 +219,10 @@ require('float mr = lr + (sr - lr) * highlightWeight;' in fusion
 require('brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
         and 'boostedPeak = scenePeak * brightnessGain;' in fusion,
         "saved Brightness EV must be one per-image linear exposure gain after fusion")
+require('buildGammaLut(clampedGamma)' in fusion
+        and 'float mappedGammaY = gammaMap(gammaY, gammaLut);' in fusion
+        and 'float gammaScale = Math.min(requestedGammaScale, gammaGamutScale);' in fusion,
+        "saved Gamma must use one per-image LUT and RGB-ratio-preserving gamut-safe scaling")
 require('const float knee = 0.70;' in hdr_shader and 'HDR_KNEE = 0.70f' in fusion,
         "live/save V1.4.7 HDR knee must be restored")
 require('0.82 - 0.04 * (bracketStops - 1.0)' in hdr_shader
@@ -456,7 +468,7 @@ require('60 FPS CROP ON: request fixed 60/60 preview' in main,
         "UI must state explicit force-60 semantics")
 
 
-# 036 / 043 - Exact V1.4.7 highlight mapping and V1.4.11 brightness math.
+# 036 / 043 / V2 - Exact V1.4.7 highlight mapping plus V1.4.11-V2 brightness/gamma math.
 def v147_policy(exposure_ratio):
     ratio = max(1.0, min(65536.0, exposure_ratio))
     stops = max(1.0, min(6.0, math.log(max(ratio, 1.0001), 2.0)))
@@ -471,7 +483,7 @@ def smoothstep_math(edge0, edge1, value):
 
 def map_peak_math(scene_peak, exposure_ratio, brightness_ev=0.0):
     ratio, stops, _, white_anchor, display_ceiling = v147_policy(exposure_ratio)
-    boosted = scene_peak * (2.0 ** max(-1.0, min(1.0, brightness_ev)))
+    boosted = scene_peak * (2.0 ** max(-4.0, min(4.0, brightness_ev)))
     knee = 0.70
     if boosted <= knee:
         return boosted
@@ -498,11 +510,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
 # 038 / 042 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.10' in workflow
-        and 'run-id: 33458017737' in workflow,
-        "workflow must download the exact successful V1.4.10 Actions authority")
-require('run-id: 33445772128' not in workflow,
-        "V1.4.11 must not silently fall back to V1.4.9 authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11' in workflow
+        and 'run-id: 33464019593' in workflow,
+        "workflow must download the exact successful V1.4.11 Actions authority")
+require('run-id: 33458017737' not in workflow and 'run-id: 33445772128' not in workflow,
+        "V1.4.11 V2 must not silently fall back to older authority")
+require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
+        "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
 # 039 / 043 - V1.4.7 red/orange speck and skin-tone correction is color-ownership only.
 require('highlightColorOwnership' in hdr_shader and 'applyHighlightColorOwnership' in fusion,
@@ -522,22 +536,38 @@ require(hdr_shader.count('texture(shortTex') == 3 and hdr_shader.count('texture(
 require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
         "no spatial/cross-edge chroma filtering is permitted")
 
-# Brightness is one explicit WYSIWYG control with frozen shutter-time ownership.
-require('DISPLAY_BRIGHTNESS_MIN_EV = -1.0f' in main
-        and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in main
+# Brightness and Gamma are explicit WYSIWYG controls with frozen shutter-time ownership.
+require('DISPLAY_BRIGHTNESS_MIN_EV = -4.0f' in main
+        and 'DISPLAY_BRIGHTNESS_MAX_EV = 4.0f' in main
         and 'DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10' in main,
-        "Brightness slider must be -1..+1 EV in 0.1 EV increments")
+        "Brightness slider must be -4..+4 EV in 0.1 EV increments")
+require('DISPLAY_GAMMA_MIN = 0.50f' in main
+        and 'DISPLAY_GAMMA_MAX = 2.00f' in main
+        and 'DISPLAY_GAMMA_STEPS_PER_UNIT = 20' in main
+        and 'displayGamma = 1.0f' in main,
+        "Gamma slider must be 0.50..2.00 in 0.05 increments with 1.00 neutral")
 require('brightnessLabelText' in main and 'glView.setDisplayBrightnessEv(displayBrightnessEv);' in main
         and 'controller.setDisplayBrightnessEv(displayBrightnessEv);' in main,
         "Brightness slider must drive both live and saved paths")
-require('captureDisplayBrightnessEv = displayBrightnessEv;' in camera,
-        "shutter press must freeze the exact displayed Brightness EV")
-require('captureDisplayBrightnessEv' in camera[camera.index('new CaptureSetSaver('):camera.index('stillSessionActive = true;')],
-        "saved fusion must receive frozen shutter-time Brightness EV")
-require('displayBrightnessEv' in saver and 'JpegFusion.fuse(shortJpeg, longJpeg, ratio, displayBrightnessEv)' in saver,
-        "CaptureSetSaver must pass frozen Brightness EV into JPEG fusion")
-require('root.put("displayBrightnessEv", displayBrightnessEv);' in saver,
-        "capture metadata must record the applied Brightness EV")
+require('captureDisplayBrightnessEv = displayBrightnessEv;' in camera
+        and 'captureDisplayGamma = displayGamma;' in camera,
+        "shutter press must freeze the exact displayed Brightness EV and Gamma")
+require('captureDisplayBrightnessEv' in camera[camera.index('new CaptureSetSaver('):camera.index('stillSessionActive = true;')]
+        and 'captureDisplayGamma' in camera[camera.index('new CaptureSetSaver('):camera.index('stillSessionActive = true;')],
+        "saved fusion must receive frozen shutter-time Brightness EV and Gamma")
+require('displayBrightnessEv' in saver and 'displayGamma' in saver
+        and 'shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma' in saver.replace('\n', ' '),
+        "CaptureSetSaver must pass frozen Brightness EV and Gamma into JPEG fusion")
+require('root.put("displayBrightnessEv", displayBrightnessEv);' in saver
+        and 'root.put("displayGamma", displayGamma);' in saver,
+        "capture metadata must record the applied Brightness EV and Gamma")
+require('applySafeSystemBarInsets(root, panel);' in main
+        and 'WindowInsets.Type.systemBars()' in main
+        and 'panelBottom + bottom' in main,
+        "controls must reserve Android system-bar/gesture-pill insets")
+require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
+        and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
+        "V1.4.11 V2 must have a side-by-side application identity and visible label")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -552,6 +582,7 @@ for token in [
     'captureLongIso = activeLongIso();',
     'capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;',
     'captureDisplayBrightnessEv = displayBrightnessEv;',
+    'captureDisplayGamma = displayGamma;',
 ]:
     require(token in begin_capture, f"immutable capture snapshot missing: {token}")
 require('activeShortExposureNs()' not in still_burst and 'activeLongExposureNs()' not in still_burst
@@ -564,14 +595,17 @@ require('captureShortExposureNs' in still_burst and 'captureLongExposureNs' in s
 require('CAPTURE_INPUTS' in camera and 'acquiredMs=' in camera and 'totalMs=' in camera,
         "minimal capture timing evidence must separate sensor acquisition from post-processing")
 
-# 041 / 043 - Full-resolution fusion must stay allocation-light. Brightness pow is
-# computed once per image, never per pixel; highlight color uses one reusable scratch vector.
+# 041 / 043 / V2 - Full-resolution fusion stays allocation-light. Brightness pow and
+# Gamma LUT are computed once per image; highlight color uses one reusable scratch vector.
 inner = fusion[fusion.index('for (int i = 0; i < count; i++)'):fusion.index('output.setPixels')]
 for forbidden in ['Math.exp(', 'Math.pow(', 'Math.sqrt(', 'new float[']:
     require(forbidden not in inner, f"expensive/per-pixel saved-fusion operation returned: {forbidden}")
 require('float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
         and fusion.index('float brightnessGain = (float) Math.pow') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
         "Brightness EV power must be computed once before full-resolution loops")
+require('buildGammaLut(clampedGamma)' in fusion
+        and fusion.index('buildGammaLut(clampedGamma)') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
+        "Gamma LUT must be computed once before full-resolution loops")
 require('float[] colorOwned = new float[3];' in fusion and 'return new float[]' not in fusion,
         "highlight color ownership must reuse one scratch vector rather than allocate per pixel")
 
@@ -635,4 +669,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 REGRESSION PASS: fixed-3EV HDR, post-fusion Brightness EV, LONG-first highlight color, frozen capture pair, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.11 V2 REGRESSION PASS: fixed-3EV HDR, -4..+4EV post-fusion Brightness, 0.50..2.00 ratio-preserving Gamma, system-bar-safe UI, side-by-side app identity, LONG-first highlight color, frozen capture controls, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")

@@ -7,11 +7,11 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.skyking0007.irishdrviewfinder"
+        applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"
         minSdk = 29
         targetSdk = 37
-        versionCode = 16
-        versionName = "1.0-v1.4.11"
+        versionCode = 17
+        versionName = "1.0-v1.4.11-v2"
     }
 
     compileOptions {
