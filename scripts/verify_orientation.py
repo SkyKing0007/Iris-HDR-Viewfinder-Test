@@ -18,7 +18,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.19 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.20 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -227,30 +227,41 @@ require('BRACKET_CONFIRM_UP_SAMPLES = 2' in camera
 require('double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);' in camera,
         "actual adaptive bracket must remain reported")
 
-# 013 / 030 / 036 / 039 / 046 / 053 / 077 / 078 / 079 - Scene-learned, edge-safe HDR reconstruction.
-for text, owner in ((hdr_shader, 'live shader'), (fusion, 'JPEG fusion')):
-    require('0.04045' in text and '12.92' in text and '0.0031308' in text and '2.4' in text,
-            f"{owner} must retain piecewise sRGB conversion")
+# 013 / 030 / 036 / 039 / 046 / 053 / 077 / 078 / 079 / 084 / 085 - Scene-learned, edge-safe HDR reconstruction.
+require('0.04045' in hdr_shader and '12.92' in hdr_shader
+        and '0.0031308' in hdr_shader and '2.4' in hdr_shader,
+        "shared HDR shader must retain piecewise sRGB conversion")
+require('0.04045' in fusion and '12.92' in fusion and '2.4' in fusion,
+        "sparse still photometric learner must decode sRGB in the same linear domain")
 require('uniform vec4 shortPhotoScaleA;' in hdr_shader
         and 'uniform float shortPhotoScaleB;' in hdr_shader
         and 'uniform vec2 fusionTexelStep;' in hdr_shader,
         "live scene-learned response/multiscale uniforms missing")
+require('uniform vec2 reliabilityUvScale;' in hdr_shader
+        and 'uniform vec2 reliabilityUvOffset;' in hdr_shader,
+        "shared tiled/live reliability-coordinate transform missing")
 require('uniform float shortCalibration;' not in hdr_shader
         and 'shortPhotoScaleForLuma' in hdr_shader
         and 'calibratedShortScene' in hdr_shader,
-        "visible live fusion must use the learned multi-knot response, never the retired scalar uniform")
+        "visible fusion must use learned multi-knot response, never retired scalar calibration")
 require('PHOTO_KNOT_COUNT = 5' in gl
         and 'PHOTO_LUMA_KNOTS = {0.020f, 0.060f, 0.150f, 0.350f, 0.700f}' in gl
         and 'PHOTO_MAX_UPDATE_EV = 0.06f' in gl
-        and 'updateShortPhotoCurve' in gl
-        and 'enforceMonotonicPhotoCurve' in gl,
-        "live five-knot monotonic scene-response learner missing")
+        and 'shortPhotoTargetScale' in gl
+        and 'advanceVisiblePhotoCurve' in gl
+        and 'previousShortRawLuma' in gl
+        and 'shortOnlyModulated' in gl,
+        "live five-knot learner must reject SHORT-only modulation and smooth visible curve at pair cadence")
+require('PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.35f' in gl
+        and 'PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND = 1.20f' in gl
+        and 'PHOTO_SHORT_ONLY_MODULATION_EV = 0.12f' in gl
+        and 'PHOTO_LONG_STABLE_EV = 0.08f' in gl,
+        "V1.4.20 temporal radiance-stabilization bounds missing")
 require('PHOTO_KNOT_COUNT = 5' in fusion
         and 'PHOTO_LUMA_KNOTS = {0.020f, 0.060f, 0.150f, 0.350f, 0.700f}' in fusion
         and 'learnPhotoCurve' in fusion
-        and 'enforceMonotonicPhotoCurve' in fusion
-        and 'photoScaleForLuma' in fusion,
-        "saved five-knot monotonic scene-response learner missing")
+        and 'enforceMonotonicPhotoCurve' in fusion,
+        "still fusion must learn only a sparse monotonic response before GPU processing")
 require('calibrateShortToLong' not in fusion,
         "retired scalar-only saved photometric mapping returned")
 require('uniform sampler2D shortReliabilityTex;' in hdr_shader
@@ -264,56 +275,33 @@ require('shortLumaReliability' in gl and 'shortChromaReliability' in gl
         "graded local luminance/chroma temporal confidence missing")
 require('shortLumaStableCounts' not in gl and 'shortChromaStableCounts' not in gl,
         "V1.4.17 binary 0/255 local trust state returned")
-require('snapshotShortReliabilityMap()' in gl
-        and 'latestShortReliabilitySnapshot' in gl,
+require('snapshotShortReliabilityMap()' in gl and 'latestShortReliabilitySnapshot' in gl,
         "shutter-time live reliability snapshot owner missing")
 require('unstableFraction <= 0.25f' in gl and 'shortTemporalReliable' in gl,
         "widespread SHORT instability must still guard exposure/bracket adaptation")
 require('longHighlightShoulder' in hdr_shader and 'longClippedCore' in hdr_shader
-        and 'fusionSample' in hdr_shader and 'multiscaleHighlightRecovery' in hdr_shader
-        and 'highlightNeed' in fusion and 'clippedCore' in fusion
-        and 'rawMask' in fusion and 'coreMask' in fusion,
-        "LONG-base full-core/edge-guided highlight compositor missing")
+        and 'fusionSample' in hdr_shader and 'multiscaleHighlightRecovery' in hdr_shader,
+        "shared LONG-base full-core/edge-guided highlight compositor missing")
 require('float corePermission = smoothstep(0.25, 0.55, shortUsable);' in hdr_shader
         and 'coreMask = clippedCore * corePermission;' in hdr_shader
         and 'rawMask = max(coreMask, shoulderMask);' in hdr_shader,
-        "live clipped core must use current SHORT safety for complete detail authority")
-require('float currentCoreMask = clippedCore * smoothstep(0.25f, 0.55f, shortUsable);' in fusion
-        and 'coreMask[i] = currentCoreMask;' in fusion
-        and 'rawMask[i] = Math.max(currentCoreMask, currentShoulderMask);' in fusion,
-        "saved clipped core must use captured SHORT safety for complete recovery")
-require('temporalTrust.r' not in hdr_shader and 'lumaReliability' not in fusion,
+        "clipped core must use current SHORT safety for complete detail authority")
+require('temporalTrust.r' not in hdr_shader,
         "5-Hz temporal luma state must never gate visible luma fusion")
-require('temporalTrust.g' in hdr_shader and 'chromaReliability' in fusion
-        and 'colorTrust' in hdr_shader and 'colorTrust' in fusion,
+require('temporalTrust.g' in hdr_shader and 'colorTrust' in hdr_shader,
         "temporal history must remain a chroma/quality prior after luma decoupling")
 require('longChromaticityAtShortLuma' in hdr_shader
-        and 'float chromaScale = sl / Math.max(ll, 0.0005f);' in fusion
-        and 'lr * chromaScale' in fusion and 'lg * chromaScale' in fusion and 'lb * chromaScale' in fusion,
-        "questionable SHORT color must recover luma/detail with LONG chromaticity")
-require('neutralLongClip' in hdr_shader and 'neutralLongClip' in fusion,
-        "neutral clipped-highlight color lock missing")
-require('validChannelAgreement' in hdr_shader and 'validChannelAgreement' in fusion,
-        "current-pair SHORT/LONG agreement guard missing")
-require('mapRecoveredHighlight' in hdr_shader and 'mappedRecoveryPeak' in fusion,
-        "recovered SHORT highlight-only display mapping missing")
+        and 'neutralLongClip' in hdr_shader
+        and 'validChannelAgreement' in hdr_shader
+        and 'mapRecoveredHighlight' in hdr_shader,
+        "shared shader must preserve LONG-chromaticity, neutral-highlight and current-pair protections")
 require('guideEdgeWeight' in hdr_shader and 'addFusionNeighbor' in hdr_shader
-        and 'damageSupport' in hdr_shader and 'edgeWeight' in fusion
-        and 'damageSupport' in fusion,
-        "one-sided edge-guided transition support missing")
-require('float blurredMask = min(damageSupport' in hdr_shader
-        and 'float coarseMask = max(coreMask, blurredMask);' in hdr_shader
-        and 'float fineMask = max(' in hdr_shader
+        and 'damageSupport' in hdr_shader
+        and 'float blurredMask = min(damageSupport' in hdr_shader
         and 'vec3 lowBand = mix(longLow, shortLow, coarseMask);' in hdr_shader
         and 'vec3 detailBand = mix(longCenter - longLow, shortCenter - shortLow, fineMask);' in hdr_shader,
-        "live Gaussian-mask/Laplacian-image transition missing")
-require('float blurredMask = Math.min(' in fusion
-        and 'float coarseMask = Math.max(coreMask[center], blurredMask);' in fusion
-        and 'float fineMask = Math.max(' in fusion
-        and '(shortLowR - longLowR) * coarseMask' in fusion
-        and '(shortR[center] - shortLowR) * fineMask' in fusion,
-        "saved Gaussian-mask/Laplacian-image transition missing")
-require('recoverOnlyLostChannels' not in hdr_shader and 'recoverChannel(' not in fusion
+        "shared one-sided Gaussian-mask/Laplacian transition missing")
+require('recoverOnlyLostChannels' not in hdr_shader
         and 'mix(longScene, shortScene, highlightWeight)' not in hdr_shader
         and 'mix(longScene, mappedShort, recoveryMask)' not in hdr_shader,
         "retired broad/per-channel/direct source-switch fusion returned")
@@ -325,25 +313,42 @@ require('displayBrightnessEv' not in gl,
 require('65_536.0' in fusion and '65_536.0' in saver and '65_536.0' in gl,
         "exposure normalization range must remain consistent live/save/metadata")
 require('controller.captureHdrSet(glView.snapshotShortReliabilityMap());' in main,
-        "shutter must freeze the currently displayed chroma/quality reliability field")
+        "shutter must freeze currently displayed chroma/quality reliability field")
 require('captureHdrSet(byte[] shortReliabilityMap)' in camera
         and 'frozenShortReliabilityMap' in camera,
         "CameraController must carry frozen live chroma/quality trust into still capture")
 require('byte[] shortReliabilityMap' in saver
         and 'shortReliabilityMap.clone()' in saver
-        and 'JpegFusion.fuse(shortJpeg, longJpeg, ratio, shortReliabilityMap)' in saver,
-        "saved FUSED JPEG must consume the frozen live chroma/quality trust field")
+        and 'JpegFusion.fuse(' in saver
+        and 'context, shortJpeg, longJpeg, ratio, shortReliabilityMap' in saver,
+        "saved GPU fusion must consume frozen live chroma/quality trust field")
 require('RELIABILITY_WIDTH = 32' in fusion and 'RELIABILITY_HEIGHT = 24' in fusion
-        and 'sampleReliability' in fusion
-        and 'chromaReliability * rgbSafe * agreement' in fusion,
-        "full-resolution JPEG fusion must consume frozen trust for chroma only")
-require('((imageX + 0.5f) * RELIABILITY_WIDTH / imageWidth) - 0.5f' in fusion
-        and '((imageY + 0.5f) * RELIABILITY_HEIGHT / imageHeight) - 0.5f' in fusion,
-        "saved JPEG reliability sampling must mirror GL_LINEAR texel-center geometry")
+        and 'uploadReliability' in fusion
+        and 'GL_RG8' in fusion,
+        "GPU still fusion must upload the frozen 32x24 two-channel reliability field")
+require('reliabilityUvScale' in fusion and 'reliabilityUvOffset' in fusion
+        and 'expandedStart / (float) height' in fusion,
+        "tiled still fusion must preserve full-frame reliability coordinates")
+require('EGL14.eglCreatePbufferSurface' in fusion
+        and 'EGLExt.EGL_OPENGL_ES3_BIT_KHR' in fusion
+        and 'GLES30.glDrawArrays' in fusion
+        and 'GLES30.glReadPixels' in fusion
+        and 'GLUtils.texSubImage2D' in fusion,
+        "full-resolution still fusion must be owned by offscreen GLES3, not Java pixel math")
+require('EGL14.eglTerminate(' not in fusion and 'EGL14.eglReleaseThread();' in fusion,
+        "still worker must never terminate the process EGL display owned by live GLSurfaceView")
+require('loadAsset(context, "shaders/hdr_display.frag")' in fusion
+        and 'loadAsset(context, "shaders/fullscreen.vert")' in fusion,
+        "still GPU path must compile the exact live fusion shader assets")
+require('TILE_ROWS = 512' in fusion and 'padBottomEdgeIfNeeded' in fusion
+        and 'fusionRadius / (float) textureRows' in fusion,
+        "bounded tiled GPU fusion with halo-safe bottom edge missing")
+for retired in ['float[] longR', 'float[] rawMask', 'edgeWeight(', 'currentCoreMask =', 'currentShoulderMask =']:
+    require(retired not in fusion, f"retired full-resolution Java HDR math returned: {retired}")
 require('0.045' not in hdr_shader and '0.045' not in fusion,
         "retired office-derived brightness constant must never enter fusion ownership")
 require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
-        "fusion neighborhood must remain explicit edge-guided sampling; retired cross-edge chroma blur primitives may not return")
+        "fusion neighborhood must remain explicit edge-guided sampling; retired cross-edge blur primitives may not return")
 # 016 / 022 - V1.4.2 on-device sideways preview: producer transform owns live orientation.
 require('SCALER_AVAILABLE_ROTATE_AND_CROP_MODES' in camera,
         "preview rotate/crop capability audit missing")
@@ -675,13 +680,13 @@ require(short_safe((247/255,1.0,1.0)) < 0.01,
         "V1.4.15 white-car failure: a SHORT with clipped G/B must not create a red-only fill")
 
 # 056 / 074 / 080 - Exact current pre-handoff authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.18' in workflow
-        and 'run-id: 33561081215' in workflow,
-        "workflow must download the exact successful V1.4.18 Actions authority")
-require('7aa84fb57b96b0c940f8ffb56feeaa1abed74e73' in workflow,
-        "V1.4.18 authority commit pin missing")
-require('backup-v1.4.18' not in workflow,
-        "V1.4.19 must not invent a new backup-branch dependency")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.19' in workflow
+        and 'run-id: 33573631526' in workflow,
+        "workflow must download the exact successful V1.4.19 Actions authority")
+require('3c468603769cebf53c9bdfbb37f91ea852a2a133' in workflow,
+        "V1.4.19 authority commit pin missing")
+require('backup-v1.4.20' not in workflow,
+        "V1.4.20 must not invent a new backup-branch dependency")
 
 # 048 / 049 / 052 / 054 - Brightness remains user LONG intent in AUTO and MANUAL.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -5.0f' in main
@@ -706,8 +711,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 24' in gradle and 'versionName = "1.0-v1.4.19"' in gradle,
-        "V1.4.19 version/build pin missing")
+require('versionCode = 25' in gradle and 'versionName = "1.0-v1.4.20"' in gradle,
+        "V1.4.20 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -742,27 +747,27 @@ require('captureShortExposureNs' in still_burst and 'captureLongExposureNs' in s
         "still burst must use only frozen shutter-time controls")
 require('CAPTURE_INPUTS' in camera and 'acquiredMs=' in camera and 'totalMs=' in camera,
         "minimal capture timing evidence must separate sensor acquisition from post-processing")
-# 041 / 043 / 053 / 077 / 078 / 079 - Full-resolution fusion stays bounded, scene-learned and edge-safe.
-inner = fusion[fusion.index('for (int row = 0; row < rows; row++)'):fusion.index('output.setPixels')]
-for forbidden in ['Math.exp(', 'Math.sqrt(', 'new float[']:
-    require(forbidden not in inner, f"new expensive/per-pixel allocation introduced: {forbidden}")
+# 041 / 043 / 053 / 077 / 078 / 079 / 084 / 085 - Full-resolution fusion stays bounded, GPU-owned and concurrent with I/O.
 require('clampedBrightnessEv' not in fusion and 'brightnessGain' not in fusion,
         "saved fusion must not contain Brightness gain")
 require('learnPhotoCurve' in fusion and 'medianPrefix' in fusion
         and 'PHOTO_KNOT_COUNT = 5' in fusion,
-        "saved fusion must learn a multi-knot SHORT->LONG response from valid overlap")
-require('highlightNeed' in fusion and 'clippedCore' in fusion
-        and 'lumaSafe' in fusion and 'signalSafe' in fusion
-        and 'currentCoreMask' in fusion and 'currentShoulderMask' in fusion
-        and 'rawMask' in fusion and 'neutralLongClip' in fusion
-        and 'validChannelAgreement' in fusion and 'colorTrust' in fusion,
-        "saved fusion must require current-pair recoverability plus protected chroma")
-require('lumaReliability' not in inner,
-        "frozen 5-Hz luma reliability must not modulate saved visible fusion")
-require('chromaReliability' in fusion and 'sampleReliability' in fusion,
-        "frozen temporal history must remain available for saved chroma protection")
+        "saved fusion must retain sparse scene-response learning")
+require('Bitmap output = Bitmap.createBitmap' in fusion
+        and 'GpuStillFusion' in fusion and 'TILE_ROWS = 512' in fusion,
+        "full-resolution output must be generated by bounded tiled GPU worker")
+require('Executors.newFixedThreadPool(2)' in saver
+        and 'Executors.newSingleThreadExecutor()' in saver
+        and 'fusion.execute(() ->' in saver,
+        "DNG/source I/O and GPU fusion must no longer serialize on one executor")
+require('FUSION_DECODE' in fusion and 'FUSION_CURVE' in fusion
+        and 'FUSION_GPU' in fusion and 'FUSION_ENCODE' in fusion
+        and 'FUSION_WRITE' in saver and 'DNG_SAVE' in saver,
+        "critical post-capture timing regressions must remain observable")
+require('private final ExecutorService io = Executors.newSingleThreadExecutor();' not in saver,
+        "retired single queue for all capture processing returned")
 
-# 074 / 075 / 076 / 077 / 078 / 079 - V1.4.19 response and boundary invariants.
+# 074 / 075 / 076 / 077 / 078 / 079 / 084 / 085 - V1.4.20 temporal response and boundary invariants.
 def update_trust(value, stable, attack, release):
     return min(255, value + attack) if stable else max(0, value - release)
 
@@ -789,6 +794,23 @@ require(all(mapped[i] > mapped[i-1] for i in range(1,len(mapped))),
         f"learned response curve must remain monotonic after bounded correction: {mapped}")
 require('PHOTO_MAX_UPDATE_EV = 0.06f' in gl,
         "live learned response must remain temporally bounded to 0.06 EV/update")
+require('shortPhotoTargetScale' in gl and 'advanceVisiblePhotoCurve' in gl,
+        "5-Hz learned target must be decoupled from pair-rate visible response")
+require('shortOnlyModulated = longDeltaEv <= PHOTO_LONG_STABLE_EV' in gl
+        and '&& shortDeltaEv >= PHOTO_SHORT_ONLY_MODULATION_EV;' in gl,
+        "stable LONG + oscillating SHORT samples must be excluded from response learning")
+
+# Device regression from fixed MANUAL SAFE plant-light test: LONG stayed fixed while
+# SHORT-driven highlight radiometry moved by ~0.38 EV. That must be treated as SHORT-only
+# modulation and excluded from global photometric response learning.
+def short_only_modulated(long_delta_ev, short_delta_ev):
+    return long_delta_ev <= 0.08 and short_delta_ev >= 0.12
+require(short_only_modulated(0.02, 0.38),
+        "fixed-LONG / oscillating-SHORT plant-light regression must be rejected from curve learning")
+require(not short_only_modulated(0.30, 0.32),
+        "coherent real scene change must not be mistaken for SHORT-only modulation")
+require(0.35 / 30.0 < 0.012,
+        "normal visible response smoothing must remain sub-0.012 EV per 30fps pair")
 
 def v1419_recovery_mask(long_second, long_peak, long_luma, short_second,
                        short_luma, radiance_ratio, agreement=1.0):
@@ -893,4 +915,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.19 REGRESSION PASS: adaptive scene-body LONG independent of bootstrap AE, scene-learned five-knot SHORT response, current-pair luma fusion without 5-Hz gating, one-sided edge-guided Laplacian transition, full clipped-core SHORT authority, protected chroma trust, exact exposure-generation pairs, adaptive AUTO+MANUAL HDR, LONG-owned Brightness -5..+2EV, stable signing, frozen capture pair, orientation/FOV/cadence/sRGB protections")
+print("V1.4.20 REGRESSION PASS: GPU-tiled shared-shader still fusion, parallel DNG/source I/O, SHORT-only modulation rejection, pair-rate visible photometric smoothing, adaptive scene-body LONG independent of bootstrap AE, scene-learned five-knot SHORT response, current-pair luma fusion without 5-Hz gating, one-sided edge-guided Laplacian transition, full clipped-core SHORT authority, protected chroma trust, exact exposure-generation pairs, adaptive AUTO+MANUAL HDR, LONG-owned Brightness -5..+2EV, stable signing, frozen capture pair, orientation/FOV/cadence/sRGB protections")

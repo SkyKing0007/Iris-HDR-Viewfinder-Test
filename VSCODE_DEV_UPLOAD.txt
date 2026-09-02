@@ -1,36 +1,36 @@
-Iris HDR Viewfinder Test V1.4.19 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.20 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 Base requirement:
-main must point exactly to successful V1.4.18 commit 7aa84fb57b96b0c940f8ffb56feeaa1abed74e73 before this upload/commit.
+main must point exactly to successful V1.4.19 commit 3c468603769cebf53c9bdfbb37f91ea852a2a133 before this upload/commit.
 
 Backup:
-No new backup branch is required for V1.4.19. Rollback protection is the exact successful V1.4.18 authority plus packaged deterministic forward/rollback patches.
+No new backup branch is required for V1.4.20 per project decision. Rollback protection is the exact successful V1.4.19 authority plus packaged deterministic forward/rollback patches.
 
 Signing:
 Reuse the existing repository secret IRIS_TEST_SIGNING_KEY_B64.
 Do NOT regenerate the signing key and do NOT upload any private key file.
-V1.4.19 versionCode 24 should install normally over successful stable-signed V1.4.18 after Actions proof.
+V1.4.20 versionCode 25 should install normally over successful stable-signed V1.4.19 after Actions proof.
 
 IMPORTANT:
 Upload ALL CONTENTS of the extracted FULL-UPLOAD ZIP into the repository root from a fresh vscode.dev workspace based on current remote main.
-Do not upload only app/ or only the three runtime files.
+Do not upload only app/ or only the runtime files.
 
 Before committing, confirm:
-1. main is still exactly 7aa84fb57b96b0c940f8ffb56feeaa1abed74e73 before replacement.
+1. main is still exactly 3c468603769cebf53c9bdfbb37f91ea852a2a133 before replacement.
 2. BUILD_WORKFLOW_COPY.yml begins exactly with:
-   name: Build Iris HDR Viewfinder Test V1.4.19
+   name: Build Iris HDR Viewfinder Test V1.4.20
 3. .github/workflows/build.yml and BUILD_WORKFLOW_COPY.yml are byte-identical.
 4. No file outside this FULL candidate is added or removed.
-5. The only intended runtime changes are HdrGlView.java, JpegFusion.java and hdr_display.frag.
+5. The only intended runtime changes are CaptureSetSaver.java, HdrGlView.java, JpegFusion.java and hdr_display.frag.
 
 Suggested commit message:
-V1.4.19 scene-learned edge-safe HDR fusion
+V1.4.20 GPU still fusion + temporal radiance stabilization
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.19.
-Do not call V1.4.19 build-proven until the workflow succeeds and its real GLSL/Java/full Android build plus artifact/signing/invariance proof are verified.
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.20.
+Do not call V1.4.20 build-proven until the workflow succeeds and its real GLSL/Java/full Android build plus artifact/signing/invariance proof are verified.
 
 Runtime logs after installation:
 Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt

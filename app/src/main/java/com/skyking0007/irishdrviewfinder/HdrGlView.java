@@ -212,6 +212,11 @@ final class HdrGlView extends GLSurfaceView {
         private static final float PHOTO_SCALE_MIN = 0.60f;
         private static final float PHOTO_SCALE_MAX = 1.50f;
         private static final float PHOTO_MAX_UPDATE_EV = 0.06f;
+        private static final float PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.35f;
+        private static final float PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND = 1.20f;
+        private static final long PHOTO_VISIBLE_FAST_NS = 650_000_000L;
+        private static final float PHOTO_SHORT_ONLY_MODULATION_EV = 0.12f;
+        private static final float PHOTO_LONG_STABLE_EV = 0.08f;
         private static final int PHOTO_MIN_BIN_SAMPLES = 12;
 
         private final Context context;
@@ -250,6 +255,10 @@ final class HdrGlView extends GLSurfaceView {
         private long lastStatsNs;
         private float shortCalibration = 1.0f;
         private final float[] shortPhotoScale = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+        private final float[] shortPhotoTargetScale = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+        private long shortPhotoVisibleGeneration = Long.MIN_VALUE;
+        private long shortPhotoVisibleLastNs;
+        private long shortPhotoVisibleFastUntilNs;
         private boolean havePreviousStats;
         private final int[] shortLumaReliability = new int[STATS_PIXELS];
         private final int[] shortChromaReliability = new int[STATS_PIXELS];
@@ -258,6 +267,7 @@ final class HdrGlView extends GLSurfaceView {
         private final float[] previousShortSceneR = new float[STATS_PIXELS];
         private final float[] previousShortSceneG = new float[STATS_PIXELS];
         private final float[] previousShortSceneB = new float[STATS_PIXELS];
+        private final float[] previousShortRawLuma = new float[STATS_PIXELS];
         private long highestExposureGenerationSeen;
         private Surface inputSurface;
         private int frameWidth;
@@ -355,6 +365,11 @@ final class HdrGlView extends GLSurfaceView {
             lastStatsNs = 0L;
             shortCalibration = 1.0f;
             Arrays.fill(shortPhotoScale, 1.0f);
+            Arrays.fill(shortPhotoTargetScale, 1.0f);
+            shortPhotoVisibleGeneration = Long.MIN_VALUE;
+            shortPhotoVisibleLastNs = 0L;
+            shortPhotoVisibleFastUntilNs = 0L;
+            Arrays.fill(previousShortRawLuma, 0.0f);
             resetShortReliabilityHistory();
             havePreviousStats = false;
             highestExposureGenerationSeen = 0L;
@@ -415,6 +430,11 @@ final class HdrGlView extends GLSurfaceView {
             lastStatsNs = 0L;
             shortCalibration = 1.0f;
             Arrays.fill(shortPhotoScale, 1.0f);
+            Arrays.fill(shortPhotoTargetScale, 1.0f);
+            shortPhotoVisibleGeneration = Long.MIN_VALUE;
+            shortPhotoVisibleLastNs = 0L;
+            shortPhotoVisibleFastUntilNs = 0L;
+            Arrays.fill(previousShortRawLuma, 0.0f);
             resetShortReliabilityHistory();
             havePreviousStats = false;
             highestExposureGenerationSeen = 0L;
@@ -598,6 +618,7 @@ final class HdrGlView extends GLSurfaceView {
                 double r = lastLongMeta.exposureProduct() / lastShortMeta.exposureProduct();
                 ratio = (float) Math.max(1.0, Math.min(65_536.0, r));
             }
+            advanceVisiblePhotoCurve();
             GLES30.glUniform1f(GLES30.glGetUniformLocation(displayProgram, "exposureRatio"), ratio);
             GLES30.glUniform4f(
                     GLES30.glGetUniformLocation(displayProgram, "shortPhotoScaleA"),
@@ -613,6 +634,12 @@ final class HdrGlView extends GLSurfaceView {
                     fusionRadiusPixels / Math.max(1.0f, frameWidth),
                     fusionRadiusPixels / Math.max(1.0f, frameHeight));
             bindSampler2d(displayProgram, "shortReliabilityTex", shortReliabilityTexture, 3);
+            GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(displayProgram, "reliabilityUvScale"),
+                    1.0f, 1.0f);
+            GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(displayProgram, "reliabilityUvOffset"),
+                    0.0f, 0.0f);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 
@@ -705,7 +732,19 @@ final class HdrGlView extends GLSurfaceView {
                 boolean validShort = sr8 > 0.015f && sg8 > 0.015f && sb8 > 0.015f
                         && sr8 < 0.90f && sg8 < 0.90f && sb8 < 0.90f;
                 float normalizedShortLuma = (float) (shortLuma * ratio);
-                if (validLong && validShort && normalizedShortLuma > 0.015f) {
+                boolean shortOnlyModulated = false;
+                if (havePreviousStats && previousLongLuma[i] > 0.01f
+                        && previousShortRawLuma[i] > 0.01f
+                        && longLuma > 0.01f && normalizedShortLuma > 0.01f) {
+                    float longDeltaEv = (float) Math.abs(
+                            Math.log(longLuma / previousLongLuma[i]) / Math.log(2.0));
+                    float shortDeltaEv = (float) Math.abs(
+                            Math.log(normalizedShortLuma / previousShortRawLuma[i]) / Math.log(2.0));
+                    shortOnlyModulated = longDeltaEv <= PHOTO_LONG_STABLE_EV
+                            && shortDeltaEv >= PHOTO_SHORT_ONLY_MODULATION_EV;
+                }
+                if (validLong && validShort && normalizedShortLuma > 0.015f
+                        && !shortOnlyModulated) {
                     float responseRatio = longLuma / normalizedShortLuma;
                     calibrationRatios[overlapCount] = clampCalibration(responseRatio);
                     photoRatios[overlapCount] = clampFloat(
@@ -813,6 +852,7 @@ final class HdrGlView extends GLSurfaceView {
                 previousShortSceneR[i] = sr;
                 previousShortSceneG[i] = sg;
                 previousShortSceneB[i] = sb;
+                previousShortRawLuma[i] = shortRawLuma;
             }
             havePreviousStats = true;
 
@@ -875,11 +915,40 @@ final class HdrGlView extends GLSurfaceView {
                     PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
             enforceMonotonicPhotoCurve(smoothTarget);
             for (int bin = 0; bin < PHOTO_KNOT_COUNT; bin++) {
-                float current = Math.max(0.0001f, shortPhotoScale[bin]);
+                float current = Math.max(0.0001f, shortPhotoTargetScale[bin]);
                 float desired = Math.max(0.0001f, smoothTarget[bin]);
                 float deltaEv = (float) (Math.log(desired / current) / Math.log(2.0));
                 deltaEv = clampFloat(deltaEv, -PHOTO_MAX_UPDATE_EV, PHOTO_MAX_UPDATE_EV);
-                shortPhotoScale[bin] = clampFloat(
+                shortPhotoTargetScale[bin] = clampFloat(
+                        (float) (current * Math.pow(2.0, deltaEv)),
+                        PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
+            }
+            enforceMonotonicPhotoCurve(shortPhotoTargetScale);
+        }
+
+        private void advanceVisiblePhotoCurve() {
+            long now = System.nanoTime();
+            long generation = lastLongMeta == null ? Long.MIN_VALUE : lastLongMeta.exposureGeneration;
+            if (generation != shortPhotoVisibleGeneration) {
+                shortPhotoVisibleGeneration = generation;
+                shortPhotoVisibleFastUntilNs = now + PHOTO_VISIBLE_FAST_NS;
+            }
+            if (shortPhotoVisibleLastNs == 0L) {
+                shortPhotoVisibleLastNs = now;
+                return;
+            }
+            float dt = Math.min(0.100f, Math.max(0.0f, (now - shortPhotoVisibleLastNs) * 1.0e-9f));
+            shortPhotoVisibleLastNs = now;
+            float rate = now <= shortPhotoVisibleFastUntilNs
+                    ? PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND
+                    : PHOTO_VISIBLE_RATE_EV_PER_SECOND;
+            float maxDeltaEv = rate * dt;
+            for (int i = 0; i < PHOTO_KNOT_COUNT; i++) {
+                float current = Math.max(0.0001f, shortPhotoScale[i]);
+                float target = Math.max(0.0001f, shortPhotoTargetScale[i]);
+                float deltaEv = (float) (Math.log(target / current) / Math.log(2.0));
+                deltaEv = clampFloat(deltaEv, -maxDeltaEv, maxDeltaEv);
+                shortPhotoScale[i] = clampFloat(
                         (float) (current * Math.pow(2.0, deltaEv)),
                         PHOTO_SCALE_MIN, PHOTO_SCALE_MAX);
             }

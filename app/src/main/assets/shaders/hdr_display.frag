@@ -15,6 +15,8 @@ uniform float exposureRatio;
 uniform vec4 shortPhotoScaleA;
 uniform float shortPhotoScaleB;
 uniform vec2 fusionTexelStep;
+uniform vec2 reliabilityUvScale;
+uniform vec2 reliabilityUvOffset;
 uniform vec2 fullFitScale;
 uniform vec2 splitFitScale;
 
@@ -212,7 +214,8 @@ void fusionSample(
         coreMask,
         smoothstep(0.02, 0.50, shoulderNeed * lumaSafe * signalSafe));
 
-    vec2 temporalTrust = texture(shortReliabilityTex, uv).rg;
+    vec2 reliabilityUv = clamp(uv * reliabilityUvScale + reliabilityUvOffset, vec2(0.0), vec2(1.0));
+    vec2 temporalTrust = texture(shortReliabilityTex, reliabilityUv).rg;
     float rgbSafe = 1.0 - smoothstep(0.955, 0.985, shortPeak);
     float colorTrust = clamp(temporalTrust.g * rgbSafe * agreement, 0.0, 1.0);
     float longSpread = max3(longRgb) - min3(longRgb);

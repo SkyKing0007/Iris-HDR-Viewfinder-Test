@@ -12,8 +12,8 @@ android {
         applicationId = "com.skyking0007.irishdrviewfinder"
         minSdk = 29
         targetSdk = 37
-        versionCode = 24
-        versionName = "1.0-v1.4.19"
+        versionCode = 25
+        versionName = "1.0-v1.4.20"
     }
 
     signingConfigs {

@@ -1,59 +1,40 @@
-# Iris HDR Viewfinder Test V1.4.19
+# Iris HDR Viewfinder Test V1.4.20
 
-V1.4.19 preserves V1.4.18's successful adaptive LONG exposure, adaptive SHORT headroom, exact-generation pairing and full recoverable clipped-core authority. It corrects the remaining fusion-boundary defects seen on-device: residual 5-Hz luma pulsing, nonlinear processed SHORT/LONG photometric mismatch, and foliage/edge ringing where the two processed exposures met.
+V1.4.20 preserves V1.4.19's adaptive LONG/SHORT exposure policy, exact-generation pairing, full clipped-core SHORT recovery, five-knot scene response and edge-guided multiscale fusion. It addresses two device-proven problems: residual live modulation under fast SHORT exposures/electronic lighting, and ~28-second post-capture processing caused by full-resolution Java CPU fusion serialized with file I/O.
 
-## Scene-learned photometric matching
+## GPU-first full-resolution still fusion
 
-A single SHORT calibration scalar is no longer allowed to own visible fusion. Both live GLSL and saved `JpegFusion` use the same five-knot monotonic response model learned from valid unsaturated SHORT/LONG overlap after exposure normalization. This lets the current scene teach the merger how the processed ISP response differs through the tonal range instead of assuming one multiplier fits every brightness.
+The final FUSED JPEG now uses an offscreen OpenGL ES 3 worker. It compiles the same `fullscreen.vert` and `hdr_display.frag` used by the live viewfinder, so clipped-core recovery, one-sided edge support, current-pair disagreement, chroma protection and the multiscale transition share one shader implementation.
 
-The live five-knot response is temporally bounded to 0.06 EV per statistics update. The knots describe normalized scene luminance, not the office test scene, so the same mechanism adapts to indoor, outdoor, low light, mixed light and direct sun.
+The 4096x3072 frame is processed in bounded 512-row tiles with the required fusion halo. Only JPEG decode/orientation, sparse scene-curve learning, GPU readback packing and JPEG encode remain CPU-side. The old full-resolution Java per-pixel HDR loop is removed.
 
-## Current-pair visible luma ownership
+The frozen 32x24 reliability map is still consumed, but tiled coordinates are transformed back into full-frame coordinates before sampling.
 
-The current complete, exposure-generation-matched SHORT/LONG pair now owns visible luma recovery for both true clipped cores and recoverable highlight shoulders. The 32x24 200-ms reliability map no longer gates visible luma. This removes the remaining mechanism that could make a valid highlight shoulder brighten/dim at the slower statistics cadence.
+## Parallel capture saving
 
-Temporal history is retained where it remains useful: chroma confidence and controller-wide quality evidence.
+`CaptureSetSaver` no longer serializes DNG writes, source JPEG writes, metadata and fusion on one executor. Two I/O workers save capture files while a dedicated fusion worker starts immediately after matched SHORT/LONG JPEGs/results are available. Completion still waits for every requested output.
 
-## Full clipped core + edge-safe multiscale boundary
+Minimal timing markers identify remaining costs without broad logging: `DNG_SAVE`, `SOURCE_JPEG_SAVE`, `FUSION_DECODE`, `FUSION_CURVE`, `FUSION_GPU`, `FUSION_ENCODE`, `FUSION_WRITE`, and `FUSION_PIPELINE`.
 
-The image still begins as LONG. A true recoverable LONG-clipped core keeps full current-SHORT luminance/detail authority.
+## Temporal radiance stabilization
 
-The outer transition is no longer a direct high-frequency LONG/SHORT source switch. V1.4.19 uses an edge-guided one-level Gaussian-mask/Laplacian-image construction:
+V1.4.19 removed 5-Hz luma-mask gating, but its visible five-knot photometric curve was still updated directly by the 200-ms statistics pass. Under a fast SHORT exposure, PWM/electronic lighting could therefore pull the response curve and create visible breathing even when manual exposure sliders were fixed.
 
-- low-frequency exposure/color differences use the smoother transition mask;
-- fine detail uses a tighter mask closer to the current-pixel decision;
-- one-sided LONG damage support prevents SHORT authority from crossing intact dark edges;
-- current-pair disagreement suppresses non-core mixing when the two processed exposures do not represent the same local detail.
+V1.4.20 separates the learned target curve from the visible curve. The target still learns from scene overlap, while the visible curve moves smoothly at render/pair cadence. Samples are excluded from global response learning when LONG is locally stable but raw exposure-normalized SHORT changes by at least 0.12 EV. Coherent LONG+SHORT changes remain eligible, so real scene changes are not frozen.
 
-This is specifically intended to prevent bright/dark/green contours on foliage, branches, text, wires and other high-frequency boundaries around clipped regions without weakening true clipped-core recovery.
+## Preserved behavior
 
-## Chroma protection remains separate
-
-Full SHORT detail authority still does not mean blind SHORT RGB replacement. If SHORT color is questionable, recovery keeps SHORT luminance/detail while retaining LONG chromaticity. The neutral highlight lock and anti-pink/anti-orange protections remain intact.
-
-## Preserved V1.4.18 behavior
-
-- adaptive P25/P35/P50 LONG scene-body appearance;
-- P90/P98 bright-tail evidence assigned to SHORT;
-- max 0.18-EV LONG update with consecutive evidence;
-- adaptive AUTO and MANUAL SAFE SHORT headroom;
-- exact exposure-generation pair publication;
-- known 50/60-Hz and unknown/PWM safety;
-- frozen still exposure/ISO/post-RAW controls and live-to-still chroma trust snapshot;
-- Brightness remains LONG-appearance intent, never post-fusion gain;
-- FOV/cadence, orientation/DNG, explicit sRGB and stable-signing protections.
+- V1.4.19 LONG/SHORT exposure policy and CameraController bytes are unchanged.
+- Exact exposure-generation SHORT/LONG pairing remains unchanged.
+- True recoverable LONG-clipped cores retain complete SHORT detail authority.
+- Outer boundaries remain one-sided and edge-guided.
+- Questionable SHORT color can retain LONG chromaticity while using SHORT detail/luminance.
+- Brightness remains LONG-appearance intent and never becomes post-fusion gain.
+- Orientation, FOV/cadence, DNG, sRGB and stable-signing protections remain intact.
 
 ## Rollback protection
 
-No new backup branch is required for V1.4.19. The exact successful V1.4.18 compiled candidate is the base, with deterministic full-index forward/rollback patches and strict 3-runtime-file allowlist proof.
-
-## Stable APK updates
-
-V1.4.19 reuses the existing `IRIS_TEST_SIGNING_KEY_B64` repository secret. Do not regenerate the signing key.
-
-Signing certificate SHA-256:
-
-`531aeed9ead79d28c424ad8f71a459b4ced8aff37e95c11bd295083fbb25c4e8`
+No new backup branch is created for V1.4.20 by project decision. The exact successful V1.4.19 compiled candidate is the base, protected by exact hashes and deterministic full-index forward/rollback patches.
 
 ## Runtime logs
 

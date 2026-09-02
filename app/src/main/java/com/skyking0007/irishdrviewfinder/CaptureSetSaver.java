@@ -44,7 +44,8 @@ final class CaptureSetSaver {
     private final float displayBrightnessEv;
     private final byte[] shortReliabilityMap;
     private final Listener listener;
-    private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final ExecutorService io = Executors.newFixedThreadPool(2);
+    private final ExecutorService fusion = Executors.newSingleThreadExecutor();
     private final Map<Long, String> labelByTimestamp = new HashMap<>();
     private final Map<Long, Image> pendingRaw = new HashMap<>();
     private final Map<Long, byte[]> pendingJpeg = new HashMap<>();
@@ -171,6 +172,7 @@ final class CaptureSetSaver {
     private void submitRaw(String label, CaptureData data, Image raw) {
         TotalCaptureResult result = data.result;
         io.execute(() -> {
+            long startedNs = System.nanoTime();
             try (DngCreator creator = new DngCreator(characteristics, result)) {
                 creator.setOrientation(dngOrientation);
                 String name = captureId + "_" + label + ".dng";
@@ -179,6 +181,9 @@ final class CaptureSetSaver {
                         name,
                         "image/x-adobe-dng",
                         output -> creator.writeImage(output, raw));
+                RuntimeLogger.event(
+                        "DNG_SAVE",
+                        label + " ms=" + elapsedMs(startedNs));
                 synchronized (CaptureSetSaver.this) {
                     data.rawSaved = true;
                     checkCompleteLocked();
@@ -195,8 +200,12 @@ final class CaptureSetSaver {
 
     private void submitJpeg(String label, CaptureData data, byte[] jpeg) {
         io.execute(() -> {
+            long startedNs = System.nanoTime();
             try {
                 MediaStoreWriter.writeBytes(context, captureId + "_" + label + ".jpg", "image/jpeg", jpeg);
+                RuntimeLogger.event(
+                        "SOURCE_JPEG_SAVE",
+                        label + " ms=" + elapsedMs(startedNs));
                 synchronized (CaptureSetSaver.this) {
                     data.jpegSaved = true;
                     maybeSubmitFusionLocked();
@@ -220,14 +229,23 @@ final class CaptureSetSaver {
         byte[] shortJpeg = shortData.jpegBytes;
         byte[] longJpeg = longData.jpegBytes;
         double ratio = exposureRatio(shortData.result, longData.result);
-        io.execute(() -> {
+        fusion.execute(() -> {
+            long startedNs = System.nanoTime();
             try {
-                byte[] fused = JpegFusion.fuse(shortJpeg, longJpeg, ratio, shortReliabilityMap);
+                byte[] fused = JpegFusion.fuse(
+                        context, shortJpeg, longJpeg, ratio, shortReliabilityMap);
+                long writeStartedNs = System.nanoTime();
                 MediaStoreWriter.writeBytes(
                         context,
                         captureId + "_FUSED_HDR.jpg",
                         "image/jpeg",
                         fused);
+                RuntimeLogger.event(
+                        "FUSION_WRITE",
+                        "bytes=" + fused.length + " ms=" + elapsedMs(writeStartedNs));
+                RuntimeLogger.event(
+                        "FUSION_PIPELINE",
+                        "ms=" + elapsedMs(startedNs));
                 synchronized (CaptureSetSaver.this) {
                     fusionSaved = true;
                     checkCompleteLocked();
@@ -251,7 +269,7 @@ final class CaptureSetSaver {
                 JSONObject root = new JSONObject();
                 root.put("captureId", captureId);
                 root.put("cameraId", cameraId);
-                root.put("fusion", "V1.4.15 overlap-calibrated per-channel clipped-highlight JPEG-domain exposure fusion");
+                root.put("fusion", "V1.4.20 GPU-tiled shared-shader scene-learned edge-safe HDR fusion");
                 root.put("short", resultJson(shortResult));
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));
@@ -311,6 +329,10 @@ final class CaptureSetSaver {
         return Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));
     }
 
+    private static long elapsedMs(long startNs) {
+        return Math.round((System.nanoTime() - startNs) / 1_000_000.0);
+    }
+
     private static int dngOrientationForDegrees(int degrees) {
         int normalized = ((degrees % 360) + 360) % 360;
         if (normalized == 0) return ExifInterface.ORIENTATION_NORMAL;
@@ -338,6 +360,7 @@ final class CaptureSetSaver {
         if (done) {
             terminal = true;
             io.shutdown();
+            fusion.shutdown();
             listener.onFinished(
                     captureId,
                     true,
@@ -352,6 +375,7 @@ final class CaptureSetSaver {
         pendingRaw.clear();
         pendingJpeg.clear();
         io.shutdown();
+        fusion.shutdown();
         listener.onFinished(captureId, false, t.getClass().getSimpleName() + ": " + t.getMessage());
     }
 }
