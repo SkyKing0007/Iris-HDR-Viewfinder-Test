@@ -17,7 +17,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.1 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -510,11 +510,11 @@ require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
 # 038 / 042 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11' in workflow
-        and 'run-id: 33464019593' in workflow,
-        "workflow must download the exact successful V1.4.11 Actions authority")
-require('run-id: 33458017737' not in workflow and 'run-id: 33445772128' not in workflow,
-        "V1.4.11 V2 must not silently fall back to older authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2' in workflow
+        and 'run-id: 33667545707' in workflow,
+        "workflow must download the exact successful V1.4.11 V2 Actions authority")
+require('run-id: 33464019593' not in workflow and 'run-id: 33458017737' not in workflow,
+        "V1.4.11 V2.1 must not silently fall back to V1.4.11 or older authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -565,6 +565,15 @@ require('applySafeSystemBarInsets(root, panel);' in main
         and 'WindowInsets.Type.systemBars()' in main
         and 'panelBottom + bottom' in main,
         "controls must reserve Android system-bar/gesture-pill insets")
+require('statusText.setSingleLine(true);' in main
+        and 'statusText.setEllipsize(TextUtils.TruncateAt.END);' in main
+        and 'statusText.setIncludeFontPadding(false);' in main
+        and 'statusText.setMinHeight(dp(20));' in main
+        and 'statusText.setMaxHeight(dp(20));' in main
+        and 'ViewGroup.LayoutParams.MATCH_PARENT,\n                dp(20)' in main,
+        "5-second remeter status must have invariant one-line 20dp geometry")
+require('AUTO_REMETER_INTERVAL_MS = 5_000L' in camera,
+        "periodic-bounce correction must not redesign the proven 5-second remeter cadence")
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
@@ -669,4 +678,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2 REGRESSION PASS: fixed-3EV HDR, -4..+4EV post-fusion Brightness, 0.50..2.00 ratio-preserving Gamma, system-bar-safe UI, side-by-side app identity, LONG-first highlight color, frozen capture controls, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")
+print("V1.4.11 V2.1 REGRESSION PASS: fixed-3EV HDR, -4..+4EV post-fusion Brightness, 0.50..2.00 ratio-preserving Gamma, system-bar-safe UI, fixed-height remeter status, side-by-side app identity, LONG-first highlight color, frozen capture controls, fast save, LONG-owned shadows, producer-owned orientation, clean-anchored pairs, native FOV, measured cadence, sRGB, capture protection")

@@ -17,6 +17,7 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
+import android.text.TextUtils;
 import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
@@ -210,7 +211,14 @@ public final class MainActivity extends Activity implements CameraController.Lis
         panel.setBackgroundColor(0xCC000000);
 
         statusText = textView("Waiting for camera permission…", portrait ? 12 : 13);
-        panel.addView(statusText, matchWrap());
+        statusText.setSingleLine(true);
+        statusText.setEllipsize(TextUtils.TruncateAt.END);
+        statusText.setIncludeFontPadding(false);
+        statusText.setMinHeight(dp(20));
+        statusText.setMaxHeight(dp(20));
+        panel.addView(statusText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(20)));
 
         cameraSpinner = new Spinner(this);
         cameraSpinner.setBackgroundColor(0xCCEEEEEE);

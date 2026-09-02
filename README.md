@@ -1,6 +1,6 @@
-# Iris HDR Viewfinder Test V1.4.11 V2
+# Iris HDR Viewfinder Test V1.4.11 V2.1
 
-V1.4.11 V2 is an isolated side-branch experiment built from the exact successful V1.4.11 Actions compiled candidate. It preserves V1.4.11 capture, fixed ~3 EV HDR bracket, SHORT/LONG fusion, LONG-first highlight color ownership, FOV/orientation, cadence, DNG/JPEG and logging behavior.
+V1.4.11 V2.1 is a narrow correction built from the exact successful V1.4.11 V2 Actions compiled candidate. It preserves V1.4.11 capture, fixed ~3 EV HDR bracket, SHORT/LONG fusion, LONG-first highlight color ownership, FOV/orientation, cadence, DNG/JPEG and logging behavior.
 
 ## Brightness EV
 
@@ -19,3 +19,7 @@ The control panel explicitly reserves Android system-bar and gesture-pill insets
 The V2 APK uses application ID `com.skyking0007.irishdrviewfinder.v1411v2` and label `Iris HDR 1.4.11 V2`, allowing installation alongside the normal Iris HDR Viewfinder. Its Actions push trigger is isolated to branch `experiment-v1.4.11-v2-brightness-4ev`; `main` is not a trigger.
 
 Runtime logs remain under `Downloads/IrisHDRViewfinder/Logs/`.
+
+## Periodic viewfinder bounce correction
+
+V2.1 preserves the existing 5-second clean-AE remeter cadence and camera/focus behavior. The visible periodic zoom/bounce was the weighted viewfinder being resized when the changing status/remeter message changed the `wrap_content` panel height. The status/debug row is now invariant one-line 20dp geometry with ellipsis, matching the later validated V1.4.14 correction. Metering text can change without changing viewfinder size.

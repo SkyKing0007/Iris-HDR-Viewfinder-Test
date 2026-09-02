@@ -1,30 +1,24 @@
-Iris HDR Viewfinder Test V1.4.11 V2
+Iris HDR Viewfinder Test V1.4.11 V2.1
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Target branch: experiment-v1.4.11-v2-brightness-4ev
 Status: PREPARED / UPLOAD-READY - NOT ACTIONS BUILD-PROVEN
 
-Runtime authority: exact successful V1.4.11 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.11
-Authority commit: 47b1f792347dfb1cf548f6a230b6423df826367b
-Authority tree: 1168bfb814e81746bca426a4158cfb11e4a143b8
-Authority Actions run: 33464019593
-Authority job: 99720012615
-Authority artifact ID: 9784219383
-Authority artifact digest: sha256:e0e290354cc0a5d2292ed633aaa8f0b7447b8dd1a2466d738744de155f070378
-Authority V1.4.11 APK SHA-256: 0e1573f02f756dfa4d6f9828ad614eb5f0c54110e5f7e362dc5d984bbf6f4047
-Authority V1.4.11 source TAR SHA-256: e402fdb3a6fc3f419a334799daff2b2a8a5de39adad525fa56a2d7c374cc267c
-Authority V1.4.11 runtime manifest SHA-256: cb80c139009ef7e39cc9a56cf1ab9d4862bb0c22965aa2b90b428ff05c26f534
-Authority V1.4.11 repository manifest SHA-256: d751e16cf8e4ce3f3ebbd0be4acd6863bea7f897dfa360becb721865b3b44482
-Authority V1.4.11 regressions SHA-256: c02a5deeed5bbf461413fcf525b182ea04f34a5dda249e97e28fccff895541c4
+Runtime authority: exact successful V1.4.11 V2 Actions artifact Iris-HDR-Viewfinder-Test-V1.4.11-V2
+Authority commit: 23ef58e7fdb96fcafec409b169f35152f93b19b9
+Authority tree: 4f5d854c2abbc83f93485d4a5760defc99992a09
+Authority Actions run: 33667545707
+Authority job: 100372890766
+Authority artifact ID: 9861227245
+Authority artifact digest: sha256:e4b0b2e678fe18951070077cbd65e72a2663e8ae6d8b79a940731839afa659b2
+Authority V2 APK SHA-256: c0e37fa174ee62e0547f1f445e15c8fb3d074da1364fe0dffbceaae7d23c7ad1
+Authority V2 source TAR SHA-256: 3cab1201dc33e466a4704fd03f4fe2a62ec7599a54d41760dbae8d0957bdf09e
+Authority V2 runtime manifest SHA-256: 090c409f4fde6eb9b85d2cc2f9a744625ec426db84aa82bb3d402c6786e5fbe0
+Authority V2 repository manifest SHA-256: 8885d14da8d95526435d09a97321c07123397d3a693cf45a62fd777287ff162f
+Authority V2 regressions SHA-256: 184111fb9adca4a3ec870f3819697d10a854023c73dddeea4fb081742a452b2f
 
-No new backup branch: localized isolated-branch variant; rollback authority is the exact V1.4.11 parent plus deterministic forward/rollback patches.
+No new backup branch: localized UI-layout regression correction. Exact V2 authority plus deterministic forward/rollback patches provide rollback.
 
-Intended runtime changed-file allowlist: exactly seven files:
-- app/src/main/AndroidManifest.xml
-- app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+Intended runtime changed-file allowlist: exactly one file:
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
 Infrastructure changed-file list:
@@ -38,13 +32,11 @@ Plus candidate documentation/version/hash pins:
 - VSCODE_DEV_UPLOAD.txt
 - app/build.gradle.kts
 
-Infrastructure differs from V1.4.11 only where required for V2: authority pin advances to exact successful V1.4.11; push trigger is isolated to the V2 branch; version/artifact names/allowlist/runtime manifest/regressions are updated. Gate/compiler/build order is unchanged.
+Infrastructure differs from successful V2 only for authority/version/artifact names, exact one-file runtime allowlist, updated manifest pins, and the permanent periodic-bounce regression. Gate/compiler/build order is unchanged.
 
-Functional V2 changes:
-- Brightness: -4.0..+4.0 EV, 0.1 EV steps, 0.0 neutral.
-- Gamma: 0.50..2.00, 0.05 steps, 1.00 neutral; luminance-driven, common RGB scaling, gamut-safe, same live/save, frozen at shutter.
-- System-bar-aware control panel; viewfinder yields height before controls overlap Android navigation/gesture areas.
-- Side-by-side application ID com.skyking0007.irishdrviewfinder.v1411v2 and app label Iris HDR 1.4.11 V2.
-- No capture exposure, HDR bracket, SHORT admission, fusion weight, cadence, camera routing, DNG or FOV redesign.
+Functional V2.1 change:
+- Fix 5-second vertical/zoom-like viewfinder bounce by making the status/debug row fixed one-line 20dp geometry with ellipsis.
+- Preserve the existing 5-second clean-AE remeter cadence; do not freeze AUTO exposure adaptation.
+- Preserve V2 Brightness -4..+4 EV, Gamma 0.50..2.00, side-by-side app identity, inset-safe controls, capture, HDR math, FOV, cadence and camera routing byte-for-byte.
 
-Toolchain/build mechanics remain V1.4.11: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2.
+Toolchain/build mechanics remain successful V2: AGP 9.2.1 / Gradle 9.6.0 / Java 17 / compileSdk 37 / minSdk 29 / pinned Ubuntu 24.04 glslang-tools 15.1.0-2~ubuntu0.24.04.2.

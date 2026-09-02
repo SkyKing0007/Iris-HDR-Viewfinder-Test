@@ -1,4 +1,4 @@
-Iris HDR Viewfinder Test V1.4.11 V2 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.11 V2.1 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
@@ -7,23 +7,23 @@ TARGET BRANCH ONLY:
 experiment-v1.4.11-v2-brightness-4ev
 
 Base requirement:
-The target branch must point exactly to successful V1.4.11 commit 47b1f792347dfb1cf548f6a230b6423df826367b before this upload/commit. Do not upload these files to main.
+The target branch must point exactly to successful V1.4.11 V2 commit 23ef58e7fdb96fcafec409b169f35152f93b19b9 before this upload/commit. Do not upload these files to main.
 
-No new backup branch is required for this localized isolated variant.
+No new backup branch is required for this narrow UI-layout regression correction.
 
 IMPORTANT:
 Upload ALL CONTENTS of the extracted FULL-UPLOAD ZIP into the repository root while vscode.dev is on experiment-v1.4.11-v2-brightness-4ev. Replace matching files. Do not switch to main.
 
 Before committing, confirm BUILD_WORKFLOW_COPY.yml begins exactly with:
-name: Build Iris HDR Viewfinder Test V1.4.11 V2
+name: Build Iris HDR Viewfinder Test V1.4.11 V2.1
 
 and its push branch is exactly:
 branches: [ experiment-v1.4.11-v2-brightness-4ev ]
 
 Suggested commit message:
-V1.4.11 V2 -4..+4EV brightness + gamma + safe screen fit
+V1.4.11 V2.1 fix periodic viewfinder bounce
 
-After commit/push, open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.11 V2.
-Do not call V1.4.11 V2 build-proven until the workflow succeeds and its compiled artifact is verified.
+After commit/push, open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.11 V2.1.
+Do not call V1.4.11 V2.1 build-proven until the workflow succeeds and its compiled artifact is verified.
 
-The APK application ID is separate from normal Iris, so the V2 APK can install side-by-side.
+The APK application ID remains com.skyking0007.irishdrviewfinder.v1411v2, so V2.1 updates the isolated V2 app and still remains side-by-side with normal Iris.
