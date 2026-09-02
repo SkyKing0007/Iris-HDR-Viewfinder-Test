@@ -106,6 +106,15 @@ final class CameraController {
     private static final double AUTO_SHORT_RECOVERY_TARGET_PEAK = 0.90;
     private static final double AUTO_SHORT_RECOVERY_RELEASE_PEAK = 0.72;
     private static final double AUTO_SHORT_RECOVERY_MIN_SIGNAL_FRACTION = 0.50;
+    // V1.4.23: AUTO SHORT is an information-gain search, not peak chasing.
+    private static final double AUTO_SHORT_INFO_GAIN_MIN = 0.08;
+    private static final double AUTO_SHORT_PROBE_STEP_EV = 1.0;
+    private static final int AUTO_SHORT_PROBE_CONFIRM_SAMPLES = 2;
+    private static final double AUTO_SHORT_FLICKER_MODULATION_EV = 0.12;
+    private static final double AUTO_SHORT_FLICKER_MIN_CONFIDENCE = 0.65;
+    private static final double AUTO_SHORT_FLICKER_MIN_COVERAGE = 0.25;
+    private static final double AUTO_SHORT_SCENE_RESET_EV = 0.50;
+    private static final double AUTO_SHORT_SCENE_RESET_CELL_FRACTION = 0.60;
     private static final double BRACKET_STEP_UP_EV = 0.50;
     private static final double BRACKET_STEP_DOWN_EV = 0.15;
     private static final int BRACKET_CONFIRM_UP_SAMPLES = 2;
@@ -194,6 +203,16 @@ final class CameraController {
     private int bracketIncreaseEvidence;
     private int bracketDecreaseEvidence;
     private boolean autoFastShortRecovery;
+    private boolean autoShortProbePending;
+    private boolean autoShortSearchExhausted;
+    private double autoShortProbeBaselineEv = AUTO_BRACKET_DEFAULT_EV;
+    private float autoShortProbeBaselineUsable;
+    private float autoShortProbeBaselineNearClip = 1.0f;
+    private boolean autoShortProbeBaselineFast;
+    private int autoShortProbeEvidence;
+    private int autoShortSearchLongCells;
+    private float autoShortSearchP98 = -1.0f;
+    private double autoShortSearchLongProduct = -1.0;
     private int bodyRaiseEvidence;
     private int bodyLowerEvidence;
     private long previewExposureGeneration;
@@ -348,9 +367,7 @@ final class CameraController {
             autoMetering = false;
             lastAdaptiveStatsFrame = -1L;
             lastAdaptivePairUpdateNs = 0L;
-            bracketIncreaseEvidence = 0;
-            bracketDecreaseEvidence = 0;
-            autoFastShortRecovery = false;
+            resetAutoShortSearchLocked();
             bodyRaiseEvidence = 0;
             bodyLowerEvidence = 0;
             if (enabled) {
@@ -891,8 +908,11 @@ final class CameraController {
                         processAutoMeterResultLocked(result, exposure, iso, sceneFlicker);
                     }
 
+                    boolean flickerGuardRequired = FrameMeta.SHORT.equals(kind)
+                            && flickerGuardRequiredForShortLocked(exposure, activeLongExposureNs());
                     FrameMeta meta = new FrameMeta(
-                            kind, result.getFrameNumber(), timestamp, exposure, iso, generation);
+                            kind, result.getFrameNumber(), timestamp, exposure, iso, generation,
+                            flickerGuardRequired);
                     listener.onPreviewMeta(meta);
                     previewResultCount++;
                     Long frameDuration = result.get(CaptureResult.SENSOR_FRAME_DURATION);
@@ -936,10 +956,32 @@ final class CameraController {
         // statistics may continue to arrive while the still session is configured, but
         // from this point forward they cannot mutate this in-flight HDR set.
                 autoMetering = false;
-        captureShortExposureNs = activeShortExposureNs();
         captureLongExposureNs = activeLongExposureNs();
-        captureShortIso = activeShortIso();
         captureLongIso = activeLongIso();
+        if (autoHdrExposure && autoShortProbePending) {
+            // A darker AUTO tier is never committed to a still capture until the
+            // information-gain/flicker test accepts it. Capture from the last accepted
+            // tier while a probe is pending so one transient PWM phase can never
+            // become the saved HDR source.
+            double longProduct = Math.max(
+                    1.0, (double) captureLongExposureNs * captureLongIso);
+            double baselineProduct = Math.max(
+                    1.0, longProduct / Math.pow(2.0, autoShortProbeBaselineEv));
+            ExposureSetting acceptedShort = solveShortSettingForProductLocked(
+                    baselineProduct, captureLongExposureNs, longProduct,
+                    AUTO_BRACKET_MAX_EV, autoShortProbeBaselineFast);
+            captureShortExposureNs = acceptedShort.exposureNs;
+            captureShortIso = acceptedShort.iso;
+            RuntimeLogger.event(
+                    "SHORT_TIER",
+                    String.format(
+                            Locale.US,
+                            "capture uses accepted %.2fEV while %.2fEV probe pending",
+                            autoShortProbeBaselineEv, autoAdaptiveBracketEv));
+        } else {
+            captureShortExposureNs = activeShortExposureNs();
+            captureShortIso = activeShortIso();
+        }
         capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;
         captureDisplayBrightnessEv = displayBrightnessEv;
         captureBeginRealtimeNs = System.nanoTime();
@@ -960,6 +1002,8 @@ final class CameraController {
                 captureId,
                 jpegOrientationDegrees,
                 captureDisplayBrightnessEv,
+                flickerGuardRequiredForShortLocked(
+                        captureShortExposureNs, captureLongExposureNs),
                 frozenShortReliabilityMap,
                 new CaptureSetSaver.Listener() {
                     @Override
@@ -1243,7 +1287,7 @@ final class CameraController {
         bodyRaiseEvidence = 0;
         bodyLowerEvidence = 0;
         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
-        autoFastShortRecovery = false;
+        resetAutoShortSearchLocked();
         lastAdaptiveStatsFrame = -1L;
         lastAdaptivePairUpdateNs = 0L;
         autoMetering = false;
@@ -1285,7 +1329,7 @@ final class CameraController {
         bodyRaiseEvidence = 0;
         bodyLowerEvidence = 0;
         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
-        autoFastShortRecovery = false;
+        resetAutoShortSearchLocked();
         lastAdaptiveStatsFrame = -1L;
         lastAdaptivePairUpdateNs = 0L;
         autoMetering = false;
@@ -1456,9 +1500,7 @@ final class CameraController {
         bodyRaiseEvidence = 0;
         bodyLowerEvidence = 0;
         autoAdaptiveBracketEv = AUTO_BRACKET_DEFAULT_EV;
-        bracketIncreaseEvidence = 0;
-        bracketDecreaseEvidence = 0;
-        autoFastShortRecovery = false;
+        resetAutoShortSearchLocked();
         deriveAdaptiveAutoPairLocked();
         publishAutoHdrSettingsLocked("AUTO_ANCHOR", finishMeter || firstAnchor);
 
@@ -1467,6 +1509,49 @@ final class CameraController {
             resetCaptureResultFpsLocked();
             applyPreviewRepeatingLocked();
         }
+    }
+
+    private void resetAutoShortSearchLocked() {
+        bracketIncreaseEvidence = 0;
+        bracketDecreaseEvidence = 0;
+        autoFastShortRecovery = false;
+        autoShortProbePending = false;
+        autoShortSearchExhausted = false;
+        autoShortProbeBaselineEv = AUTO_BRACKET_DEFAULT_EV;
+        autoShortProbeBaselineUsable = 0.0f;
+        autoShortProbeBaselineNearClip = 1.0f;
+        autoShortProbeBaselineFast = false;
+        autoShortProbeEvidence = 0;
+        autoShortSearchLongCells = 0;
+        autoShortSearchP98 = -1.0f;
+        autoShortSearchLongProduct = -1.0;
+    }
+
+    private boolean autoShortSearchSceneChangedLocked(HdrGlView.SceneStats stats) {
+        if (!autoShortSearchExhausted) return false;
+        if (stats.longRecoveryCells == 0) return true;
+        int baselineCells = Math.max(1, autoShortSearchLongCells);
+        int cellDelta = Math.abs(stats.longRecoveryCells - autoShortSearchLongCells);
+        boolean largeCellChange = cellDelta > Math.max(3, Math.round(
+                baselineCells * (float) AUTO_SHORT_SCENE_RESET_CELL_FRACTION));
+        boolean veryLargeCellChange = cellDelta > Math.max(5, baselineCells);
+        double p98DeltaEv = 0.0;
+        if (autoShortSearchP98 > 0.001f && stats.longP98Linear > 0.001f) {
+            p98DeltaEv = Math.abs(Math.log(
+                    stats.longP98Linear / autoShortSearchP98) / Math.log(2.0));
+        }
+        double productDeltaEv = 0.0;
+        if (autoShortSearchLongProduct > 1.0 && stats.longExposureProduct > 1.0) {
+            productDeltaEv = Math.abs(Math.log(
+                    stats.longExposureProduct / autoShortSearchLongProduct) / Math.log(2.0));
+        }
+        // Do not reopen an exhausted tier search because a few clipped cells jitter
+        // around a threshold. A new search requires a real body-exposure change, a
+        // very large topology change, or both a substantial highlight-topology and
+        // P98 change. This permanently prevents the 1/240 <-> 1/480 table oscillation.
+        return productDeltaEv >= AUTO_SHORT_SCENE_RESET_EV
+                || veryLargeCellChange
+                || (largeCellChange && p98DeltaEv >= 0.30);
     }
 
     private void processHdrSceneStatsLocked(HdrGlView.SceneStats stats) {
@@ -1619,86 +1704,196 @@ final class CameraController {
 
     private double adaptBracketEvLocked(
             double currentEv, HdrGlView.SceneStats stats, boolean manual) {
-        double minEv = manual
-                ? Math.max(manualBracketFloorEv, AUTO_BRACKET_DEFAULT_EV + MANUAL_EXTRA_HEADROOM_EV)
-                : AUTO_BRACKET_DEFAULT_EV;
-        double maxEv = manual ? MANUAL_BRACKET_MAX_EV : AUTO_BRACKET_MAX_EV;
-        double shortTarget = manual ? MANUAL_SHORT_CLIP_TARGET : AUTO_SHORT_CLIP_TARGET;
+        if (!manual) return adaptAutoShortHeadroomEvLocked(currentEv, stats);
 
-        // V1.4.22 AUTO: localized recoverability owns additional SHORT headroom.
-        // A tiny clipped bulb/TV/reflection is allowed to demand a darker SHORT even
-        // when it occupies far less than the old 0.5% full-frame LONG-clip trigger.
-        boolean localLongDamage = stats.longRecoveryCells > 0;
-        boolean localShortHasSignal = stats.shortRecoverySignalFraction
-                >= AUTO_SHORT_RECOVERY_MIN_SIGNAL_FRACTION;
-        boolean autoNeedsMore = !manual
-                && localLongDamage
-                && localShortHasSignal
-                && (stats.shortRecoveryPeak > AUTO_SHORT_RECOVERY_TARGET_PEAK
-                        || stats.shortRecoveryNearClipFraction > 0.20f);
-
-        // MANUAL SAFE retains its prior global clipping contract. The user's SHORT
-        // slider remains the integration ceiling and may already intentionally cross
-        // the flicker-safe period.
+        double minEv = Math.max(
+                manualBracketFloorEv, AUTO_BRACKET_DEFAULT_EV + MANUAL_EXTRA_HEADROOM_EV);
+        double maxEv = MANUAL_BRACKET_MAX_EV;
         boolean meaningfulLongClip = stats.longMeaningfulClipFraction >= LONG_CLIP_TRIGGER_FRACTION;
         boolean manualShortFragile = stats.shortDarkFraction > 0.94f
                 || stats.overlapSamples < 12
                 || stats.overlapErrorEv > 0.50f
                 || !stats.shortTemporalReliable;
-        boolean manualNeedsMore = manual
-                && meaningfulLongClip
-                && stats.shortMeaningfulClipFraction > shortTarget
+        boolean wantsMore = meaningfulLongClip
+                && stats.shortMeaningfulClipFraction > MANUAL_SHORT_CLIP_TARGET
                 && !manualShortFragile;
-
-        boolean wantsMoreHeadroom = autoNeedsMore || manualNeedsMore;
-        boolean autoCanRelease = !manual && currentEv > minEv
-                && (!localLongDamage
-                        || (stats.shortRecoveryPeak < AUTO_SHORT_RECOVERY_RELEASE_PEAK
-                                && stats.shortRecoveryNearClipFraction <= 0.05f));
-        boolean manualCanRelease = manual
-                && !meaningfulLongClip
+        boolean wantsLess = !meaningfulLongClip
                 && stats.shortMeaningfulClipFraction <= SHORT_CLIP_RELEASE_FRACTION
                 && currentEv > minEv;
-        boolean wantsLessHeadroom = autoCanRelease || manualCanRelease;
 
-        if (wantsMoreHeadroom) {
+        if (wantsMore) {
             bracketIncreaseEvidence++;
             bracketDecreaseEvidence = 0;
             if (bracketIncreaseEvidence >= BRACKET_CONFIRM_UP_SAMPLES) {
                 bracketIncreaseEvidence = 0;
-                if (!manual) autoFastShortRecovery = true;
-                double stepEv = !manual && stats.shortRecoveryPeak >= 0.98f
-                        ? 0.75 : BRACKET_STEP_UP_EV;
-                double next = clampDouble(
-                        Math.min(maxEv, currentEv + stepEv), minEv, maxEv);
-                RuntimeLogger.event(
-                        manual ? "MANUAL_SHORT_HEADROOM" : "AUTO_SHORT_HEADROOM",
-                        String.format(
-                                Locale.US,
-                                "localLongCells=%d shortNear=%d nearFrac=%.3f shortPeak=%.3f signalFrac=%.3f bracket=%.2f->%.2fEV fast=%s",
-                                stats.longRecoveryCells, stats.shortRecoveryNearClipCells,
-                                stats.shortRecoveryNearClipFraction, stats.shortRecoveryPeak,
-                                stats.shortRecoverySignalFraction, currentEv, next,
-                                autoFastShortRecovery));
-                return next;
+                return clampDouble(
+                        Math.min(maxEv, currentEv + BRACKET_STEP_UP_EV), minEv, maxEv);
             }
-        } else if (wantsLessHeadroom) {
+        } else if (wantsLess) {
             bracketDecreaseEvidence++;
             bracketIncreaseEvidence = 0;
             if (bracketDecreaseEvidence >= BRACKET_CONFIRM_DOWN_SAMPLES) {
                 bracketDecreaseEvidence = 0;
-                double next = clampDouble(
+                return clampDouble(
                         Math.max(minEv, currentEv - BRACKET_STEP_DOWN_EV), minEv, maxEv);
-                if (!manual && !localLongDamage && next <= AUTO_BRACKET_DEFAULT_EV + 0.05) {
-                    autoFastShortRecovery = false;
-                }
-                return next;
             }
         } else {
             bracketIncreaseEvidence = 0;
             bracketDecreaseEvidence = 0;
         }
         return clampDouble(currentEv, minEv, maxEv);
+    }
+
+    private double adaptAutoShortHeadroomEvLocked(
+            double currentEv, HdrGlView.SceneStats stats) {
+        double minEv = AUTO_BRACKET_DEFAULT_EV;
+        double maxEv = AUTO_BRACKET_MAX_EV;
+        boolean localLongDamage = stats.longRecoveryCells > 0;
+
+        if (autoShortSearchSceneChangedLocked(stats)) {
+            autoShortSearchExhausted = false;
+            autoShortProbePending = false;
+            autoShortProbeEvidence = 0;
+            bracketIncreaseEvidence = 0;
+            RuntimeLogger.event(
+                    "SHORT_TIER",
+                    "scene-change reset current=" + String.format(Locale.US, "%.2fEV", currentEv));
+        }
+
+        if (!localLongDamage) {
+            autoShortProbePending = false;
+            autoShortSearchExhausted = false;
+            autoShortProbeEvidence = 0;
+            bracketIncreaseEvidence = 0;
+            if (currentEv > minEv) {
+                bracketDecreaseEvidence++;
+                if (bracketDecreaseEvidence >= BRACKET_CONFIRM_DOWN_SAMPLES) {
+                    bracketDecreaseEvidence = 0;
+                    double next = Math.max(minEv, currentEv - BRACKET_STEP_DOWN_EV);
+                    if (next <= minEv + 0.05) autoFastShortRecovery = false;
+                    return next;
+                }
+            } else {
+                bracketDecreaseEvidence = 0;
+                autoFastShortRecovery = false;
+            }
+            return clampDouble(currentEv, minEv, maxEv);
+        }
+        bracketDecreaseEvidence = 0;
+
+        if (autoShortProbePending) {
+            boolean modulationUnsafe = stats.shortFlickerEvidenceCoverage
+                    < AUTO_SHORT_FLICKER_MIN_COVERAGE
+                    || (stats.shortRowModulationEv >= AUTO_SHORT_FLICKER_MODULATION_EV
+                            && stats.shortRowCorrectionConfidence
+                                    < AUTO_SHORT_FLICKER_MIN_CONFIDENCE);
+            double usableGain = stats.shortRecoveryUsableFraction - autoShortProbeBaselineUsable;
+            double clipRelief = autoShortProbeBaselineNearClip
+                    - stats.shortRecoveryNearClipFraction;
+            double informationGain = Math.max(usableGain, clipRelief);
+            RuntimeLogger.event(
+                    "SHORT_GAIN_TEST",
+                    String.format(
+                            Locale.US,
+                            "baseline=%.2fEV probe=%.2fEV gain=%+.3f usable=%.3f near=%.3f rowMod=%.3fEV corr=%.3f coverage=%.3f",
+                            autoShortProbeBaselineEv, currentEv, informationGain,
+                            stats.shortRecoveryUsableFraction, stats.shortRecoveryNearClipFraction,
+                            stats.shortRowModulationEv, stats.shortRowCorrectionConfidence,
+                            stats.shortFlickerEvidenceCoverage));
+
+            if (modulationUnsafe) {
+                autoShortProbePending = false;
+                autoShortSearchExhausted = true;
+                autoFastShortRecovery = autoShortProbeBaselineFast;
+                autoShortSearchLongCells = stats.longRecoveryCells;
+                autoShortSearchP98 = stats.longP98Linear;
+                autoShortSearchLongProduct = stats.longExposureProduct;
+                RuntimeLogger.event(
+                        "FAST_SHORT_REJECT",
+                        String.format(
+                                Locale.US,
+                                "uncorrectable-field probe=%.2fEV rollback=%.2fEV rowMod=%.3f corr=%.3f coverage=%.3f",
+                                currentEv, autoShortProbeBaselineEv,
+                                stats.shortRowModulationEv, stats.shortRowCorrectionConfidence,
+                                stats.shortFlickerEvidenceCoverage));
+                return autoShortProbeBaselineEv;
+            }
+
+            if (informationGain >= AUTO_SHORT_INFO_GAIN_MIN
+                    || (stats.shortRecoveryNearClipFraction <= 0.05f
+                            && stats.shortRecoveryUsableFraction
+                                    >= autoShortProbeBaselineUsable)) {
+                autoShortProbePending = false;
+                autoShortProbeEvidence = 0;
+                RuntimeLogger.event(
+                        "FAST_SHORT_ACCEPT",
+                        String.format(
+                                Locale.US,
+                                "probe=%.2fEV gain=%+.3f usable=%.3f near=%.3f rowMod=%.3f corr=%.3f coverage=%.3f",
+                                currentEv, informationGain, stats.shortRecoveryUsableFraction,
+                                stats.shortRecoveryNearClipFraction, stats.shortRowModulationEv,
+                                stats.shortRowCorrectionConfidence,
+                                stats.shortFlickerEvidenceCoverage));
+            } else {
+                autoShortProbeEvidence++;
+                if (autoShortProbeEvidence >= AUTO_SHORT_PROBE_CONFIRM_SAMPLES) {
+                    autoShortProbePending = false;
+                    autoShortProbeEvidence = 0;
+                    autoShortSearchExhausted = true;
+                    autoFastShortRecovery = autoShortProbeBaselineFast;
+                    autoShortSearchLongCells = stats.longRecoveryCells;
+                    autoShortSearchP98 = stats.longP98Linear;
+                    autoShortSearchLongProduct = stats.longExposureProduct;
+                    RuntimeLogger.event(
+                            "FAST_SHORT_REJECT",
+                            String.format(
+                                    Locale.US,
+                                    "no-information-gain probe=%.2fEV rollback=%.2fEV gain=%+.3f",
+                                    currentEv, autoShortProbeBaselineEv, informationGain));
+                    return autoShortProbeBaselineEv;
+                }
+                return clampDouble(currentEv, minEv, maxEv);
+            }
+        }
+
+        if (autoShortSearchExhausted) {
+            return clampDouble(currentEv, minEv, maxEv);
+        }
+
+        boolean localShortHasSignal = stats.shortRecoverySignalFraction
+                >= AUTO_SHORT_RECOVERY_MIN_SIGNAL_FRACTION;
+        // Any SHORT-near-clipped cell inside a genuinely LONG-damaged region may
+        // request one darker probe. The probe is accepted only by measured information
+        // gain below, so small emitters are not ignored by a full-frame fraction and
+        // bright-but-uninformative emitters cannot drive an endless peak chase.
+        boolean unresolved = localShortHasSignal
+                && stats.shortRecoveryNearClipCells > 0;
+        if (!unresolved || currentEv >= maxEv - 0.01) {
+            bracketIncreaseEvidence = 0;
+            return clampDouble(currentEv, minEv, maxEv);
+        }
+
+        bracketIncreaseEvidence++;
+        if (bracketIncreaseEvidence < BRACKET_CONFIRM_UP_SAMPLES) {
+            return clampDouble(currentEv, minEv, maxEv);
+        }
+        bracketIncreaseEvidence = 0;
+        autoShortProbeBaselineEv = currentEv;
+        autoShortProbeBaselineUsable = stats.shortRecoveryUsableFraction;
+        autoShortProbeBaselineNearClip = stats.shortRecoveryNearClipFraction;
+        autoShortProbeBaselineFast = autoFastShortRecovery;
+        autoShortProbePending = true;
+        autoShortProbeEvidence = 0;
+        autoFastShortRecovery = true;
+        double next = Math.min(maxEv, currentEv + AUTO_SHORT_PROBE_STEP_EV);
+        RuntimeLogger.event(
+                "SHORT_TIER",
+                String.format(
+                        Locale.US,
+                        "probe %.2f->%.2fEV usable=%.3f near=%.3f cells=%d",
+                        currentEv, next, stats.shortRecoveryUsableFraction,
+                        stats.shortRecoveryNearClipFraction, stats.longRecoveryCells));
+        return next;
     }
 
     private void deriveAdaptiveAutoPairLocked() {
@@ -1717,7 +1912,8 @@ final class CameraController {
         double targetShortProduct = Math.max(1.0,
                 achievedLongProduct / Math.pow(2.0, autoAdaptiveBracketEv));
         ExposureSetting shortSetting = solveShortSettingForProductLocked(
-                targetShortProduct, autoLongExposureNs, autoFastShortRecovery);
+                targetShortProduct, autoLongExposureNs, achievedLongProduct,
+                AUTO_BRACKET_MAX_EV, autoFastShortRecovery);
         autoShortExposureNs = shortSetting.exposureNs;
         autoShortIso = shortSetting.iso;
     }
@@ -1750,7 +1946,8 @@ final class CameraController {
     }
 
     private ExposureSetting solveShortSettingForProductLocked(
-            double targetProduct, long longExposureNs, boolean allowFastRecovery) {
+            double targetProduct, long longExposureNs, double longProduct,
+            double maxBracketEv, boolean allowFastRecovery) {
         int minIso = sensorMinIsoLocked();
         long maxAllowed = Math.min(
                 clampExposure(longExposureNs),
@@ -1778,9 +1975,15 @@ final class CameraController {
                 // minimum-ISO SHORT is still saturated, preserving information wins.
                 // Use exact binary subdivisions of the measured mains period and keep
                 // sensor ISO at minimum; do not brighten the fast probe back up with ISO.
+                double minimumShortProduct = Math.max(
+                        1.0, longProduct / Math.pow(2.0, maxBracketEv));
+                long fastestAllowed = clampExposure((long) Math.ceil(
+                        minimumShortProduct / Math.max(1, minIso)));
                 long fast = period;
                 while (fast > desired && fast > 1L) {
-                    fast = Math.max(1L, fast / 2L);
+                    long candidate = Math.max(1L, fast / 2L);
+                    if (candidate < fastestAllowed) break;
+                    fast = candidate;
                 }
                 fast = Math.min(maxAllowed, clampExposure(fast));
                 return new ExposureSetting(fast, minIso);
@@ -1882,7 +2085,8 @@ final class CameraController {
         double targetShortProduct = Math.max(1.0,
                 achievedLongProduct / Math.pow(2.0, manualAdaptiveBracketEv));
         ExposureSetting shortSetting = solveShortSettingForProductLocked(
-                targetShortProduct, manualEffectiveLongExposureNs, false);
+                targetShortProduct, manualEffectiveLongExposureNs, achievedLongProduct,
+                MANUAL_BRACKET_MAX_EV, false);
 
         // In MANUAL SAFE the Short slider is a headroom ceiling, not a lock. The
         // adaptive engine may go darker/shorter when highlights require it, but never
@@ -1944,6 +2148,18 @@ final class CameraController {
 
     private int activeLongIso() {
         return autoHdrExposure ? autoLongIso : manualEffectiveLongIso;
+    }
+
+    private boolean flickerGuardRequiredForShortLocked(
+            long shortExposure, long longExposure) {
+        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) return false;
+        long period = flickerPeriodNs(sceneFlicker);
+        if (period > 0L) {
+            return shortExposure + 50_000L < period;
+        }
+        // Unknown/PWM: any SHORT integration materially faster than LONG is treated
+        // as potentially phase-sensitive until the pair-rate field proves otherwise.
+        return shortExposure * 5L < Math.max(1L, longExposure) * 4L;
     }
 
     private static String flickerLabel(int flicker) {

@@ -6,6 +6,8 @@ uniform sampler2D normalTex;
 uniform sampler2D shortTex;
 uniform sampler2D longTex;
 uniform sampler2D shortReliabilityTex;
+uniform sampler2D flickerFieldTex;
+uniform int flickerGuardRequired;
 uniform int mode;
 uniform int rotationQuarterTurns;
 uniform int haveNormal;
@@ -185,7 +187,14 @@ void fusionSample(
     vec3 longRgb = texture(longTex, uv).rgb;
     vec3 shortRgb = texture(shortTex, uv).rgb;
     longScene = srgbToLinear(longRgb);
-    vec3 shortScene = calibratedShortScene(shortRgb, ratio);
+    vec2 fieldUv = clamp(
+        uv * reliabilityUvScale + reliabilityUvOffset, vec2(0.0), vec2(1.0));
+    vec3 fieldState = texture(flickerFieldTex, fieldUv).rgb;
+    float guardRequired = flickerGuardRequired == 1 ? 1.0 : 0.0;
+    float localGainEv = mix(-1.5, 1.5, fieldState.r) * guardRequired;
+    float fieldLumaTrust = mix(1.0, clamp(fieldState.g, 0.0, 1.0), guardRequired);
+    float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);
+    vec3 shortScene = calibratedShortScene(shortRgb, ratio) * exp2(localGainEv);
     float longSceneLuma = luma3(longScene);
 
     float shoulderNeed = longHighlightShoulder(longRgb, longScene);
@@ -196,7 +205,7 @@ void fusionSample(
     float shortSecond = second3(shortRgb);
     float lumaSafe = 1.0 - smoothstep(0.975, 0.997, shortSecond);
     float signalSafe = smoothstep(0.008, 0.025, shortEncodedLuma);
-    float shortUsable = min(lumaSafe, signalSafe);
+    float shortUsable = min(lumaSafe, signalSafe) * fieldLumaTrust;
     float corePermission = smoothstep(0.25, 0.55, shortUsable);
     coreMask = clippedCore * corePermission;
 
@@ -209,7 +218,7 @@ void fusionSample(
     // clipped-core mask can feather into near-clipped pixels on the same surface.
     damageSupport = max(
         coreMask,
-        smoothstep(0.38, 0.86, shoulderNeed * lumaSafe * signalSafe));
+        smoothstep(0.38, 0.86, shoulderNeed * shortUsable));
 
     // V1.4.21 validity-aware boundary guide. LONG defines edges while it still
     // carries scene information. As LONG loses highlight structure, the calibrated
@@ -220,10 +229,19 @@ void fusionSample(
         smoothstep(0.20, 0.85, shoulderNeed * shortUsable));
     guideLuma = mix(longSceneLuma, shortSceneLuma, shortGuideAuthority);
 
-    vec2 reliabilityUv = clamp(uv * reliabilityUvScale + reliabilityUvOffset, vec2(0.0), vec2(1.0));
-    vec2 temporalTrust = texture(shortReliabilityTex, reliabilityUv).rg;
+    // V1.4.23 visible chroma is pair-rate and fail-closed. The slow 200 ms
+    // reliability history cannot switch visible color. Local SHORT/LONG
+    // chromaticity disagreement also rejects color immediately while preserving
+    // usable SHORT luminance/detail.
     float rgbSafe = 1.0 - smoothstep(0.955, 0.985, shortPeak);
-    float colorTrust = clamp(temporalTrust.g * rgbSafe * agreement, 0.0, 1.0);
+    float longColorValidity = 1.0 - smoothstep(0.94, 0.985, max3(longRgb));
+    vec3 longChromaticity = longScene / max(longSceneLuma, 0.0005);
+    vec3 shortChromaticity = shortScene / max(shortSceneLuma, 0.0005);
+    float localChromaDelta = max3(abs(longChromaticity - shortChromaticity));
+    float localChromaAgreement = 1.0 - smoothstep(0.08, 0.28, localChromaDelta);
+    float chromaGuard = mix(1.0, localChromaAgreement, longColorValidity);
+    float colorTrust = clamp(
+        fieldChromaTrust * rgbSafe * agreement * chromaGuard, 0.0, 1.0);
     float longSpread = max3(longRgb) - min3(longRgb);
     float shortSpread = max3(shortRgb) - min3(shortRgb);
     float neutralLongClip = (1.0 - smoothstep(0.015, 0.060, longSpread))
@@ -292,13 +310,20 @@ vec3 multiscaleHighlightRecovery(vec2 uv, float ratio) {
     float blurredMask = min(damageSupport, maskAccum / max(weightAccum, 0.0001));
     float ownershipMask = clamp(max(coreMask, blurredMask), 0.0, 1.0);
 
-    // Same-domain fusion: apply the identical highlight operator to BOTH endpoints,
-    // then interpolate with one ownership field. Fade that common shoulder in with
-    // ownership so untouched LONG pixels remain appearance authority.
-    vec3 mappedLong = mapRecoveredHighlight(longCenter, ratio);
+    // V1.4.23 bounded single-ownership reconstruction. Source selection happens
+    // exactly once in calibrated scene-linear radiance. Only after that do we map
+    // the recovered highlight for display, and that mapping is clamped to the
+    // physical LONG / mapped-SHORT endpoint range so it cannot invent a halo/ring.
+    vec3 fusedRadiance = mix(longCenter, shortCenter, ownershipMask);
+    vec3 boundedRadiance = clamp(
+        fusedRadiance, min(longCenter, shortCenter), max(longCenter, shortCenter));
+    vec3 mappedFused = mapRecoveredHighlight(boundedRadiance, ratio);
     vec3 mappedShort = mapRecoveredHighlight(shortCenter, ratio);
-    vec3 recoveredDisplay = mix(mappedLong, mappedShort, ownershipMask);
-    return mix(longCenter, recoveredDisplay, ownershipMask);
+    vec3 displayLow = min(longCenter, mappedShort);
+    vec3 displayHigh = max(longCenter, mappedShort);
+    vec3 boundedMapped = clamp(mappedFused, displayLow, displayHigh);
+    float toneWeight = ownershipMask;
+    return mix(boundedRadiance, boundedMapped, toneWeight);
 }
 
 void main() {

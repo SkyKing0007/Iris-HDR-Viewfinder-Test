@@ -38,6 +38,9 @@ final class JpegFusion {
     private static final float PHOTO_SCALE_MAX = 1.50f;
     private static final int PHOTO_MIN_BIN_SAMPLES = 24;
     private static final int TILE_ROWS = 512;
+    private static final int FLICKER_FIELD_WIDTH = 16;
+    private static final int FLICKER_ROW_HEIGHT = 64;
+    private static final int FLICKER_FIELD_CHANNELS = 3;
     private static final int DEFAULT_LUMA_RELIABILITY = 224;
     private static final int DEFAULT_CHROMA_RELIABILITY = 128;
 
@@ -48,7 +51,8 @@ final class JpegFusion {
             byte[] shortJpeg,
             byte[] longJpeg,
             double exposureRatio,
-            byte[] shortReliabilityMap) throws Exception {
+            byte[] shortReliabilityMap,
+            boolean flickerGuardRequired) throws Exception {
         long allStart = System.nanoTime();
         long stageStart = allStart;
         Bitmap shortBitmap = decodeUpright(shortJpeg);
@@ -74,10 +78,16 @@ final class JpegFusion {
                 "ms=" + elapsedMs(stageStart)
                         + " scale=" + Arrays.toString(photoCurve.relativeScale));
 
+        stageStart = System.nanoTime();
+        byte[] flickerField = learnFlickerField(shortBitmap, longBitmap, ratio, photoCurve);
+        RuntimeLogger.event("FUSION_FLICKER_FIELD", "ms=" + elapsedMs(stageStart));
+
         Bitmap output;
         stageStart = System.nanoTime();
         try (GpuStillFusion gpu = new GpuStillFusion(context)) {
-            output = gpu.fuse(shortBitmap, longBitmap, ratio, photoCurve, shortReliabilityMap);
+            output = gpu.fuse(
+                    shortBitmap, longBitmap, ratio, photoCurve,
+                    shortReliabilityMap, flickerField, flickerGuardRequired);
         }
         RuntimeLogger.event(
                 "FUSION_GPU",
@@ -116,6 +126,7 @@ final class JpegFusion {
         private int shortTexture;
         private int longTexture;
         private int reliabilityTexture;
+        private int flickerFieldTexture;
         private int outputTexture;
         private int framebuffer;
 
@@ -130,7 +141,9 @@ final class JpegFusion {
                 Bitmap longBitmap,
                 float ratio,
                 PhotoCurve photoCurve,
-                byte[] reliabilityMap) {
+                byte[] reliabilityMap,
+                byte[] flickerField,
+                boolean flickerGuardRequired) {
             int width = shortBitmap.getWidth();
             int height = shortBitmap.getHeight();
             int minDimension = Math.max(1, Math.min(width, height));
@@ -155,9 +168,15 @@ final class JpegFusion {
             allocateRgbaTexture(shortTexture, width, maxExpandedRows);
             allocateRgbaTexture(longTexture, width, maxExpandedRows);
             allocateRgbaTexture(outputTexture, width, TILE_ROWS);
+            allocateRgbTexture(
+                    flickerFieldTexture, FLICKER_FIELD_WIDTH, FLICKER_ROW_HEIGHT);
             uploadReliability(reliabilityMap);
-            attachOutputTexture();
+            uploadFlickerField(flickerField);
             configureStaticUniforms(ratio, photoCurve, fusionRadius, width, maxExpandedRows);
+            GLES30.glUseProgram(program);
+            GLES30.glUniform1i(
+                    GLES30.glGetUniformLocation(program, "flickerGuardRequired"),
+                    flickerGuardRequired ? 1 : 0);
 
             int tiles = 0;
             for (int y = 0; y < height; y += TILE_ROWS) {
@@ -180,6 +199,8 @@ final class JpegFusion {
                 longTile.setPixels(uploadPixels, 0, width, 0, 0, width, uploadRows);
                 uploadBitmap(longTexture, longTile);
 
+                attachOutputTexture();
+                GLES30.glUseProgram(program);
                 float v0 = coreOffset / (float) maxExpandedRows;
                 float v1 = (coreOffset + rows) / (float) maxExpandedRows;
                 setTileUvs(v0, v1);
@@ -283,6 +304,7 @@ final class JpegFusion {
             shortTexture = createTexture2d();
             longTexture = createTexture2d();
             reliabilityTexture = createTexture2d();
+            flickerFieldTexture = createTexture2d();
             outputTexture = createTexture2d();
             int[] fb = new int[1];
             GLES30.glGenFramebuffers(1, fb, 0);
@@ -292,6 +314,7 @@ final class JpegFusion {
             bindSampler(program, "shortTex", shortTexture, 1);
             bindSampler(program, "longTex", longTexture, 2);
             bindSampler(program, "shortReliabilityTex", reliabilityTexture, 3);
+            bindSampler(program, "flickerFieldTex", flickerFieldTexture, 4);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(program, "mode"), 2);
             GLES30.glUniform1i(
                     GLES30.glGetUniformLocation(program, "rotationQuarterTurns"), 0);
@@ -346,6 +369,23 @@ final class JpegFusion {
             checkGl("upload reliability");
         }
 
+        private void uploadFlickerField(byte[] fieldBytes) {
+            int expected = FLICKER_FIELD_WIDTH * FLICKER_ROW_HEIGHT * FLICKER_FIELD_CHANNELS;
+            byte[] bytes = fieldBytes;
+            if (bytes == null || bytes.length != expected) {
+                bytes = defaultFlickerField();
+            }
+            ByteBuffer buffer = ByteBuffer.allocateDirect(bytes.length)
+                    .order(ByteOrder.nativeOrder());
+            buffer.put(bytes).flip();
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, flickerFieldTexture);
+            GLES30.glTexSubImage2D(
+                    GLES30.GL_TEXTURE_2D, 0, 0, 0,
+                    FLICKER_FIELD_WIDTH, FLICKER_ROW_HEIGHT,
+                    GLES30.GL_RGB, GLES30.GL_UNSIGNED_BYTE, buffer);
+            checkGl("upload flicker field");
+        }
+
         private void uploadBitmap(int texture, Bitmap bitmap) {
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
             GLUtils.texSubImage2D(GLES30.GL_TEXTURE_2D, 0, 0, 0, bitmap);
@@ -391,6 +431,7 @@ final class JpegFusion {
             bindSampler(program, "shortTex", shortTexture, 1);
             bindSampler(program, "longTex", longTexture, 2);
             bindSampler(program, "shortReliabilityTex", reliabilityTexture, 3);
+            bindSampler(program, "flickerFieldTex", flickerFieldTexture, 4);
         }
 
         @Override
@@ -400,7 +441,8 @@ final class JpegFusion {
             // objects/context so still fusion can never tear down the live viewfinder.
             if (eglDisplay != EGL14.EGL_NO_DISPLAY
                     && eglContext != EGL14.EGL_NO_CONTEXT) {
-                int[] textures = {shortTexture, longTexture, reliabilityTexture, outputTexture};
+                int[] textures = {
+                        shortTexture, longTexture, reliabilityTexture, flickerFieldTexture, outputTexture};
                 GLES30.glDeleteTextures(textures.length, textures, 0);
                 if (framebuffer != 0) {
                     int[] framebuffers = {framebuffer};
@@ -462,6 +504,14 @@ final class JpegFusion {
                     GLES30.GL_UNSIGNED_BYTE,
                     null);
             checkGl("allocate " + width + "x" + height);
+        }
+
+        private static void allocateRgbTexture(int texture, int width, int height) {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
+            GLES30.glTexImage2D(
+                    GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGB8, width, height, 0,
+                    GLES30.GL_RGB, GLES30.GL_UNSIGNED_BYTE, null);
+            checkGl("allocate RGB " + width + "x" + height);
         }
 
         private static void bindSampler(int program, String name, int texture, int unit) {
@@ -561,6 +611,131 @@ final class JpegFusion {
                         + Integer.toHexString(error));
             }
         }
+    }
+
+    private static byte[] learnFlickerField(
+            Bitmap shortBitmap, Bitmap longBitmap, float ratio, PhotoCurve photoCurve) {
+        byte[] field = defaultFlickerField();
+        int width = shortBitmap.getWidth();
+        int height = shortBitmap.getHeight();
+        for (int fy = 0; fy < FLICKER_ROW_HEIGHT; fy++) {
+            for (int fx = 0; fx < FLICKER_FIELD_WIDTH; fx++) {
+                float logGainSum = 0.0f;
+                float logGainSqSum = 0.0f;
+                float chromaDeltaSum = 0.0f;
+                float weightSum = 0.0f;
+                for (int sx = 0; sx < 8; sx++) {
+                        float ux = (fx + (sx + 0.5f) / 8.0f) / FLICKER_FIELD_WIDTH;
+                        float uy = (fy + 0.5f) / FLICKER_ROW_HEIGHT;
+                        int x = Math.max(0, Math.min(width - 1, Math.round(ux * (width - 1))));
+                        int y = Math.max(0, Math.min(height - 1, Math.round(uy * (height - 1))));
+                        int sp = shortBitmap.getPixel(x, y);
+                        int lp = longBitmap.getPixel(x, y);
+                        int sr = (sp >>> 16) & 0xFF;
+                        int sg = (sp >>> 8) & 0xFF;
+                        int sb = sp & 0xFF;
+                        int lr = (lp >>> 16) & 0xFF;
+                        int lg = (lp >>> 8) & 0xFF;
+                        int lb = lp & 0xFF;
+                        float longMin = Math.min(lr, Math.min(lg, lb)) / 255.0f;
+                        float longMax = Math.max(lr, Math.max(lg, lb)) / 255.0f;
+                        float shortMin = Math.min(sr, Math.min(sg, sb)) / 255.0f;
+                        float shortMax = Math.max(sr, Math.max(sg, sb)) / 255.0f;
+                        float longValid = smoothstep(0.025f, 0.070f, longMin)
+                                * (1.0f - smoothstep(0.86f, 0.93f, longMax));
+                        float shortValid = smoothstep(0.008f, 0.020f, shortMin)
+                                * (1.0f - smoothstep(0.86f, 0.93f, shortMax));
+                        float weight = longValid * shortValid;
+                        if (weight <= 0.02f) continue;
+
+                        float longR = SRGB_TO_LINEAR[lr];
+                        float longG = SRGB_TO_LINEAR[lg];
+                        float longB = SRGB_TO_LINEAR[lb];
+                        float longLuma = 0.2126f * longR + 0.7152f * longG + 0.0722f * longB;
+                        float shortR = SRGB_TO_LINEAR[sr] * ratio;
+                        float shortG = SRGB_TO_LINEAR[sg] * ratio;
+                        float shortB = SRGB_TO_LINEAR[sb] * ratio;
+                        float normalizedLuma = 0.2126f * shortR + 0.7152f * shortG + 0.0722f * shortB;
+                        float photoScale = shortPhotoScaleForLuma(normalizedLuma, photoCurve);
+                        shortR *= photoScale;
+                        shortG *= photoScale;
+                        shortB *= photoScale;
+                        float shortLuma = normalizedLuma * photoScale;
+                        if (longLuma <= 0.002f || shortLuma <= 0.002f) continue;
+
+                        float gainEv = clamp(
+                                (float) (Math.log(longLuma / shortLuma) / Math.log(2.0)),
+                                -1.5f, 1.5f);
+                        float invLong = 1.0f / Math.max(longLuma, 0.0005f);
+                        float invShort = 1.0f / Math.max(shortLuma, 0.0005f);
+                        float chromaDelta = Math.max(
+                                Math.abs(longR * invLong - shortR * invShort),
+                                Math.max(
+                                        Math.abs(longG * invLong - shortG * invShort),
+                                        Math.abs(longB * invLong - shortB * invShort)));
+                        logGainSum += gainEv * weight;
+                        logGainSqSum += gainEv * gainEv * weight;
+                        chromaDeltaSum += chromaDelta * weight;
+                        weightSum += weight;
+                    }
+
+                int index = (fy * FLICKER_FIELD_WIDTH + fx) * FLICKER_FIELD_CHANNELS;
+                if (weightSum < 1.20f) continue;
+                float meanEv = logGainSum / weightSum;
+                float varianceEv = Math.max(0.0f, logGainSqSum / weightSum - meanEv * meanEv);
+                float sigmaEv = (float) Math.sqrt(varianceEv);
+                float evidence = smoothstep(1.20f, 4.00f, weightSum);
+                float consistency = 1.0f - smoothstep(0.12f, 0.38f, sigmaEv);
+                float amplitudeTrust = 1.0f - smoothstep(1.35f, 1.50f, Math.abs(meanEv));
+                float lumaTrust = evidence * consistency * amplitudeTrust;
+                float chromaMean = chromaDeltaSum / weightSum;
+                float chromaTrust = lumaTrust
+                        * (1.0f - smoothstep(0.045f, 0.140f, chromaMean));
+                float correctedEv = clamp(meanEv, -1.5f, 1.5f) * lumaTrust;
+                field[index] = encodeUnit(correctedEv / 3.0f + 0.5f);
+                field[index + 1] = encodeUnit(lumaTrust);
+                field[index + 2] = encodeUnit(chromaTrust);
+            }
+        }
+        return field;
+    }
+
+    private static byte[] defaultFlickerField() {
+        byte[] field = new byte[
+                FLICKER_FIELD_WIDTH * FLICKER_ROW_HEIGHT * FLICKER_FIELD_CHANNELS];
+        for (int i = 0; i < FLICKER_FIELD_WIDTH * FLICKER_ROW_HEIGHT; i++) {
+            field[i * FLICKER_FIELD_CHANNELS] = (byte) 128;
+            field[i * FLICKER_FIELD_CHANNELS + 1] = 0;
+            field[i * FLICKER_FIELD_CHANNELS + 2] = 0;
+        }
+        return field;
+    }
+
+    private static byte encodeUnit(float value) {
+        int encoded = Math.round(clamp(value, 0.0f, 1.0f) * 255.0f);
+        return (byte) (encoded & 0xFF);
+    }
+
+    private static float smoothstep(float edge0, float edge1, float value) {
+        float t = clamp((value - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    }
+
+    private static float shortPhotoScaleForLuma(float normalizedLuma, PhotoCurve photoCurve) {
+        float value = Math.max(normalizedLuma, 0.00001f);
+        if (value <= PHOTO_LUMA_KNOTS[0]) return photoCurve.relativeScale[0];
+        for (int i = 1; i < PHOTO_KNOT_COUNT; i++) {
+            if (value <= PHOTO_LUMA_KNOTS[i]) {
+                float low = PHOTO_LUMA_KNOTS[i - 1];
+                float high = PHOTO_LUMA_KNOTS[i];
+                float t = clamp(
+                        (float) (Math.log(value / low) / Math.log(high / low)),
+                        0.0f, 1.0f);
+                return photoCurve.relativeScale[i - 1]
+                        + (photoCurve.relativeScale[i] - photoCurve.relativeScale[i - 1]) * t;
+            }
+        }
+        return photoCurve.relativeScale[PHOTO_KNOT_COUNT - 1];
     }
 
     private static PhotoCurve learnPhotoCurve(

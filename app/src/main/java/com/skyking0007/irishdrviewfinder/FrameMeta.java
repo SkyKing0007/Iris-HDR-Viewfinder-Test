@@ -12,16 +12,19 @@ final class FrameMeta {
     final long exposureTimeNs;
     final int iso;
     final long exposureGeneration;
+    final boolean flickerGuardRequired;
 
     FrameMeta(
             String kind, long frameNumber, long sensorTimestampNs,
-            long exposureTimeNs, int iso, long exposureGeneration) {
+            long exposureTimeNs, int iso, long exposureGeneration,
+            boolean flickerGuardRequired) {
         this.kind = kind;
         this.frameNumber = frameNumber;
         this.sensorTimestampNs = sensorTimestampNs;
         this.exposureTimeNs = exposureTimeNs;
         this.iso = iso;
         this.exposureGeneration = exposureGeneration;
+        this.flickerGuardRequired = flickerGuardRequired;
     }
 
     double exposureProduct() {

@@ -55,6 +55,14 @@ final class HdrGlView extends GLSurfaceView {
         final float shortRecoveryNearClipFraction;
         final float shortRecoveryPeak;
         final float shortRecoverySignalFraction;
+        // V1.4.23: information-gain and current-pair flicker evidence. A darker
+        // SHORT tier is useful only when it increases valid recovery and can be
+        // normalized against stable LONG overlap.
+        final float shortRecoveryUsableFraction;
+        final float shortRowModulationEv;
+        final float shortRowCorrectionConfidence;
+        final float shortFlickerEvidenceCoverage;
+        final float shortPairChromaTrust;
         final float shortDarkFraction;
         final float calibration;
         final float overlapErrorEv;
@@ -81,6 +89,11 @@ final class HdrGlView extends GLSurfaceView {
                 float shortRecoveryNearClipFraction,
                 float shortRecoveryPeak,
                 float shortRecoverySignalFraction,
+                float shortRecoveryUsableFraction,
+                float shortRowModulationEv,
+                float shortRowCorrectionConfidence,
+                float shortFlickerEvidenceCoverage,
+                float shortPairChromaTrust,
                 float shortDarkFraction,
                 float calibration,
                 float overlapErrorEv,
@@ -105,6 +118,11 @@ final class HdrGlView extends GLSurfaceView {
             this.shortRecoveryNearClipFraction = shortRecoveryNearClipFraction;
             this.shortRecoveryPeak = shortRecoveryPeak;
             this.shortRecoverySignalFraction = shortRecoverySignalFraction;
+            this.shortRecoveryUsableFraction = shortRecoveryUsableFraction;
+            this.shortRowModulationEv = shortRowModulationEv;
+            this.shortRowCorrectionConfidence = shortRowCorrectionConfidence;
+            this.shortFlickerEvidenceCoverage = shortFlickerEvidenceCoverage;
+            this.shortPairChromaTrust = shortPairChromaTrust;
             this.shortDarkFraction = shortDarkFraction;
             this.calibration = calibration;
             this.overlapErrorEv = overlapErrorEv;
@@ -209,6 +227,8 @@ final class HdrGlView extends GLSurfaceView {
         private static final int STATS_WIDTH = 32;
         private static final int STATS_HEIGHT = 24;
         private static final int STATS_PIXELS = STATS_WIDTH * STATS_HEIGHT;
+        private static final int FLICKER_FIELD_WIDTH = 16;
+        private static final int FLICKER_ROW_HEIGHT = 64;
         private static final long STATS_INTERVAL_NS = 200_000_000L;
         private static final float MEANINGFUL_CLIP_CHANNEL = 0.992f;
         private static final float MEANINGFUL_CLIP_LUMA = 0.72f;
@@ -220,6 +240,8 @@ final class HdrGlView extends GLSurfaceView {
         private static final float RECOVERY_LONG_LUMA = 0.60f;
         private static final float RECOVERY_SHORT_NEAR_CLIP = 0.900f;
         private static final float RECOVERY_SHORT_SIGNAL = 0.020f;
+        private static final float RECOVERY_SHORT_USABLE_SECOND = 0.940f;
+        private static final float ROW_MODULATION_REPORT_EV = 0.10f;
         // V1.4.18 temporal continuity: luma/detail trust releases gradually so one
         // marginal SHORT sample cannot make a recoverable highlight blink off. Chroma
         // releases faster so unstable processed-ISP tint is rejected before detail.
@@ -238,7 +260,7 @@ final class HdrGlView extends GLSurfaceView {
         private static final float PHOTO_SCALE_MIN = 0.60f;
         private static final float PHOTO_SCALE_MAX = 1.50f;
         private static final float PHOTO_MAX_UPDATE_EV = 0.06f;
-        private static final float PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.35f;
+        private static final float PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.0f;
         private static final float PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND = 1.20f;
         private static final long PHOTO_VISIBLE_FAST_NS = 650_000_000L;
         private static final float PHOTO_SHORT_ONLY_MODULATION_EV = 0.12f;
@@ -261,6 +283,7 @@ final class HdrGlView extends GLSurfaceView {
 
         private int oesProgram;
         private int copyProgram;
+        private int flickerFieldProgram;
         private int displayProgram;
         private int externalTexture;
         private int normalTexture;
@@ -270,6 +293,7 @@ final class HdrGlView extends GLSurfaceView {
         private int stagingLongTexture;
         private int statsTexture;
         private int shortReliabilityTexture;
+        private int flickerFieldTexture;
         private int framebuffer;
         private SurfaceTexture surfaceTexture;
         private final ByteBuffer longStatsBuffer = ByteBuffer.allocateDirect(STATS_PIXELS * 4)
@@ -344,9 +368,11 @@ final class HdrGlView extends GLSurfaceView {
             String vertexShader = loadAsset(context, "shaders/fullscreen.vert");
             String oesShader = loadAsset(context, "shaders/oes_to_rgb.frag");
             String copyShader = loadAsset(context, "shaders/copy_2d.frag");
+            String flickerFieldShader = loadAsset(context, "shaders/flicker_field.frag");
             String displayShader = loadAsset(context, "shaders/hdr_display.frag");
             oesProgram = buildProgram(vertexShader, oesShader);
             copyProgram = buildProgram(vertexShader, copyShader);
+            flickerFieldProgram = buildProgram(vertexShader, flickerFieldShader);
             displayProgram = buildProgram(vertexShader, displayShader);
 
             externalTexture = createExternalTexture();
@@ -359,6 +385,8 @@ final class HdrGlView extends GLSurfaceView {
             allocateRgbTexture(statsTexture, STATS_WIDTH, STATS_HEIGHT);
             shortReliabilityTexture = createTexture2d();
             allocateReliabilityTexture(shortReliabilityTexture);
+            flickerFieldTexture = createTexture2d();
+            allocateRgbTexture(flickerFieldTexture, FLICKER_FIELD_WIDTH, FLICKER_ROW_HEIGHT);
             for (PendingFrame pending : pendingFrames) {
                 pending.texture = createTexture2d();
                 pending.occupied = false;
@@ -619,12 +647,46 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
         }
 
+        private void renderFlickerRowField(float ratio) {
+            if (!haveShort || !haveLong || flickerFieldTexture == 0) return;
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+            GLES30.glFramebufferTexture2D(
+                    GLES30.GL_FRAMEBUFFER,
+                    GLES30.GL_COLOR_ATTACHMENT0,
+                    GLES30.GL_TEXTURE_2D,
+                    flickerFieldTexture,
+                    0);
+            GLES30.glViewport(0, 0, FLICKER_FIELD_WIDTH, FLICKER_ROW_HEIGHT);
+            GLES30.glUseProgram(flickerFieldProgram);
+            bindQuad();
+            bindSampler2d(flickerFieldProgram, "shortTex", shortTexture, 0);
+            bindSampler2d(flickerFieldProgram, "longTex", longTexture, 1);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(flickerFieldProgram, "exposureRatio"), ratio);
+            GLES30.glUniform4f(
+                    GLES30.glGetUniformLocation(flickerFieldProgram, "shortPhotoScaleA"),
+                    shortPhotoScale[0], shortPhotoScale[1],
+                    shortPhotoScale[2], shortPhotoScale[3]);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(flickerFieldProgram, "shortPhotoScaleB"),
+                    shortPhotoScale[4]);
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
+        }
+
         private void drawDisplay() {
+            if (surfaceWidth <= 0 || surfaceHeight <= 0) return;
+            float ratio = 1.0f;
+            if (lastShortMeta != null && lastLongMeta != null) {
+                double r = lastLongMeta.exposureProduct() / lastShortMeta.exposureProduct();
+                ratio = (float) Math.max(1.0, Math.min(65_536.0, r));
+            }
+            advanceVisiblePhotoCurve();
+            renderFlickerRowField(ratio);
+
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
             GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight);
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT);
-            if (surfaceWidth <= 0 || surfaceHeight <= 0) return;
-
             GLES30.glUseProgram(displayProgram);
             bindQuad();
             bindSampler2d(displayProgram, "normalTex", normalTexture, 0);
@@ -639,12 +701,6 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveNormal"), haveNormal ? 1 : 0);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveShort"), haveShort ? 1 : 0);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveLong"), haveLong ? 1 : 0);
-            float ratio = 1.0f;
-            if (lastShortMeta != null && lastLongMeta != null) {
-                double r = lastLongMeta.exposureProduct() / lastShortMeta.exposureProduct();
-                ratio = (float) Math.max(1.0, Math.min(65_536.0, r));
-            }
-            advanceVisiblePhotoCurve();
             GLES30.glUniform1f(GLES30.glGetUniformLocation(displayProgram, "exposureRatio"), ratio);
             GLES30.glUniform4f(
                     GLES30.glGetUniformLocation(displayProgram, "shortPhotoScaleA"),
@@ -660,6 +716,10 @@ final class HdrGlView extends GLSurfaceView {
                     fusionRadiusPixels / Math.max(1.0f, frameWidth),
                     fusionRadiusPixels / Math.max(1.0f, frameHeight));
             bindSampler2d(displayProgram, "shortReliabilityTex", shortReliabilityTexture, 3);
+            bindSampler2d(displayProgram, "flickerFieldTex", flickerFieldTexture, 4);
+            GLES30.glUniform1i(
+                    GLES30.glGetUniformLocation(displayProgram, "flickerGuardRequired"),
+                    lastShortMeta != null && lastShortMeta.flickerGuardRequired ? 1 : 0);
             GLES30.glUniform2f(
                     GLES30.glGetUniformLocation(displayProgram, "reliabilityUvScale"),
                     1.0f, 1.0f);
@@ -721,8 +781,13 @@ final class HdrGlView extends GLSurfaceView {
             int longRecoveryCells = 0;
             int shortRecoveryNearClipCells = 0;
             int shortRecoverySignalCells = 0;
+            int shortRecoveryUsableCells = 0;
             float shortRecoveryPeak = 0.0f;
             int shortDark = 0;
+            float[] rowLogGainSum = new float[STATS_HEIGHT];
+            float[] rowLogGainSqSum = new float[STATS_HEIGHT];
+            float[] rowChromaSum = new float[STATS_HEIGHT];
+            int[] rowOverlapCount = new int[STATS_HEIGHT];
 
             for (int i = 0; i < STATS_PIXELS; i++) {
                 int o = i * 4;
@@ -772,6 +837,9 @@ final class HdrGlView extends GLSurfaceView {
                     }
                     if (shortLuma >= RECOVERY_SHORT_SIGNAL) {
                         shortRecoverySignalCells++;
+                        if (shortSecond < RECOVERY_SHORT_USABLE_SECOND) {
+                            shortRecoveryUsableCells++;
+                        }
                     }
                 }
                 if (shortLuma < 0.008f) shortDark++;
@@ -846,9 +914,25 @@ final class HdrGlView extends GLSurfaceView {
                         && lr8 < 0.90f && lg8 < 0.90f && lb8 < 0.90f;
                 boolean validShort = sr8 > 0.015f && sg8 > 0.015f && sb8 > 0.015f
                         && sr8 < 0.90f && sg8 < 0.90f && sb8 < 0.90f;
-                if (validLong && validShort && ll > 0.015f && sl > 0.015f
-                        && errorCount < errors.length) {
-                    errors[errorCount++] = (float) Math.abs(Math.log(sl / ll) / Math.log(2.0));
+                if (validLong && validShort && ll > 0.015f && sl > 0.015f) {
+                    if (errorCount < errors.length) {
+                        errors[errorCount++] = (float) Math.abs(
+                                Math.log(sl / ll) / Math.log(2.0));
+                    }
+                    int row = i / STATS_WIDTH;
+                    float logGain = clampFloat(
+                            (float) (Math.log(ll / sl) / Math.log(2.0)), -1.5f, 1.5f);
+                    float invLl = 1.0f / Math.max(ll, 0.0005f);
+                    float invSl = 1.0f / Math.max(sl, 0.0005f);
+                    float chromaDelta = Math.max(
+                            Math.abs(lr * invLl - sr * invSl),
+                            Math.max(
+                                    Math.abs(lg * invLl - sg * invSl),
+                                    Math.abs(lb * invLl - sb * invSl)));
+                    rowLogGainSum[row] += logGain;
+                    rowLogGainSqSum[row] += logGain * logGain;
+                    rowChromaSum[row] += chromaDelta;
+                    rowOverlapCount[row]++;
                 }
 
                 float longMax = Math.max(lr8, Math.max(lg8, lb8));
@@ -920,6 +1004,46 @@ final class HdrGlView extends GLSurfaceView {
                     : shortRecoveryNearClipCells / (float) longRecoveryCells;
             float recoverySignalFraction = longRecoveryCells == 0 ? 0.0f
                     : shortRecoverySignalCells / (float) longRecoveryCells;
+            float recoveryUsableFraction = longRecoveryCells == 0 ? 0.0f
+                    : shortRecoveryUsableCells / (float) longRecoveryCells;
+
+            float rowMin = Float.POSITIVE_INFINITY;
+            float rowMax = Float.NEGATIVE_INFINITY;
+            float rowConfidenceSum = 0.0f;
+            float rowChromaTrustSum = 0.0f;
+            int rowEvidence = 0;
+            for (int row = 0; row < STATS_HEIGHT; row++) {
+                int n = rowOverlapCount[row];
+                if (n < 3) continue;
+                float mean = rowLogGainSum[row] / n;
+                float variance = Math.max(0.0f, rowLogGainSqSum[row] / n - mean * mean);
+                float sigma = (float) Math.sqrt(variance);
+                float confidence = 1.0f - smoothstepFloat(0.20f, 0.60f, sigma);
+                float chromaMean = rowChromaSum[row] / n;
+                float chromaTrust = confidence
+                        * (1.0f - smoothstepFloat(0.060f, 0.200f, chromaMean));
+                rowMin = Math.min(rowMin, mean);
+                rowMax = Math.max(rowMax, mean);
+                rowConfidenceSum += confidence;
+                rowChromaTrustSum += chromaTrust;
+                rowEvidence++;
+            }
+            float rowModulationEv = rowEvidence >= 4 ? Math.max(0.0f, rowMax - rowMin) : 0.0f;
+            float rowCorrectionConfidence = rowEvidence == 0 ? 0.0f
+                    : rowConfidenceSum / rowEvidence;
+            float flickerEvidenceCoverage = rowEvidence / (float) STATS_HEIGHT;
+            float pairChromaTrust = rowEvidence == 0 ? 0.0f
+                    : rowChromaTrustSum / rowEvidence;
+            if (rowModulationEv >= ROW_MODULATION_REPORT_EV) {
+                RuntimeLogger.event(
+                        "FLICKER_FIELD",
+                        String.format(
+                                java.util.Locale.US,
+                                "rowMod=%.3fEV confidence=%.3f coverage=%.3f chroma=%.3f rows=%d",
+                                rowModulationEv, rowCorrectionConfidence, flickerEvidenceCoverage,
+                                pairChromaTrust, rowEvidence));
+            }
+
             return new SceneStats(
                     shortMeta.frameNumber, longMeta.frameNumber,
                     shortMeta.exposureProduct(), longMeta.exposureProduct(), ratio,
@@ -928,7 +1052,8 @@ final class HdrGlView extends GLSurfaceView {
                     shortClipped / (float) STATS_PIXELS,
                     longRecoveryCells, shortRecoveryNearClipCells,
                     recoveryNearClipFraction, shortRecoveryPeak, recoverySignalFraction,
-                    shortDark / (float) STATS_PIXELS,
+                    recoveryUsableFraction, rowModulationEv, rowCorrectionConfidence,
+                    flickerEvidenceCoverage, pairChromaTrust, shortDark / (float) STATS_PIXELS,
                     calibration, overlapError, overlapCount,
                     shortTemporalReliable, unstableFraction);
         }
@@ -1046,6 +1171,11 @@ final class HdrGlView extends GLSurfaceView {
 
         private static float clampFloat(float value, float low, float high) {
             return Math.max(low, Math.min(high, value));
+        }
+
+        private static float smoothstepFloat(float edge0, float edge1, float value) {
+            float t = clampFloat((value - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+            return t * t * (3.0f - 2.0f * t);
         }
 
         private static float srgbToLinear(float value) {

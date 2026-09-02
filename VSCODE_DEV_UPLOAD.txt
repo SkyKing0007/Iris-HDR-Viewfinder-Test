@@ -1,40 +1,43 @@
-Iris HDR Viewfinder Test V1.4.22 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.4.23 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 Base requirement:
-main must point exactly to successful V1.4.21 commit 23d3c1d5d4498f8548d45ba81f1d5c02f95e76a5 before this upload/commit.
+main must point exactly to successful V1.4.22 commit 3042459e1308006c09f0236ddf23751222cadd59 before this upload/commit.
 
 Backup:
-No new backup branch is required for V1.4.22 per project decision. Rollback protection is the exact successful V1.4.21 Actions artifact plus packaged deterministic forward/rollback patches.
+No new backup branch is required for V1.4.23 per project decision. Rollback protection is the exact successful V1.4.22 Actions artifact plus packaged deterministic forward/rollback patches.
 
 Signing:
 Reuse the existing repository secret IRIS_TEST_SIGNING_KEY_B64.
 Do NOT regenerate the signing key and do NOT upload any private key file.
-V1.4.22 versionCode 27 should install normally over successful stable-signed V1.4.21 after Actions proof.
+V1.4.23 versionCode 28 should install normally over successful stable-signed V1.4.22 after Actions proof.
 
 IMPORTANT:
 Upload ALL CONTENTS of the extracted FULL-UPLOAD ZIP into the repository root from a fresh vscode.dev workspace based on current remote main.
 Do not upload only app/ or only the runtime files.
 
 Before committing, confirm:
-1. main is still exactly 23d3c1d5d4498f8548d45ba81f1d5c02f95e76a5 before replacement.
+1. main is still exactly 3042459e1308006c09f0236ddf23751222cadd59 before replacement.
 2. BUILD_WORKFLOW_COPY.yml begins exactly with:
-   name: Build Iris HDR Viewfinder Test V1.4.22
+   name: Build Iris HDR Viewfinder Test V1.4.23
 3. .github/workflows/build.yml and BUILD_WORKFLOW_COPY.yml are byte-identical.
 4. No file outside this FULL candidate is added or removed.
 5. The intended runtime changes are exactly:
+   - app/src/main/assets/shaders/flicker_field.frag (NEW)
    - app/src/main/assets/shaders/hdr_display.frag
    - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+   - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+   - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
    - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-   - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java (metadata string only)
+   - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 
 Suggested commit message:
-V1.4.22 localized SHORT headroom + same-domain HDR fusion
+V1.4.23 information-gain SHORT + flicker-safe bounded HDR fusion
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.22.
-Do not call V1.4.22 build-proven until the workflow succeeds and its real GLSL/Java/full Android build plus artifact/signing/invariance proof are verified.
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.4.23.
+Do not call V1.4.23 build-proven until the workflow succeeds and its real GLSL/Java/full Android build plus artifact/signing/invariance proof are verified.
 
 Runtime logs after installation:
 Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt

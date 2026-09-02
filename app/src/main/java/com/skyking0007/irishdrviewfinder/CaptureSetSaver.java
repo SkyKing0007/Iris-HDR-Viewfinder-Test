@@ -42,6 +42,7 @@ final class CaptureSetSaver {
     private final String captureId;
     private final int dngOrientation;
     private final float displayBrightnessEv;
+    private final boolean flickerGuardRequired;
     private final byte[] shortReliabilityMap;
     private final Listener listener;
     private final ExecutorService io = Executors.newFixedThreadPool(2);
@@ -66,6 +67,7 @@ final class CaptureSetSaver {
             String captureId,
             int captureOrientationDegrees,
             float displayBrightnessEv,
+            boolean flickerGuardRequired,
             byte[] shortReliabilityMap,
             Listener listener) {
         this.context = context.getApplicationContext();
@@ -74,6 +76,7 @@ final class CaptureSetSaver {
         this.captureId = captureId;
         this.dngOrientation = dngOrientationForDegrees(captureOrientationDegrees);
         this.displayBrightnessEv = Math.max(-5.0f, Math.min(2.0f, displayBrightnessEv));
+        this.flickerGuardRequired = flickerGuardRequired;
         this.shortReliabilityMap = shortReliabilityMap == null
                 ? null : shortReliabilityMap.clone();
         this.listener = listener;
@@ -233,7 +236,8 @@ final class CaptureSetSaver {
             long startedNs = System.nanoTime();
             try {
                 byte[] fused = JpegFusion.fuse(
-                        context, shortJpeg, longJpeg, ratio, shortReliabilityMap);
+                        context, shortJpeg, longJpeg, ratio,
+                        shortReliabilityMap, flickerGuardRequired);
                 long writeStartedNs = System.nanoTime();
                 MediaStoreWriter.writeBytes(
                         context,
@@ -269,7 +273,7 @@ final class CaptureSetSaver {
                 JSONObject root = new JSONObject();
                 root.put("captureId", captureId);
                 root.put("cameraId", cameraId);
-                root.put("fusion", "V1.4.22 GPU-tiled localized-headroom same-domain HDR fusion");
+                root.put("fusion", "V1.4.23 GPU-tiled information-gain flicker-normalized bounded HDR fusion");
                 root.put("short", resultJson(shortResult));
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));
