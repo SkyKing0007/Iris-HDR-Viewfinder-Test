@@ -22,7 +22,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.5.0 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.5.1 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -341,12 +341,13 @@ require('recoverOnlyLostChannels' not in hdr_shader
         and 'mix(longScene, mappedShort, recoveryMask)' not in hdr_shader,
         "retired broad/per-channel/direct live source-switch fusion returned")
 
-# V1.5.0 one shared, global, bracket-independent display mapping.
+# V1.5.1 one shared, global, bracket-independent display mapping. No LTM.
 require('vec3 globalToneMap(vec3 sceneLinear)' in hdr_shader
         and 'const float knee = 0.70;' in hdr_shader
-        and 'const float shoulderStrength = 1.80;' in hdr_shader
-        and 'mappedPeak = clamp(mappedPeak, knee, 0.9995);' in hdr_shader,
-        "shared bounded global tone map missing")
+        and 'const float displayAtSceneOne = 0.80;' in hdr_shader
+        and 'const float maxSceneRadiance = 64.0;' in hdr_shader
+        and 'mappedPeak = clamp(mappedPeak, knee, displayCeiling);' in hdr_shader,
+        "shared fixed stop-domain global tone map missing")
 require('if (mode == 3)' in hdr_shader
         and 'vec3 displayLinear = globalToneMap(texture(normalTex, vUv).rgb);' in hdr_shader
         and 'vec3 displayLinear = globalToneMap(fusedLinear);' in hdr_shader,
@@ -360,7 +361,7 @@ require('localTone' not in raw_fusion and 'localTone' not in raw_fusion_shader
 require('65_536.0' in raw_fusion and '65_536.0' in saver and '65_536.0' in gl,
         "exposure ratio bounds must remain consistent live/save/RAW metadata")
 
-# V1.5.0 WYSIWYG authority is the exact SHORT/LONG generation currently published.
+# V1.5.1 WYSIWYG authority is the exact SHORT/LONG generation currently published.
 require('static final class PublishedPairSnapshot' in gl
         and 'PublishedPairSnapshot snapshotPublishedPair()' in gl
         and 'publishedPairSnapshot = new PublishedPairSnapshot(lastShortMeta, lastLongMeta);' in gl
@@ -395,7 +396,7 @@ require('CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON' in camera
         and 'CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX' in camera,
         "still requests must freeze color and request physical RAW lens-shading evidence")
 
-# V1.5.0 sole saved-HDR authority: immutable matched RAW_SENSOR pair, no HAL-JPEG fallback.
+# V1.5.1 inherited sole saved-HDR authority: immutable matched RAW_SENSOR pair, no HAL-JPEG fallback.
 require('RawHdrFusion.RawBuffer raw = RawHdrFusion.copyRaw(image);' in saver
         and 'finally {' in saver and 'image.close();' in saver,
         "RAW ImageReader buffers must be copied immediately and Camera2 Images closed")
@@ -441,32 +442,80 @@ require('raw_hdr_fusion.frag' in raw_fusion and 'raw_hdr_demosaic.frag' in raw_f
         and 'TILE_ROWS = 512' in raw_fusion,
         "bounded offscreen GLES3 RAW fusion/demosaic/shared-GTM pipeline missing")
 require('whiteBalanceGains' in raw_demosaic_shader
-        and 'vec3 sensorRgb = vec3(r, g, b);' in raw_demosaic_shader
-        and 'dot(colorRow0, sensorRgb)' in raw_demosaic_shader
+        and 'vec3 balancedCameraRgb = vec3(r, g, b);' in raw_demosaic_shader
+        and 'coherentHighlightColorRisk(p)' in raw_demosaic_shader
+        and 'balancedCameraRgb = mix(balancedCameraRgb, neutralCameraRgb, colorRisk);' in raw_demosaic_shader
+        and 'dot(colorRow0, balancedCameraRgb)' in raw_demosaic_shader
         and 'outColor = vec4(max(linearSrgb, vec3(0.0)), 1.0);' in raw_demosaic_shader,
-        "RAW must demosaic once, then apply one frozen WB/sensor-to-linear-sRGB transform")
+        "RAW must demosaic once, apply provenance-aware camera-space highlight completion, then one frozen color transform")
+require('outFusionState = vec4(' in raw_fusion_shader
+        and 'float physicalColorTrust = mix(' in raw_fusion_shader
+        and 'longPhysicalTrust, shortValidated, ownership' in raw_fusion_shader
+        and 'longPhysicalClipRisk' in raw_fusion_shader
+        and 'allocateRgba16f(fusedCfaTexture' in raw_fusion,
+        "V1.5.1 fused CFA must carry ownership-weighted physical highlight provenance in RGBA16F")
+require('quadColorRisk' in raw_demosaic_shader
+        and 'minPhysicalTrust' in raw_demosaic_shader
+        and 'maxPhysicalClipRisk' in raw_demosaic_shader
+        and '0.85 * quadColorRisk' in raw_demosaic_shader,
+        "V1.5.1 Bayer-quad color trust/coherence regression missing")
+require('mirrorParityCoord' in raw_demosaic_shader
+        and 'mirrorParityPoint' in raw_demosaic_shader,
+        "V1.5.1 CFA-parity-safe true-photo boundary regression missing")
 require('EGL14.eglTerminate(' not in raw_fusion and 'EGL14.eglReleaseThread();' in raw_fusion,
         "RAW still worker must never terminate process EGL display owned by live GLSurfaceView")
 
 # Permanent synthetic GTM/ownership regressions, independent of physical bracket size.
-def v150_gtm_peak(value):
-    knee=0.70; strength=1.80
+def v151_gtm_peak(value):
+    knee=0.70; scene_one=0.80; max_scene=64.0; ceiling=0.9995
     if value <= knee: return max(value, 0.0)
-    mapped=1.0-(1.0-knee)/(1.0+strength*(value-knee))
-    return max(knee, min(0.9995, mapped))
+    if value <= 1.0:
+        t=max(0.0,min(1.0,(value-knee)/(1.0-knee)))
+        smooth_t=t*t*(3.0-2.0*t)
+        mapped=knee+(scene_one-knee)*smooth_t
+    else:
+        stop=max(0.0,min(1.0,math.log(value,2)/math.log(max_scene,2)))
+        mapped=scene_one+(ceiling-scene_one)*stop
+    return max(knee,min(ceiling,mapped))
 values=[i/1000.0 for i in range(64001)]
-mapped=[v150_gtm_peak(v) for v in values]
+mapped=[v151_gtm_peak(v) for v in values]
 require(all(mapped[i+1] + 1e-9 >= mapped[i] for i in range(len(mapped)-1)),
-        "V1.5.0 GTM must remain monotonic")
-require(all(abs(v150_gtm_peak(v)-v) < 1e-9 for v in [0.0,0.05,0.20,0.50,0.70]),
-        "V1.5.0 GTM must preserve naturally exposed LONG body through knee")
-require(v150_gtm_peak(16.0)-v150_gtm_peak(1.0) >= 0.15,
-        "V1.5.0 GTM must preserve useful highlight code span")
-for radiance in [0.1,0.7,1.0,2.0,4.0,8.0,16.0]:
-    reference=v150_gtm_peak(radiance)
+        "V1.5.1 GTM must remain monotonic")
+require(all(abs(v151_gtm_peak(v)-v) < 1e-9 for v in [0.0,0.05,0.20,0.50,0.70]),
+        "V1.5.1 GTM must preserve naturally exposed LONG body through knee")
+require(abs(v151_gtm_peak(1.0)-0.80) < 1e-9,
+        "V1.5.1 GTM must reserve display headroom above scene-linear 1.0")
+stop_values=[v151_gtm_peak(v) for v in [1.0,2.0,4.0,8.0,16.0,32.0,64.0]]
+stop_steps=[stop_values[i+1]-stop_values[i] for i in range(len(stop_values)-1)]
+require(min(stop_steps) >= 0.032 and max(stop_steps)-min(stop_steps) <= 0.002,
+        f"V1.5.1 GTM must preserve approximately uniform per-stop highlight separation: {stop_steps}")
+for radiance in [0.1,0.7,1.0,2.0,4.0,8.0,16.0,64.0]:
+    reference=v151_gtm_peak(radiance)
     for bracket_ev in range(2,7):
-        require(abs(v150_gtm_peak(radiance)-reference) < 1e-12,
+        require(abs(v151_gtm_peak(radiance)-reference) < 1e-12,
                 f"same radiance changed appearance at {bracket_ev} EV bracket")
+
+# V1.5.1 physical color-trust contract: trust follows the source mixture and
+# brightness alone can never neutralize color.
+def fused_physical_trust(long_trust, short_trust, ownership):
+    return long_trust * (1.0-ownership) + short_trust * ownership
+require(fused_physical_trust(0.0, 1.0, 0.25) == 0.25,
+        "valid SHORT may not make a still-mostly-clipped LONG mixture fully trusted")
+require(fused_physical_trust(0.0, 1.0, 1.0) == 1.0,
+        "fully owned validated SHORT must restore physical color trust")
+require(fused_physical_trust(1.0, 0.0, 0.0) == 1.0,
+        "healthy LONG body must remain fully trusted")
+
+def quad_color_risk(max_clip_risk, min_physical_trust):
+    return max_clip_risk*(1.0-min_physical_trust)
+require(quad_color_risk(0.0,0.0) == 0.0,
+        "bright-but-physically-unclipped color must never be neutralized")
+require(quad_color_risk(1.0,1.0) == 0.0,
+        "fully SHORT/LONG-proven clipped color must remain unchanged")
+require(quad_color_risk(1.0,0.0) == 1.0,
+        "physically clipped color with missing CFA evidence must fail closed to neutral")
+require(quad_color_risk(0.8,0.5) == 0.4,
+        "partially proven clipped color must receive graded opponent-chroma suppression")
 
 # 016 / 022 - V1.4.2 on-device sideways preview: producer transform owns live orientation.
 require('SCALER_AVAILABLE_ROTATE_AND_CROP_MODES' in camera,
@@ -955,15 +1004,15 @@ require('float fieldLumaTrust = mix(1.0, clamp(fieldState.g, 0.0, 1.0), guardReq
         and 'float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);' in hdr_shader,
         "phase-sensitive SHORT must fail closed at pair rate while safe SHORT bypasses mandatory field trust")
 
-# 056 / 074 / 080 / V1.5.0 - Exact current pre-handoff authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.23' in workflow
-        and 'run-id: 33591832342' in workflow,
-        "workflow must download the exact successful V1.4.23 V1.1 Actions authority")
-require('f340d8de62d41e9c505b3936b2b0af543deb9c53' in workflow
-        and 'e46a12109d9e0c8e727a21394c1508bd5dbb0724' in workflow,
-        "V1.4.23 V1.1 authority commit/tree pins missing")
-require('backup-v1.4.23-v1.1-before-raw-short-long-hdr' not in workflow,
-        "V1.5.0 workflow must not depend on the safety backup branch")
+# 056 / 074 / 080 / V1.5.1 - Exact current pre-handoff authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.5.0' in workflow
+        and 'run-id: 33668681576' in workflow,
+        "workflow must download the exact successful V1.5.0 Actions authority")
+require('4b1753c7e07705946e5a43ae9edf081795f252f6' in workflow
+        and 'a4c92daa0d4439784d88766133d7f2092173c60e' in workflow,
+        "V1.5.0 authority commit/tree pins missing")
+require('backup-' not in workflow,
+        "V1.5.1 narrow correction must not depend on or create a backup branch")
 
 # 048 / 049 / 052 / 054 - Brightness remains user LONG intent in AUTO and MANUAL.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -5.0f' in main
@@ -988,8 +1037,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 29' in gradle and 'versionName = "1.0-v1.5.0"' in gradle,
-        "V1.5.0 version/build pin missing")
+require('versionCode = 30' in gradle and 'versionName = "1.0-v1.5.1"' in gradle,
+        "V1.5.1 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -1151,7 +1200,7 @@ ownership=max(core_mask,blurred)
 require(ownership <= damage_support + 1e-9,
         f"one-sided damage support must bound coherent source authority: {ownership}")
 
-# V1.5.0 bounded single-ownership regression. Live source selection and RAW source
+# V1.5.1 bounded single-ownership regression. Live source selection and RAW source
 # selection each happen once in their own scene-linear reconstruction domain; GTM follows.
 require('recoveredShort = trustedShort;' in hdr_shader
         and 'mapRecoveredHighlight' not in hdr_shader,
@@ -1252,4 +1301,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.5.0 REGRESSION PASS: exact-published-pair WYSIWYG freeze, matched RAW_SENSOR sole still authority, CFA-aware continuous alignment/fusion, source-row photometric fail-closed protection, one demosaic/WB/color owner, shared global GTM, live information-gain SHORT/flicker protections, adaptive LONG appearance, exact exposure-generation pairs, capture-performance/EGL/orientation/FOV/signing protections")
+print("V1.5.1 REGRESSION PASS: exact-published-pair WYSIWYG freeze, matched RAW_SENSOR sole still authority, CFA-aware continuous alignment/fusion, source-row photometric fail-closed protection, one demosaic/WB/color owner, shared global GTM, live information-gain SHORT/flicker protections, adaptive LONG appearance, exact exposure-generation pairs, capture-performance/EGL/orientation/FOV/signing protections")

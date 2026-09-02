@@ -1,7 +1,11 @@
 #version 300 es
 precision highp float;
 precision highp int;
-layout(location=0) out float outCfa;
+// V1.5.1: R=fused scene-linear CFA, G=physical color trust,
+// B=physical LONG clipping risk, A=SHORT ownership.
+// Keeping provenance beside the CFA value lets demosaic make one coherent
+// color-trust decision per Bayer quad instead of guessing from brightness.
+layout(location=0) out vec4 outFusionState;
 uniform highp usampler2D shortRawTex;
 uniform highp usampler2D longRawTex;
 uniform sampler2D shortShadingTex;
@@ -204,5 +208,28 @@ void main() {
         ownership = 1.0;
     }
 
-    outCfa = max(0.0, mix(longScene, shortState.x, ownership));
+    float longPhysicalTrust =
+        1.0 - smoothstep(0.985, 0.997, longSensor);
+    float shortValidated =
+        smoothstep(0.55, 0.85, shortState.y)
+        * smoothstep(0.45, 0.70, flowConfidence)
+        * smoothstep(0.40, 0.65, photometricConfidence);
+    if (shortState.y >= 0.85
+            && flowConfidence >= 0.60
+            && photometricConfidence >= 0.55) {
+        shortValidated = 1.0;
+    }
+    // Trust belongs to the actual fused sample, not merely to the existence of
+    // some valid evidence. If a clipped/untrusted LONG value still owns part of
+    // the output, that fraction remains color-incomplete even when SHORT itself
+    // is valid. Full trust is recovered only as validated SHORT actually owns it.
+    float physicalColorTrust = mix(
+        longPhysicalTrust, shortValidated, ownership);
+    float longPhysicalClipRisk = 1.0 - longPhysicalTrust;
+
+    outFusionState = vec4(
+        max(0.0, mix(longScene, shortState.x, ownership)),
+        clamp(physicalColorTrust, 0.0, 1.0),
+        clamp(longPhysicalClipRisk, 0.0, 1.0),
+        ownership);
 }

@@ -1,19 +1,18 @@
-Iris HDR Viewfinder Test V1.5.0 - FULL candidate upload for vscode.dev + GitHub Actions
+Iris HDR Viewfinder Test V1.5.1 - FULL candidate upload for vscode.dev + GitHub Actions
 
 Repository:
 https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 
 Base requirement:
-main must point exactly to successful V1.4.23 V1.1 commit f340d8de62d41e9c505b3936b2b0af543deb9c53 before this upload/commit.
+main must point exactly to successful V1.5.0 commit 4b1753c7e07705946e5a43ae9edf081795f252f6 before this upload/commit.
 
-Backup already created and verified:
-backup-v1.4.23-v1.1-before-raw-short-long-hdr -> f340d8de62d41e9c505b3936b2b0af543deb9c53
-The workflow does not depend on the backup branch.
+Backup:
+No V1.5.1 backup was requested or created. The narrow correction remains protected by deterministic full-index V1.5.0 <-> V1.5.1 rollback proof in Actions.
 
 Signing:
 Reuse the existing repository secret IRIS_TEST_SIGNING_KEY_B64.
 Do NOT regenerate the signing key and do NOT upload any private key file.
-V1.5.0 versionCode 29 should install normally over stable-signed V1.4.23 after Actions proof.
+V1.5.1 versionCode 30 should install normally over stable-signed V1.5.0 after Actions proof.
 
 IMPORTANT:
 Upload ALL CONTENTS of the extracted FULL-UPLOAD ZIP into the repository root from a fresh vscode.dev workspace based on current remote main.
@@ -21,35 +20,35 @@ Do not upload only app/ or only the runtime files.
 Do not push any APK.
 
 Before committing, confirm:
-1. main is still exactly f340d8de62d41e9c505b3936b2b0af543deb9c53 before replacement.
-2. BUILD_WORKFLOW_COPY.yml begins exactly with: name: Build Iris HDR Viewfinder Test V1.5.0
+1. main is still exactly 4b1753c7e07705946e5a43ae9edf081795f252f6 before replacement.
+2. BUILD_WORKFLOW_COPY.yml begins exactly with: name: Build Iris HDR Viewfinder Test V1.5.1
 3. .github/workflows/build.yml and BUILD_WORKFLOW_COPY.yml are byte-identical.
 4. No file outside this FULL candidate is added or removed.
-5. Intended runtime/build changes are exactly:
-   - app/build.gradle.kts
+5. Intended runtime changes are exactly:
    - app/src/main/assets/shaders/hdr_display.frag
-   - app/src/main/assets/shaders/raw_hdr_demosaic.frag (NEW)
-   - app/src/main/assets/shaders/raw_hdr_fusion.frag (NEW)
-   - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-   - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
-   - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
-   - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-   - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
-   - app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java (NEW)
-6. Intended infrastructure/docs changes are exactly:
+   - app/src/main/assets/shaders/raw_hdr_demosaic.frag
+   - app/src/main/assets/shaders/raw_hdr_fusion.frag
+   - app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java
+6. Intended build/version change is exactly:
+   - app/build.gradle.kts
+7. Intended infrastructure changes are exactly:
    - .github/workflows/build.yml
    - BUILD_WORKFLOW_COPY.yml
    - scripts/verify_orientation.py
+8. Intended documentation/hash-pin changes are exactly:
    - PACKAGE_INFO.txt
    - PACKAGE_MANIFEST_SHA256.txt
    - README.md
    - VSCODE_DEV_UPLOAD.txt
 
-Suggested commit message:
-V1.5.0 RAW SHORT+LONG WYSIWYG HDR fusion
+V1.5.1 does NOT add local tone mapping.
+Saved FUSED uses physical Bayer-quad highlight color provenance; live HDR uses the shared fixed global stop-domain tone map so SHORT-recovered highlights retain visible display separation.
 
-Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.5.0.
-Do not call V1.5.0 build-proven until the workflow succeeds and the artifact's real GLSL/Java/full Android build, signing, exactly-one-APK, patch and post-build invariance proofs are verified.
+Suggested commit message:
+V1.5.1 provenance-safe highlights + no-LTM true HDR display
+
+Then open GitHub Actions -> Build Iris HDR Viewfinder Test V1.5.1.
+Do not call V1.5.1 build-proven until the workflow succeeds and its real GLSL/Java/full Android build, signing, exactly-one-APK, deterministic patch and post-build invariance proofs are verified.
 
 Runtime logs after installation:
 Downloads/IrisHDRViewfinder/Logs/IrisHDR_Runtime_*.txt

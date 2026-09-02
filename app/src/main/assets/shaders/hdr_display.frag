@@ -124,17 +124,31 @@ float longClippedCore(vec3 longRgb, vec3 longScene) {
 }
 
 vec3 globalToneMap(vec3 sceneLinear) {
-    // V1.5.0 one scene-referred GTM shared by live HDR and RAW still rendering.
-    // Preserve the naturally exposed LONG body exactly, then reserve stable display
-    // headroom for radiance recovered from SHORT. The curve is fixed, monotonic,
-    // bounded, bracket-ratio independent, and scales RGB uniformly to preserve hue.
+    // V1.5.1 keeps one global, scene-referred GTM for BOTH live HDR and RAW still.
+    // There is no LTM. LONG body values through 0.70 remain literal. From 0.70 to
+    // scene white, a fixed stop-domain shoulder reserves visible separation for
+    // SHORT-recovered highlights instead of packing 2x..16x radiance into the last
+    // few display code values. The mapping is bracket-independent and RGB-uniform.
     float scenePeak = max3(sceneLinear);
     const float knee = 0.70;
-    const float shoulderStrength = 1.80;
-    if (scenePeak <= knee || scenePeak <= 0.000001) return max(sceneLinear, vec3(0.0));
-    float mappedPeak = 1.0 - (1.0 - knee)
-        / (1.0 + shoulderStrength * (scenePeak - knee));
-    mappedPeak = clamp(mappedPeak, knee, 0.9995);
+    const float displayAtSceneOne = 0.80;
+    const float maxSceneRadiance = 64.0; // fixed 6-EV scene white, not bracket-driven
+    const float displayCeiling = 0.9995;
+    if (scenePeak <= knee || scenePeak <= 0.000001) {
+        return max(sceneLinear, vec3(0.0));
+    }
+
+    float mappedPeak;
+    if (scenePeak <= 1.0) {
+        float t = clamp((scenePeak - knee) / (1.0 - knee), 0.0, 1.0);
+        float smoothT = t * t * (3.0 - 2.0 * t);
+        mappedPeak = mix(knee, displayAtSceneOne, smoothT);
+    } else {
+        float stopPosition = clamp(
+            log2(scenePeak) / log2(maxSceneRadiance), 0.0, 1.0);
+        mappedPeak = mix(displayAtSceneOne, displayCeiling, stopPosition);
+    }
+    mappedPeak = clamp(mappedPeak, knee, displayCeiling);
     return max(sceneLinear, vec3(0.0)) * (mappedPeak / scenePeak);
 }
 

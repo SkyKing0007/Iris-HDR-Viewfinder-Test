@@ -991,7 +991,9 @@ final class RawHdrFusion {
 
             allocateR16Ui(shortRawTexture, longModel.raw.width, maxSourceRows);
             allocateR16Ui(longRawTexture, longModel.raw.width, maxSourceRows);
-            allocateR16f(fusedCfaTexture, width, maxFusedRows);
+            // V1.5.1 keeps physical highlight provenance next to each fused CFA sample:
+            // R=fused CFA, G=physical color trust, B=LONG clip risk, A=SHORT ownership.
+            allocateRgba16f(fusedCfaTexture, width, maxFusedRows);
             allocateRgba16f(linearRgbTexture, width, TILE_ROWS);
             allocateRgba8(displayTexture, width, TILE_ROWS);
             uploadRgba32f(shortShadingTexture,
@@ -1076,6 +1078,8 @@ final class RawHdrFusion {
                 GLES30.glUniform2i(location(demosaicProgram, "fusedTextureSize"), width, fusedRows);
                 GLES30.glUniform2i(location(demosaicProgram, "fusedGlobalOrigin"), active.left, fusedStart);
                 GLES30.glUniform2i(location(demosaicProgram, "outputGlobalOrigin"), active.left, y);
+                GLES30.glUniform4i(location(demosaicProgram, "activeArray"),
+                        active.left, active.top, active.right, active.bottom);
                 uniformVec4(demosaicProgram, "whiteBalanceGains", longModel.wbGains);
                 GLES30.glUniform3f(location(demosaicProgram, "colorRow0"),
                         longModel.colorMatrix[0], longModel.colorMatrix[1], longModel.colorMatrix[2]);

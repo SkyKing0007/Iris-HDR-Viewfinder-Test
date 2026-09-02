@@ -1,13 +1,17 @@
-# Iris HDR Viewfinder Test V1.5.0
+# Iris HDR Viewfinder Test V1.5.1
 
-V1.5.0 is the first sensor-domain SHORT+LONG still-HDR candidate. It keeps the existing finished live HDR viewfinder but replaces the saved fused-JPEG authority with the matched full-resolution RAW_SENSOR SHORT/LONG pair already captured by Iris.
+V1.5.1 is the provenance-safe highlight and no-LTM live-HDR correction built directly from the exact successful V1.5.0 GitHub Actions candidate.
 
-The principal goal is WYSIWYG HDR: LONG remains the natural scene/body appearance owner; aligned SHORT supplies recoverable highlight measurements; one CFA-aware fusion occurs before a single demosaic/WB/color transform; then the RAW still and live reconstructed HDR use the same global tone-mapping function. No local tone mapping is introduced.
+Two independent device failures from V1.5.0 are addressed:
 
-The implementation is designed specifically to prevent the earlier hard-white shelf, fusion-boundary, row/PWM, and pink/green/blue highlight failure classes. SHORT is not broadly mixed into healthy LONG midtones. Saturated or invalid LONG CFA phases can be replaced from valid same-CFA SHORT evidence before demosaic; real motion/radiometry disagreement fails closed.
+1. **Saved FUSED_HDR broad pink / pink-edge highlights.** V1.5.0 could mix SHORT and LONG independently at CFA sites, discard that physical trust information, then let an incomplete clipped Bayer neighborhood become chromatic during demosaic/WB/color conversion. V1.5.1 carries physical color provenance with the fused CFA, makes highlight color trust at Bayer-quad granularity, expands only the trust decision by one Bayer quad at clipping boundaries, and drives only unproven opponent chroma toward neutral. Bright real color is never neutralized merely because it is bright.
 
-Real Xiaomi fixture evidence for this architecture measured 311044 of 311119 physically clipped LONG CFA samples (99.975893%) with usable aligned SHORT headroom, well above the 95% recoverable-highlight target for coherent regions.
+2. **Live HDR FUSED looking nearly like clipped LONG.** No local tone mapping is added. The live and saved paths still share one spatially uniform global tone mapper, but V1.5.1 gives recovered multi-stop radiance explicit fixed stop-domain display range instead of collapsing it rapidly toward white. LONG-like body appearance through 0.70 is preserved; 1x..64x highlight radiance is mapped monotonically through the remaining global display headroom.
 
-Current status: **PREPARED / UPLOAD-READY, NOT BUILD-PROVEN**. The package has passed local static/semantic/patch checks, but the pinned real GLSL compiler, real Android Java compiler and full `:app:assembleDebug` must run successfully in GitHub Actions before V1.5.0 is called build-proven.
+The saved RAW architecture remains SHORT+LONG RAW fusion before one demosaic. Capture policy, matched frame ownership, RAW alignment, photometric normalization, physical lens/crop ownership, DNG publication, and the rest of the successful V1.5.0 runtime are protected byte-for-byte.
 
-Runtime authority is successful V1.4.23 V1.1 commit `f340d8de62d41e9c505b3936b2b0af543deb9c53`, Actions run `33591832342`, artifact `9832029897`. Safety backup `backup-v1.4.23-v1.1-before-raw-short-long-hdr` is verified at that same commit.
+There is **no LTM**, no generic "bright pixel -> white" smoothstep repair, no hue donor, and no RGB blur to hide clipping artifacts.
+
+Runtime authority: successful V1.5.0 commit `4b1753c7e07705946e5a43ae9edf081795f252f6`, Actions run `33668681576`, artifact `9861657341`.
+
+Current V1.5.1 status: **PREPARED / UPLOAD-READY, NOT YET V1.5.1 BUILD-PROVEN**. Local authority/static/semantic checks are being exhausted, while the pinned real GLSL compiler, real Android Java compiler, full `:app:assembleDebug`, signing, exactly-one-APK proof and final post-build invariance must succeed in GitHub Actions before V1.5.1 becomes build authority.
