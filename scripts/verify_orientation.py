@@ -1413,4 +1413,18 @@ require('quadColorRisk' in raw_demosaic_shader and 'coherentHighlightColorRisk' 
 require('local tone' not in hdr_shader.lower() and 'bilateral tone' not in hdr_shader.lower(),
         "V1.5.3 must remain no-LTM")
 
-print("V1.5.3 V1.1 REGRESSION PASS: exact V1.5.2 Actions authority, clipped-LONG unconditional SHORT takeover, coherent pre-clipping SHORT shoulder, preserved broad-pink/peach-edge protections, stable live calibration, shared 8-EV global GTM, no LTM")
+
+# 130 - V1.5.3 V1.1 authority-lineage regression (Actions run 33691567856):
+# V1.1 was a child of failed V1.5.3, so the old HEAD^ == successful V1.5.2
+# guard aborted under set -e before compilers. Preserve V1.5.2 as sole runtime
+# authority but prove the exact failed-candidate chain with sufficient checkout depth.
+workflow = (ROOT / '.github/workflows/build.yml').read_text()
+require('fetch-depth: 4' in workflow
+        and "failed_v153='33e93e528a69750da79f5847cb033d810f2d7251'" in workflow
+        and "failed_v153_v11='02224874fe78eccfec2e05415691edcaed3229d2'" in workflow
+        and 'test "$(git rev-parse HEAD^)" = "$failed_v153_v11"' in workflow
+        and 'test "$(git rev-parse HEAD~2)" = "$failed_v153"' in workflow
+        and 'test "$(git rev-parse HEAD~3)" = "$authority"' in workflow,
+        "authority-lineage regression 130: exact V1.5.2 -> failed V1.5.3 -> failed V1.5.3 V1.1 -> V1.2 chain proof missing")
+
+print("V1.5.3 V1.2 REGRESSION PASS: exact V1.5.2 Actions authority, clipped-LONG unconditional SHORT takeover, coherent pre-clipping SHORT shoulder, preserved broad-pink/peach-edge protections, stable live calibration, shared 8-EV global GTM, no LTM")

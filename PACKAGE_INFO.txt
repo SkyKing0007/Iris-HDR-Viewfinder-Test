@@ -1,4 +1,4 @@
-Iris HDR Viewfinder Test V1.5.3 V1.1
+Iris HDR Viewfinder Test V1.5.3 V1.2
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
 Status: PREPARED / UPLOAD-READY - NOT V1.5.3 BUILD-PROVEN
 
@@ -26,13 +26,29 @@ Failed V1.5.3 candidate evidence (NOT authority):
 - Exact failure: hdr_display.frag fusionSample referenced longSecond outside its declaration scope; longPeak/longLuma were also absent from that local scope and would fail subsequently.
 - Java, patch proof, assemble and post-build stages were correctly skipped.
 
+Failed V1.5.3 V1.1 candidate evidence (NOT authority):
+- Commit: 02224874fe78eccfec2e05415691edcaed3229d2
+- Parent: failed V1.5.3 commit 33e93e528a69750da79f5847cb033d810f2d7251
+- Actions run: 33691567856
+- Job: 100451216861
+- Failure stage: Reconstruct exact V1.5.2 authority and prove V1.5.3 candidate before compilers
+- Exact failure: the strict HEAD^ == successful-V1.5.2 guard still assumed a direct-child handoff. Because V1.1 was a child of failed V1.5.3, set -e exited 1 before any compiler ran.
+- Runtime/shader correction bytes were not compiled and did not become authority.
+
+V1.5.3 V1.2 infrastructure-only correction:
+- No runtime bytes differ from V1.5.3 V1.1.
+- Checkout depth changes only from 2 to 4 so the exact three-commit ancestry to successful V1.5.2 is visible.
+- Pre-compiler proof requires HEAD^ = failed V1.5.3 V1.1, HEAD~2 = failed V1.5.3, HEAD~3 = successful V1.5.2.
+- Candidate reconstruction remains seeded from the exact successful V1.5.2 Actions source artifact and overlays the same approved V1.5.3 allowlist.
+- Permanent regression 130 protects this exact failure.
+
 Verification-mechanics authority:
 - Exact successful V1.5.2 16-stage authority-seeded compiler/build/invariance sequence.
 - Gradle/SDK/glslang/Java/signing/assemble/freeze mechanics are unchanged.
 - The failed V1.5.3 workflow reached the same real pinned GLSL compiler stage, proving the procedural sequence itself remained intact.
 
 Backup:
-- NONE CREATED for V1.5.3 V1.1, per explicit user instruction.
+- NONE CREATED for V1.5.3 V1.2, per explicit user instruction.
 
 V1.5.3 intended runtime changed-file allowlist relative successful V1.5.2: exactly 2 files:
 - app/src/main/assets/shaders/hdr_display.frag

@@ -1,6 +1,6 @@
-# Iris HDR Viewfinder Test V1.5.3 V1.1
+# Iris HDR Viewfinder Test V1.5.3 V1.2
 
-V1.5.3 V1.1 is a **compiler-only correction** to the failed V1.5.3 handoff. It is still reconstructed and verified against the exact successful V1.5.2 GitHub Actions candidate; failed V1.5.3 commit `33e93e528a69750da79f5847cb033d810f2d7251` is evidence only, never runtime authority.
+V1.5.3 V1.2 is an **infrastructure-only lineage correction on top of the V1.5.3 V1.1 compiler-only correction**. No runtime bytes differ from V1.1. It is still reconstructed and verified against the exact successful V1.5.2 GitHub Actions candidate; failed V1.5.3 commit `33e93e528a69750da79f5847cb033d810f2d7251` is evidence only, never runtime authority.
 
 The failed Actions run `33690475046` passed authority reconstruction, Java/Android/Gradle/signing setup and the static shader scan, then failed the real pinned GLSL compile because `hdr_display.frag` used `longSecond` inside `fusionSample()` without a declaration in that function scope. `longPeak` and `longLuma` used by the same expression were also not locally declared.
 
@@ -34,3 +34,8 @@ Version remains `1.0-v1.5.3 / 32`; the failed candidate never became a successfu
 The packaged Actions workflow preserves the successful V1.5.2 procedure: same 16-stage authority reconstruction, Java 17, Android 37, Gradle 9.6.0, stable signing, pinned `glslang-tools=15.1.0-2~ubuntu0.24.04.2`, exact runtime shader compilation, real Java compilation, deterministic patch/PRE-BUILD proof, full `:app:assembleDebug`, post-build invariance and final candidate export.
 
 Current status: **PREPARED / UPLOAD-READY, NOT BUILD-PROVEN** until Actions passes.
+
+
+## V1.5.3 V1.2 exact-lineage correction
+
+Actions run `33691567856` for V1.5.3 V1.1 stopped before compilers because the authority guard still required `HEAD^` to equal successful V1.5.2. V1.2 keeps successful V1.5.2 as sole runtime authority, uses the minimal `fetch-depth: 4`, and proves the exact chain `V1.5.2 -> failed V1.5.3 -> failed V1.5.3 V1.1 -> V1.2`. Candidate reconstruction remains seeded from the exact V1.5.2 Actions artifact.

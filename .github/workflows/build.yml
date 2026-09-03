@@ -26,7 +26,7 @@ jobs:
       - name: Checkout exact candidate history
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 4
 
       - name: Download exact successful V1.5.2 Actions authority artifact
         uses: actions/download-artifact@v4
@@ -42,13 +42,19 @@ jobs:
           set -euo pipefail
           authority='2ed7072212bc1e9571163a914be6497c6254b702'
           authority_tree='7108e37bb9e4c9ab15d0b97661dcc6c9d93687c8'
+          failed_v153='33e93e528a69750da79f5847cb033d810f2d7251'
+          failed_v153_v11='02224874fe78eccfec2e05415691edcaed3229d2'
           authority_dir="$RUNNER_TEMP/v152-authority-artifact"
           authority_src="$RUNNER_TEMP/v152-authority-source"
           canonical="$RUNNER_TEMP/v153-canonical-candidate"
 
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'main'
-          test "$(git rev-parse HEAD^)" = "$authority"
+          # V1.5.3 and V1.5.3 V1.1 failed and never became runtime authority.
+          # Prove that exact failed chain while preserving V1.5.2 as sole authority.
+          test "$(git rev-parse HEAD^)" = "$failed_v153_v11"
+          test "$(git rev-parse HEAD~2)" = "$failed_v153"
+          test "$(git rev-parse HEAD~3)" = "$authority"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
           grep -Fq 'versionCode = 32' app/build.gradle.kts
