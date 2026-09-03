@@ -1,23 +1,16 @@
-RESET REQUIRED AFTER FAILED V2.3
-Before uploading this corrected package, move experiment-v1.4.11-v2-brightness-4ev back to successful V2.2 commit 816889039c110607304746b9036389c36db2a8e6.
-The corrected workflow intentionally preserves V2.2's proven HEAD^ = authority lineage check and does not add a failed-commit exception.
-
-V1.4.11 V2.3 vscode.dev upload
+V1.4.11 V2.4 vscode.dev upload
 
 1. In vscode.dev switch to:
    experiment-v1.4.11-v2-brightness-4ev
 
-2. Confirm that branch is still at successful V2.2 commit:
-   816889039c110607304746b9036389c36db2a8e6
+2. Confirm the branch is still at the exact successful V2.3 commit before making this one commit:
+   aa35fd08e8c0eebd10278b9ef54d135957e697b9
 
-3. Extract the FULL-UPLOAD ZIP locally and upload/replace the extracted CONTENTS into the repository root. Do not upload the ZIP itself.
+3. Upload/replace every file from this ZIP at repository root.
 
-4. Source Control should show only the guarded V2.3 candidate. Commit:
-   V1.4.11 V2.3 instant AE GPU fusion SHORT texture recovery
+4. Commit exactly once, for example:
+   V1.4.11 V2.4 damaged LONG cannot veto SHORT RGB
 
-5. Push only experiment-v1.4.11-v2-brightness-4ev.
+5. Push experiment-v1.4.11-v2-brightness-4ev.
 
-6. GitHub Actions should start:
-   Build Iris HDR Viewfinder Test V1.4.11 V2.3
-
-Do not merge into main. Do not change the default branch. No backup branch is required.
+GitHub Actions is the authoritative compiler/build proof. Do not add another commit before the V2.4 build because the workflow intentionally requires HEAD^ to equal the exact successful V2.3 authority commit.

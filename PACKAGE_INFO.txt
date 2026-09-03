@@ -1,35 +1,36 @@
-Iris HDR Viewfinder Test V1.4.11 V2.3
+Iris HDR Viewfinder Test V1.4.11 V2.4
 
 STATUS BEFORE ACTIONS: PREPARED / UPLOAD-READY - NOT BUILD-PROVEN
 TARGET BRANCH: experiment-v1.4.11-v2-brightness-4ev
+BACKUP: NOT CREATED, per user instruction; this is a narrow JPEG-fusion ownership correction with deterministic rollback patch proof.
 
 RUNTIME AUTHORITY
-- Exact successful V1.4.11 V2.2 GitHub Actions compiled candidate.
-- Commit: 816889039c110607304746b9036389c36db2a8e6
-- Tree: bb8b16032e35e874fc0f07eaeb6bc0ee2ebb3c2e
-- Actions run: 33678538693
-- Artifact ID: 9865357740
-- APK SHA-256: f64bc6ccad3c4028fa416ecf90ef5f02b7a740c501bc7e3be33895a8ef2b91b4
-- Source candidate TAR SHA-256: f6618945d6c90f1c76abda5eb458f3564baeafc0008f439ad8bf8740755ff4aa
-- Runtime manifest SHA-256: 837b515f0e0e8b83ec05eaa1a23aa362379787cb037e53c0cb6c86498f86eb98
-- Repository manifest SHA-256: 89d169fc062279e73638454a06182a38dc7fa8f33ddf279b6145185cc53ffebf
-- REGRESSIONS SHA-256: d0ecb4ccea29a75ce0d87bd67d618eccc19017da449744303016d57404c15b4c
+- Exact successful V1.4.11 V2.3 GitHub Actions compiled candidate.
+- Commit: aa35fd08e8c0eebd10278b9ef54d135957e697b9
+- Tree: 05e5378cf9fd3d9a639a257284c964c946132c7f
+- Actions run: 33691180722
+- Artifact ID: 9870114864
+- Artifact digest: sha256:c6f36289d6fd8924982c8e1eafab609d679b3871e23cb2fc6039e930fd5458dd
+- APK SHA-256: 774b42e67b7bdaa38b0a9842f99c509a5809fd89a476f939c36616f328a3d74c
+- Source candidate TAR SHA-256: 73dae64bea16276ae7bb4d9b11629cd61b085f4202024476e7c1acff7c38f247
+- Runtime manifest SHA-256: d3766ccfc2a752f1a28e86e76fcc51392d8d19b4dabf9b091f0afd19b14cd8de
+- Repository manifest SHA-256: 41fb830c2ab5e9e27adf3062a568ef93144e180a22f755de2b1001787bab9f04
+- REGRESSIONS SHA-256: 5b7750f56240056ac87e05bf24dc330d5d4ca428a79b623626f28fb3d0d2f74f
 
 VERIFICATION-MECHANICS AUTHORITY
-- Exact successful V2.2 workflow order retained.
+- Exact successful V1.4.11 V2.3 workflow implementation and gate order.
 - fetch-depth remains 3.
+- Authority artifact reconstruction/manifests/path-set/byte-equality proof retained.
 - Embedded Python heredoc syntax preflight retained.
-- Pinned real GLSL compiler, real project Java compiler and full assemble order retained.
-- Deterministic full-index forward/rollback proof retained at core.abbrev 7/12/40 with fuzz=0.
-- No backup branch required, per user instruction.
+- Complete GLSL reserved-identifier scan retained.
+- Pinned real glslangValidator, real project Java compiler and full :app:assembleDebug order retained.
+- Deterministic full-index forward/rollback proof retained at core.abbrev 7/12/40 with git apply + GNU patch fuzz=0.
+- Post-build candidate/protected invariance and exactly-one-APK proof retained.
+- 25 tracked files / 12 runtime files retained; no new runtime file is introduced.
 
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST: EXACTLY 7
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST: EXACTLY 2
 - app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
 INFRASTRUCTURE CHANGED-FILE LIST
 - .github/workflows/build.yml
@@ -44,30 +45,36 @@ CANDIDATE METADATA/VERSION/HASH FILES
 - app/build.gradle.kts
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION: YES, NARROWLY
-- Authority pins advance from V2.1 to exact successful V2.2.
-- Exact allowlist/manifests/protected hashes advance to V2.3.
-- No new shader file is added. The off-screen still GPU pass reuses the existing V2.2 hdr_display.frag, which remains under the existing pinned real GLSL compiler gate.
-- New permanent regressions cover scene-cut AUTO, GPU-primary still fusion, reliable real-SHORT texture recovery and V2.2-only lineage.
-- Compiler/build gate order is unchanged.
+- Authority pins advance only from exact successful V2.3 to the V2.4 candidate.
+- Exact changed-file allowlist/protected set/runtime digest advance to V2.4.
+- Permanent regression 050-053 records the device-observed peach/orange failure condition and the corrected source-ownership contract.
+- Compiler/build/patch/provenance gate order is unchanged.
 
 VERSION
-- versionCode: 20
-- versionName: 1.0-v1.4.11-v2.3
+- versionCode: 21
+- versionName: 1.0-v1.4.11-v2.4
 - applicationId: com.skyking0007.irishdrviewfinder.v1411v2
 
 FUNCTIONAL CHANGE
-- Large >=0.70EV dark/bright scene changes jump to the measured V2.2 live-stat target on the first fresh statistic, up to +/-6EV.
-- Ordinary exposure drift retains V2.2's 0.10EV hysteresis and +/-0.30EV smoothing.
-- LONG statistics interval changes from 200ms to 100ms.
-- Saved FUSED HDR uses the existing V2.2 GLES3 context as the primary full-resolution fusion executor.
-- Actual normalized SHORT pixels own bright regions only when SHORT signal and SHORT/LONG radiometric agreement prove reliability; darker/unreliable regions remain LONG-owned.
-- CPU JpegFusion remains only as explicit GL-failure fallback and mirrors the same ownership rule.
-- Brightness changes from -4..+4EV to -16..+1EV, 0.1EV steps.
-- Gamma remains unchanged.
+- V2.3's saved JPEG recovery required normalized SHORT/LONG luminance agreement; a damaged peach/orange LONG rendering could therefore veto the correct SHORT texture.
+- V2.4 removes that damaged-LONG agreement veto only from the still-only recovery path.
+- SHORT validates itself from encoded signal plus non-clipped headroom.
+- LONG provides a bright/damage trigger from encoded luma/peak, not color/texture authority.
+- Once validated recovery begins, complete exposure-normalized SHORT RGB owns the pixel and LONG chroma is not re-injected over it.
+- Dark/no-signal SHORT and clipped SHORT fail closed to LONG.
+- GPU-primary still fusion and CPU emergency fallback use the same ownership scalar.
+- No neighborhood fill, synthesis, sharpening, RAW/V1.5 runtime path, or live-view ownership change is introduced.
+
+PRESERVED SUCCESSFUL V2.3 BEHAVIOR
+- V2.3 scene-cut AUTO response and 100ms live statistics.
+- Fixed ~8x / 3EV SHORT/LONG bracket.
+- Brightness -16..+1EV, 0.1EV steps.
+- Gamma 0.50..2.00, 0.05 steps, 1.00 neutral.
+- GLES3-primary saved fusion and explicit CPU-only failure fallback.
+- Live HDR mode=2 ownership, capture routing, DNG/JPEG saving, orientation/FIT, app identity, and fixed-height status row.
 
 COMPILER STATUS BEFORE ACTIONS
 - Complete GLSL reserved-identifier scan: PASS locally.
 - Pinned real glslangValidator: NOT RUN locally; Actions required.
 - Real project Java compiler: NOT RUN locally; Actions required.
 - Full :app:assembleDebug: NOT RUN locally; Actions required.
-- Therefore status is PREPARED / UPLOAD-READY only after final package replay.

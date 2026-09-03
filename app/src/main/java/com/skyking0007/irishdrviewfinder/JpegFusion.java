@@ -98,20 +98,19 @@ final class JpegFusion {
                         sr8 / 255.0f, sg8 / 255.0f, sb8 / 255.0f);
                 float longEncodedY = linearLuma(
                         lr8 / 255.0f, lg8 / 255.0f, lb8 / 255.0f);
-                float shortSceneY = Math.max(0.000001f, linearLuma(sr, sg, sb));
-                float longSceneY = Math.max(0.000001f, linearLuma(lr, lg, lb));
-                float exposureAgreementRatio = Math.max(
-                        shortSceneY / longSceneY, longSceneY / shortSceneY);
-                float shortSignal = smoothstep(0.10f, 0.18f, shortEncodedY);
-                float brightLong = smoothstep(0.45f, 0.62f, longEncodedY);
-                float agreement = 1.0f - smoothstep(1.2746f, 1.6818f, exposureAgreementRatio);
-                float textureRecoveryWeight = clamp(
-                        shortSignal * brightLong * agreement, 0.0f, 1.0f);
+                float shortEncodedPeak = Math.max(sr8, Math.max(sg8, sb8)) / 255.0f;
+                float shortSignal = smoothstep(0.08f, 0.16f, shortEncodedY);
+                float shortHeadroom = 1.0f - smoothstep(0.985f, 0.998f, shortEncodedPeak);
+                float longDamage = Math.max(
+                        smoothstep(0.55f, 0.75f, longEncodedY),
+                        smoothstep(0.88f, 0.97f, longEncodedPeak));
+                float ownershipEvidence = shortSignal * shortHeadroom * longDamage;
+                float textureRecoveryWeight = smoothstep(0.35f, 0.65f, ownershipEvidence);
                 float shortWeight = Math.max(highlightWeight, textureRecoveryWeight);
 
-                // V2.3 remains a V2.2 JPEG-domain fusion. In bright regions where
-                // exposure-normalized SHORT and LONG agree and SHORT has real signal,
-                // actual SHORT pixels own texture instead of LONG's processed blotches.
+                // V2.4 remains a V2.3/V2.2 JPEG-domain fusion. Once bright LONG is
+                // plausibly damaged and SHORT proves its own signal/headroom, complete
+                // normalized SHORT RGB owns the pixel; damaged LONG cannot veto it.
                 float mr = lr + (sr - lr) * shortWeight;
                 float mg = lg + (sg - lg) * shortWeight;
                 float mb = lb + (sb - lb) * shortWeight;
@@ -154,11 +153,10 @@ final class JpegFusion {
                     tb *= gammaScale;
                 }
 
-                // Preserve V1.4.7 HDR luminance while preventing normalized SHORT JPEG
-                // chroma errors from creating red/orange/pink speckles. LONG owns color
-                // throughout the handoff unless LONG has lost at least two highlight
-                // channels and SHORT has usable signal. This is strictly pixel-local.
-                if (highlightWeight > 0.0005f && textureRecoveryWeight < 0.50f) {
+                // Preserve V1.4.7 HDR luminance. Live/fallback highlight color remains
+                // LONG-first only when the still recovery gate has not begun validated
+                // SHORT ownership; never repaint LONG chroma over recovered SHORT RGB.
+                if (highlightWeight > 0.0005f && textureRecoveryWeight < 0.05f) {
                     applyHighlightColorOwnership(
                             tr, tg, tb,
                             lr, lg, lb,

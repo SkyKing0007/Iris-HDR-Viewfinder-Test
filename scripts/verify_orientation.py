@@ -19,7 +19,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.3 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.4 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -49,7 +49,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.3 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.4 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -541,7 +541,7 @@ def smoothstep_math(edge0, edge1, value):
 
 def map_peak_math(scene_peak, exposure_ratio, brightness_ev=0.0):
     ratio, stops, _, white_anchor, display_ceiling = v147_policy(exposure_ratio)
-    boosted = scene_peak * (2.0 ** max(-4.0, min(4.0, brightness_ev)))
+    boosted = scene_peak * (2.0 ** max(-16.0, min(1.0, brightness_ev)))
     knee = 0.70
     if boosted <= knee:
         return boosted
@@ -568,13 +568,14 @@ require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
 # 038 / 042 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.2' in workflow
-        and 'run-id: 33678538693' in workflow,
-        "workflow must download the exact successful V1.4.11 V2.2 Actions authority")
-require('run-id: 33675083158' not in workflow
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.3' in workflow
+        and 'run-id: 33691180722' in workflow,
+        "workflow must download the exact successful V1.4.11 V2.3 Actions authority")
+require('run-id: 33678538693' not in workflow
+        and 'run-id: 33675083158' not in workflow
         and 'run-id: 33667545707' not in workflow
         and 'run-id: 33464019593' not in workflow,
-        "V1.4.11 V2.3 must never fall back to V2.1/V2/V1.4.11 authority")
+        "V1.4.11 V2.4 must never fall back behind successful V2.3 authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -649,7 +650,7 @@ require('controller.setStillFusionView(glView);' in main
         and 'GLUtils.texImage2D' in gl
         and 'GLES30.glReadPixels' in gl
         and 'GPU_STILL_FUSION' in gl,
-        "V2.3 primary full-resolution still fusion must run through the existing V2.2 GLES3 context")
+        "V2.4 must preserve V2.3 primary full-resolution still fusion through the existing GLES3 context")
 fallback_block = saver[saver.index('private void submitCpuFusionFallback'):saver.index('private void submitFusedBytes')]
 require('submitCpuFusionFallback' in saver and 'GPU_STILL_FUSION_FALLBACK' in saver
         and saver.count('JpegFusion.fuse(') == 1
@@ -659,36 +660,53 @@ require('submitCpuFusionFallback' in saver and 'GPU_STILL_FUSION_FALLBACK' in sa
 require(not (ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java').exists()
         and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_demosaic.frag').exists()
         and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_fusion.frag').exists(),
-        "V2.3 must be derived only from V2.2; non-V2.2 RAW-fusion files are forbidden")
+        "V2.4 must remain on the successful V2.3 JPEG architecture; RAW-fusion files are forbidden")
 require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
-        "V2.3 must preserve V2.2 tracked-file universe; no new still shader asset is permitted")
+        "V2.4 must preserve V2.3 tracked-file universe; no new still shader asset is permitted")
 require('root.put("displayBrightnessEv", displayBrightnessEv);' in saver
         and 'root.put("displayGamma", displayGamma);' in saver,
         "capture metadata must record the applied Brightness EV and Gamma")
 
-# V2.3 SHORT texture recovery is fail-closed and pixel-local.
+# V2.4 permanent regression: damaged LONG must never veto validated SHORT RGB.
 require('reliableShortTextureWeight' in hdr_shader
-        and 'smoothstep(0.10, 0.18' in hdr_shader
-        and 'smoothstep(0.45, 0.62' in hdr_shader
-        and 'smoothstep(1.2746, 1.6818' in hdr_shader
-        and 'textureRecoveryWeight < 0.50' in hdr_shader
+        and 'smoothstep(0.08, 0.16' in hdr_shader
+        and 'smoothstep(0.985, 0.998, max3(shortRgb))' in hdr_shader
+        and 'smoothstep(0.55, 0.75' in hdr_shader
+        and 'smoothstep(0.88, 0.97' in hdr_shader
+        and 'smoothstep(0.35, 0.65, ownershipEvidence)' in hdr_shader
+        and 'textureRecoveryWeight < 0.05' in hdr_shader
         and 'textureRecoveryWeight = mode == 3' in hdr_shader,
-        "GPU still fusion reliable-SHORT gate missing")
+        "GPU still fusion damaged-LONG/validated-SHORT ownership gate missing")
+require('exposureAgreementRatio' not in hdr_shader
+        and 'exposureAgreementRatio' not in fusion
+        and '1.2746' not in hdr_shader
+        and '1.6818' not in hdr_shader
+        and '1.2746f' not in fusion
+        and '1.6818f' not in fusion,
+        "damaged LONG JPEG radiometric agreement must not veto SHORT recovery")
+require('shortHeadroom' in hdr_shader and 'shortHeadroom' in fusion
+        and 'longDamage' in hdr_shader and 'longDamage' in fusion
+        and 'ownershipEvidence' in hdr_shader and 'ownershipEvidence' in fusion,
+        "GPU and CPU fallback must share SHORT validity + LONG damage evidence")
 require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
         "SHORT texture recovery must remain pixel-local; no neighborhood hallucination/fill operator")
 def smoothstep(a, b, x):
     t = max(0.0, min(1.0, (x - a) / (b - a)))
     return t * t * (3.0 - 2.0 * t)
-def reliable_short(short_encoded_y, long_encoded_y, normalized_ratio):
-    signal = smoothstep(0.10, 0.18, short_encoded_y)
-    bright = smoothstep(0.45, 0.62, long_encoded_y)
-    agreement_ratio = max(normalized_ratio, 1.0 / normalized_ratio)
-    agreement = 1.0 - smoothstep(1.2746, 1.6818, agreement_ratio)
-    return signal * bright * agreement
-require(reliable_short(0.24, 0.67, 0.99) > 0.90,
-        "office-window fixture must strongly select real SHORT texture")
-require(reliable_short(0.10, 0.34, 0.90) < 0.01,
+def reliable_short_v24(short_encoded_y, short_peak, long_encoded_y, long_peak):
+    signal = smoothstep(0.08, 0.16, short_encoded_y)
+    headroom = 1.0 - smoothstep(0.985, 0.998, short_peak)
+    damage = max(
+        smoothstep(0.55, 0.75, long_encoded_y),
+        smoothstep(0.88, 0.97, long_peak))
+    evidence = signal * headroom * damage
+    return smoothstep(0.35, 0.65, evidence)
+require(reliable_short_v24(0.24, 0.35, 0.67, 0.88) > 0.99,
+        "office-window damaged-LONG fixture must hand complete RGB ownership to SHORT")
+require(reliable_short_v24(0.10, 0.20, 0.34, 0.40) < 0.01,
         "dark office fixture must remain LONG-owned rather than importing SHORT noise")
+require(reliable_short_v24(0.30, 0.999, 0.90, 1.00) < 0.01,
+        "clipped SHORT must fail closed even when LONG is damaged")
 require('applySafeSystemBarInsets(root, panel);' in main
         and 'WindowInsets.Type.systemBars()' in main
         and 'panelBottom + bottom' in main,
@@ -806,4 +824,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.3 REGRESSION PASS: V2.2-only lineage, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, GLES3-primary still fusion, reliable real-SHORT bright texture, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")
+print("V1.4.11 V2.4 REGRESSION PASS: exact V2.3 authority, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, GLES3-primary still fusion, damaged-LONG cannot veto validated SHORT RGB, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")

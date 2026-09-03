@@ -165,19 +165,18 @@ vec3 highlightColorOwnership(
     return clamp(vec3(targetY) + chroma * clamp(gamutScale, 0.0, 1.0), 0.0, 1.0);
 }
 
-float reliableShortTextureWeight(
-        vec3 shortRgb, vec3 longRgb, vec3 shortScene, vec3 longScene) {
-    // V2.3 still-only SHORT texture recovery, derived only from V2.2 JPEG inputs.
-    // Mode 2 live HDR stays byte-for-byte equivalent in ownership math; mode 3 is
-    // the off-screen still pass. SHORT is admitted only with useful signal, a bright
-    // LONG region, and radiometric agreement after exposure normalization.
-    float shortSignal = smoothstep(0.10, 0.18, encodedLuma(shortRgb));
-    float brightLong = smoothstep(0.45, 0.62, encodedLuma(longRgb));
-    float shortY = max(linearLuma(shortScene), 0.000001);
-    float longY = max(linearLuma(longScene), 0.000001);
-    float exposureAgreementRatio = max(shortY / longY, longY / shortY);
-    float agreement = 1.0 - smoothstep(1.2746, 1.6818, exposureAgreementRatio);
-    return clamp(shortSignal * brightLong * agreement, 0.0, 1.0);
+float reliableShortTextureWeight(vec3 shortRgb, vec3 longRgb) {
+    // V2.4 still-only JPEG source ownership. A damaged/flattened bright LONG JPEG
+    // must not veto real SHORT structure merely because the two rendered JPEGs no
+    // longer agree radiometrically. SHORT proves itself from its own signal/headroom;
+    // LONG contributes only a damage trigger. The returned scalar owns complete RGB.
+    float shortSignal = smoothstep(0.08, 0.16, encodedLuma(shortRgb));
+    float shortHeadroom = 1.0 - smoothstep(0.985, 0.998, max3(shortRgb));
+    float longDamage = max(
+        smoothstep(0.55, 0.75, encodedLuma(longRgb)),
+        smoothstep(0.88, 0.97, max3(longRgb)));
+    float ownershipEvidence = shortSignal * shortHeadroom * longDamage;
+    return smoothstep(0.35, 0.65, ownershipEvidence);
 }
 
 void main() {
@@ -236,7 +235,7 @@ void main() {
     // mode==3 is the V2.3 off-screen still pass. Live HDR remains mode==2 and
     // therefore retains V2.2's original SHORT admission/ownership behavior.
     float textureRecoveryWeight = mode == 3
-        ? reliableShortTextureWeight(shortRgb, longRgb, shortScene, longScene)
+        ? reliableShortTextureWeight(shortRgb, longRgb)
         : 0.0;
     float shortWeight = max(highlightWeight, textureRecoveryWeight);
 
@@ -247,9 +246,10 @@ void main() {
     vec3 displayLinear = adaptiveHdrToneMap(mergedScene * brightnessGain, ratio, bracketStops);
     displayLinear = applyDisplayGamma(displayLinear, displayGamma);
 
-    // Retain V2.2's conservative highlight chroma fallback for live HDR and for
-    // still pixels where SHORT did not independently prove reliable texture/color.
-    if (highlightWeight > 0.0005 && textureRecoveryWeight < 0.50) {
+    // Live HDR retains V2.2 highlight color ownership. In the still pass, once
+    // validated SHORT starts owning a damaged LONG pixel, do not paint LONG chroma
+    // back over that real SHORT RGB structure.
+    if (highlightWeight > 0.0005 && textureRecoveryWeight < 0.05) {
         displayLinear = highlightColorOwnership(
                 displayLinear, longScene, shortScene, longRgb, shortRgb, highlightWeight);
     }

@@ -1,55 +1,38 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.3
+# Iris HDR Viewfinder Test V1.4.11 V2.4
 
-V2.3 is derived **only** from the exact successful V1.4.11 V2.2 compiled candidate. No other Iris build is used as a runtime or algorithm source.
+V2.4 is derived **only** from the exact successful V1.4.11 V2.3 GitHub Actions compiled candidate. The V1.5.2 build was inspected only to understand the already-observed ownership failure: once LONG is damaged, LONG must not veto valid SHORT evidence. No RAW/V1.5 runtime files or algorithms are imported.
 
-## Changes from V2.2
+## Change from successful V2.3
 
-### Faster dark ↔ bright AUTO response
+### Damaged LONG can no longer veto real SHORT RGB
 
-V2.2 already owns physical AUTO exposure through its live 32x24 LONG statistics after the initial clean HAL-AE bootstrap. V2.3 keeps that ownership and changes only the response policy:
+V2.3 still required exposure-normalized SHORT and LONG JPEG luminance to agree before the still-only recovery gate could strongly select SHORT. That is self-defeating when LONG itself contains the peach/orange HAL-rendered blotch: the correct SHORT texture disagrees with the damaged LONG rendering, so LONG vetoes the evidence that should replace it.
 
-- statistics interval: 100 ms;
-- ordinary drift: unchanged 0.10 EV hysteresis and ±0.30 EV smoothing;
-- scene cut: when the measured error is at least 0.70 EV, apply the measured correction immediately on the first fresh statistic, capped at ±6 EV for safety;
-- stale statistics from the previous exposure pair remain rejected;
-- fixed ~8x / 3 EV SHORT↔LONG bracket remains unchanged.
+V2.4 changes only saved JPEG fusion ownership:
 
-### GPU-primary saved fusion
+- LONG remains the normal shadow/midtone/body source.
+- SHORT proves itself from its own encoded signal and highlight headroom.
+- LONG supplies only a bright/damage trigger; LONG-vs-SHORT radiometric agreement is **not** required once that trigger is active.
+- When the gate proves SHORT, the complete exposure-normalized **SHORT RGB** owns the pixel; LONG chroma is not painted back over it.
+- SHORT that is too dark or itself clipped fails closed to LONG.
+- The same scalar ownership math is used by the GLES3-primary still pass and the explicit CPU emergency fallback.
+- The rule remains pixel-local: no texture synthesis, sharpening, neighborhood fill, or cross-edge hallucination operator is introduced.
 
-V2.2 saved `FUSED_HDR.jpg` by decoding both still JPEGs and running the full-resolution fusion loop on the CPU. V2.3 moves that same V2.2-domain job onto the existing GLES3 context:
+On the original supplied office SHORT/LONG pair, this raises full-strength SHORT ownership over the bright outdoor ground/window texture while leaving the dark office floor overwhelmingly LONG-owned.
 
-- SHORT and LONG still JPEGs are decoded and uploaded as GPU textures;
-- the full-resolution HDR fusion, brightness, Gamma and tone-fit math reuse V2.2's existing `hdr_display.frag` in an off-screen still-only mode;
-- only the final GPU readback and JPEG encoding remain CPU-side;
-- the old CPU `JpegFusion` path remains only as an explicit failure fallback and uses the same fusion ownership rules.
+## Preserved successful V2.3 behavior
 
-### Real SHORT texture recovery
-
-The V2.2 saved path admitted SHORT primarily when LONG was already near encoded clipping. In the supplied office capture, the outdoor ground is bright and the exposure-normalized SHORT and LONG agree, but LONG is not close enough to clipping to trigger that handoff. The result is therefore overwhelmingly LONG-owned and preserves LONG's peach/orange processed blotches instead of the pine-needle/grass/dirt texture present in SHORT.
-
-V2.3 adds a fail-closed, pixel-local SHORT reliability gate using only information already present in the V2.2 SHORT/LONG pair:
-
-- SHORT must have real encoded signal;
-- LONG must be a genuinely bright region;
-- exposure-normalized SHORT and LONG luminance must agree closely;
-- otherwise LONG remains owner.
-
-No neighborhood fill, texture synthesis, sharpening or cross-edge operator is introduced.
-
-### Brightness range
-
-Brightness is now **-16.0 EV through +1.0 EV** in 0.1 EV steps. It remains presentation-only after SHORT/LONG fusion and cannot alter sensor exposure or the fixed HDR bracket. Gamma remains 0.50..2.00 with 1.00 neutral.
-
-## Preserved V2.2 behavior
-
+- exact V2.3 immediate scene-cut AUTO response;
+- 32x24 live LONG statistics every 100 ms;
+- fixed ~8x / 3 EV SHORT↔LONG bracket;
+- GLES3-primary full-resolution saved fusion with CPU fallback only on explicit GPU failure;
+- Brightness **-16.0 EV through +1.0 EV** in 0.1 EV steps;
+- Gamma 0.50..2.00, 1.00 neutral;
+- V2.2/V2.3 live HDR ownership remains unchanged (`mode=2`); the correction is still-only (`mode=3`);
 - side-by-side application ID `com.skyking0007.irishdrviewfinder.v1411v2`;
-- fixed ~3 EV AUTO HDR bracket;
-- AUTO/MANUAL ownership;
-- FOV-safe 30 fps and explicit cropped 60 fps mode;
 - producer-owned orientation/FIT geometry;
 - fixed-height status-row bounce correction;
 - shutter-time freeze of SHORT/LONG exposure/ISO/post-RAW boost/Brightness/Gamma;
-- RAW DNG and individual SHORT/LONG JPEG saves;
-- existing live HDR display fusion behavior except the requested Brightness clamp expansion.
+- RAW DNG and individual SHORT/LONG JPEG saves.
 
 Target branch: `experiment-v1.4.11-v2-brightness-4ev`.
