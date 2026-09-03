@@ -328,10 +328,11 @@ final class CameraController {
             if (characteristics == null) return;
             shortExposureNs = clampExposure(shortNs);
             longExposureNs = clampExposure(longNs);
-            if (longExposureNs < shortExposureNs) {
-                long tmp = shortExposureNs;
+            // V2.5 manual contract: the SHORT control owns the physical SHORT
+            // integration. If a requested SHORT crosses LONG, clamp SHORT at LONG
+            // instead of silently swapping the two controls and changing LONG.
+            if (shortExposureNs > longExposureNs) {
                 shortExposureNs = longExposureNs;
-                longExposureNs = tmp;
             }
             manualIso = clampIso(iso);
             recomputeManualFlickerSafetyLocked();
@@ -1566,18 +1567,20 @@ final class CameraController {
         int minIso = sensorMinIsoLocked();
         double targetLongProduct = Math.max(1.0, (double) longExposureNs * manualIso);
         boolean safeTiming = sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE;
+        // V2.5: flicker safety must never collapse the user-selected SHORT shutter
+        // onto LONG. SHORT remains the exact requested physical integration and
+        // sensor-minimum ISO. Only LONG may snap to a flicker-safe integration, with
+        // LONG ISO compensating to preserve the requested LONG exposure product.
+        manualEffectiveShortExposureNs = shortExposureNs;
+        manualEffectiveShortIso = minIso;
         if (!safeTiming) {
-            manualEffectiveShortExposureNs = shortExposureNs;
             manualEffectiveLongExposureNs = longExposureNs;
-            manualEffectiveShortIso = minIso;
             manualEffectiveLongIso = manualIso;
             manualFlickerSafetyApplied = false;
         } else {
-            long commonExposure = chooseManualFlickerSafeExposureLocked(longExposureNs, sceneFlicker);
-            manualEffectiveShortExposureNs = commonExposure;
-            manualEffectiveLongExposureNs = commonExposure;
-            manualEffectiveShortIso = minIso;
-            manualEffectiveLongIso = solveIsoForProduct(targetLongProduct, commonExposure);
+            long safeLongExposure = chooseManualFlickerSafeExposureLocked(longExposureNs, sceneFlicker);
+            manualEffectiveLongExposureNs = safeLongExposure;
+            manualEffectiveLongIso = solveIsoForProduct(targetLongProduct, safeLongExposure);
             manualFlickerSafetyApplied = true;
         }
 

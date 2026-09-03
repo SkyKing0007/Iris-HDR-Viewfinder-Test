@@ -166,10 +166,10 @@ vec3 highlightColorOwnership(
 }
 
 float reliableShortTextureWeight(vec3 shortRgb, vec3 longRgb) {
-    // V2.4 still-only JPEG source ownership. A damaged/flattened bright LONG JPEG
-    // must not veto real SHORT structure merely because the two rendered JPEGs no
-    // longer agree radiometrically. SHORT proves itself from its own signal/headroom;
-    // LONG contributes only a damage trigger. The returned scalar owns complete RGB.
+    // V2.4/V2.5 still-only JPEG luminance/detail ownership. A damaged/flattened
+    // bright LONG JPEG must not veto real SHORT structure merely because the two
+    // rendered JPEGs no longer agree radiometrically. SHORT proves useful signal
+    // and headroom; LONG contributes only a damage trigger.
     float shortSignal = smoothstep(0.08, 0.16, encodedLuma(shortRgb));
     float shortHeadroom = 1.0 - smoothstep(0.985, 0.998, max3(shortRgb));
     float longDamage = max(
@@ -177,6 +177,26 @@ float reliableShortTextureWeight(vec3 shortRgb, vec3 longRgb) {
         smoothstep(0.88, 0.97, max3(longRgb)));
     float ownershipEvidence = shortSignal * shortHeadroom * longDamage;
     return smoothstep(0.35, 0.65, ownershipEvidence);
+}
+
+float reliableShortChromaConfidence(vec3 shortRgb) {
+    // V2.5: useful SHORT luminance/detail can exist before its chroma SNR is high
+    // enough to survive a positive display Gamma lift. Keep low-signal SHORT chroma
+    // from becoming rainbow speckle on smooth bright surfaces; once encoded SHORT
+    // luma is strong, preserve the complete SHORT chromaticity.
+    return smoothstep(0.16, 0.28, encodedLuma(shortRgb));
+}
+
+vec3 mergeStillLumaAndChroma(
+        vec3 longScene,
+        vec3 shortScene,
+        float shortLumaWeight,
+        float shortChromaWeight) {
+    float targetY = mix(linearLuma(longScene), linearLuma(shortScene), shortLumaWeight);
+    vec3 colorSource = mix(longScene, shortScene, shortChromaWeight);
+    float colorY = linearLuma(colorSource);
+    if (targetY <= 0.000001 || colorY <= 0.000001) return colorSource;
+    return colorSource * (targetY / colorY);
 }
 
 void main() {
@@ -239,9 +259,19 @@ void main() {
         : 0.0;
     float shortWeight = max(highlightWeight, textureRecoveryWeight);
 
+    // V2.5 still-only split confidence: SHORT may own luminance/detail before its
+    // low-signal JPEG chroma is trustworthy. This removes the Gamma-exposed rainbow
+    // speckle without restoring the V2.3 damaged-LONG veto. Live mode==2 remains
+    // byte-for-behavior on the original RGB merge.
+    vec3 mergedScene = mix(longScene, shortScene, shortWeight);
+    if (mode == 3 && textureRecoveryWeight > 0.0005) {
+        float shortChromaWeight = shortWeight * reliableShortChromaConfidence(shortRgb);
+        mergedScene = mergeStillLumaAndChroma(
+                longScene, shortScene, shortWeight, shortChromaWeight);
+    }
+
     // HDR reconstruction completes before display brightness is applied. The slider
     // cannot change capture, bracket width, SHORT admission, or fusion ownership.
-    vec3 mergedScene = mix(longScene, shortScene, shortWeight);
     float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
     vec3 displayLinear = adaptiveHdrToneMap(mergedScene * brightnessGain, ratio, bracketStops);
     displayLinear = applyDisplayGamma(displayLinear, displayGamma);

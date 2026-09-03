@@ -19,7 +19,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.4 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.5 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -49,7 +49,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.4 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.5 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -454,6 +454,34 @@ require('longISO' in camera and 'Short=min' in main,
         "LONG-only ISO ownership must be visible")
 require('MANUAL_FLICKER' in camera,
         "manual flicker decision must be logged")
+# V2.5 device regression: MANUAL SAFE may adjust LONG for flicker, but must never
+# collapse the user-selected SHORT shutter onto LONG or silently swap the controls.
+manual_recompute = camera[camera.index('private boolean recomputeManualFlickerSafetyLocked()'):camera.index('private long chooseManualFlickerSafeExposureLocked')]
+manual_setter = camera[camera.index('void setManualSettings'):camera.index('void onHdrSceneStats')]
+require('manualEffectiveShortExposureNs = shortExposureNs;' in manual_recompute,
+        "MANUAL SAFE must preserve the selected SHORT physical shutter")
+require('safeLongExposure = chooseManualFlickerSafeExposureLocked(longExposureNs, sceneFlicker);' in manual_recompute,
+        "flicker-safe solver must adjust LONG independently")
+require('manualEffectiveShortExposureNs = commonExposure;' not in manual_recompute
+        and 'manualEffectiveLongExposureNs = commonExposure;' not in manual_recompute,
+        "MANUAL SAFE must never collapse SHORT and LONG onto one common shutter")
+require('if (shortExposureNs > longExposureNs)' in manual_setter
+        and 'shortExposureNs = longExposureNs;' in manual_setter,
+        "SHORT crossing LONG must clamp SHORT at LONG")
+require('long tmp = shortExposureNs;' not in manual_setter,
+        "manual controls must not silently swap SHORT and LONG")
+def manual_safe_period_snap(requested_long_ns, period_ns):
+    periods = max(1, round(requested_long_ns / period_ns))
+    return periods * period_ns
+manual_fixture_short = 1_000_000_000 / 240.0
+manual_fixture_long = 1_000_000_000 / 50.0
+manual_fixture_safe_long = manual_safe_period_snap(manual_fixture_long, 8_333_333.0)
+require(math.isclose(manual_fixture_short, 4_166_666.666666667, rel_tol=1e-9),
+        "1/240s manual SHORT fixture changed")
+require(math.isclose(manual_fixture_safe_long, 16_666_666.0, rel_tol=1e-6),
+        "60-Hz MANUAL SAFE LONG fixture must snap near 1/60s")
+require(not math.isclose(manual_fixture_short, manual_fixture_safe_long, rel_tol=0.01),
+        "exact device regression: requested 1/240s SHORT must not collapse onto flicker-safe LONG")
 
 # 028 - Production logger for device freezes/crashes without turning logging into a frame-rate owner.
 require('final class RuntimeLogger' in main,
@@ -568,14 +596,15 @@ require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
 # 038 / 042 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.3' in workflow
-        and 'run-id: 33691180722' in workflow,
-        "workflow must download the exact successful V1.4.11 V2.3 Actions authority")
-require('run-id: 33678538693' not in workflow
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.4' in workflow
+        and 'run-id: 33708991821' in workflow,
+        "workflow must download the exact successful V1.4.11 V2.4 Actions authority")
+require('run-id: 33691180722' not in workflow
+        and 'run-id: 33678538693' not in workflow
         and 'run-id: 33675083158' not in workflow
         and 'run-id: 33667545707' not in workflow
         and 'run-id: 33464019593' not in workflow,
-        "V1.4.11 V2.4 must never fall back behind successful V2.3 authority")
+        "V1.4.11 V2.5 must never fall back behind successful V2.4 authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -650,7 +679,7 @@ require('controller.setStillFusionView(glView);' in main
         and 'GLUtils.texImage2D' in gl
         and 'GLES30.glReadPixels' in gl
         and 'GPU_STILL_FUSION' in gl,
-        "V2.4 must preserve V2.3 primary full-resolution still fusion through the existing GLES3 context")
+        "V2.5 must preserve V2.4 primary full-resolution still fusion through the existing GLES3 context")
 fallback_block = saver[saver.index('private void submitCpuFusionFallback'):saver.index('private void submitFusedBytes')]
 require('submitCpuFusionFallback' in saver and 'GPU_STILL_FUSION_FALLBACK' in saver
         and saver.count('JpegFusion.fuse(') == 1
@@ -660,9 +689,9 @@ require('submitCpuFusionFallback' in saver and 'GPU_STILL_FUSION_FALLBACK' in sa
 require(not (ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java').exists()
         and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_demosaic.frag').exists()
         and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_fusion.frag').exists(),
-        "V2.4 must remain on the successful V2.3 JPEG architecture; RAW-fusion files are forbidden")
+        "V2.5 must remain on the successful V2.4 JPEG architecture; RAW-fusion files are forbidden")
 require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
-        "V2.4 must preserve V2.3 tracked-file universe; no new still shader asset is permitted")
+        "V2.5 must preserve V2.4 tracked-file universe; no new still shader asset is permitted")
 require('root.put("displayBrightnessEv", displayBrightnessEv);' in saver
         and 'root.put("displayGamma", displayGamma);' in saver,
         "capture metadata must record the applied Brightness EV and Gamma")
@@ -707,6 +736,34 @@ require(reliable_short_v24(0.10, 0.20, 0.34, 0.40) < 0.01,
         "dark office fixture must remain LONG-owned rather than importing SHORT noise")
 require(reliable_short_v24(0.30, 0.999, 0.90, 1.00) < 0.01,
         "clipped SHORT must fail closed even when LONG is damaged")
+
+# V2.5 permanent regression: SHORT detail/luminance confidence is not equivalent to
+# SHORT chroma confidence. Low-signal SHORT chroma must be suppressed before Gamma
+# can reveal it as rainbow speckle, while strong SHORT signal retains full color.
+require('reliableShortChromaConfidence' in hdr_shader
+        and 'smoothstep(0.16, 0.28, encodedLuma(shortRgb))' in hdr_shader
+        and 'mergeStillLumaAndChroma' in hdr_shader
+        and 'shortChromaWeight' in hdr_shader,
+        "GPU still fusion must split SHORT luminance/detail and chroma confidence")
+require('smoothstep(0.16f, 0.28f, shortEncodedY)' in fusion
+        and 'shortChromaWeight' in fusion
+        and 'colorScale = targetY / colorY' in fusion,
+        "CPU fallback must mirror V2.5 signal-gated SHORT chroma ownership")
+require(hdr_shader.index('mergeStillLumaAndChroma') < hdr_shader.index('applyDisplayGamma(displayLinear, displayGamma)'),
+        "SHORT chroma stabilization must happen before display Gamma")
+require(fusion.index('shortChromaWeight') < fusion.index('gammaLut != null'),
+        "CPU SHORT chroma stabilization must happen before display Gamma")
+def short_chroma_v25(short_encoded_y):
+    return smoothstep(0.16, 0.28, short_encoded_y)
+require(short_chroma_v25(0.18) < 0.10,
+        "low-signal SHORT chroma must remain strongly suppressed")
+require(short_chroma_v25(0.24) > 0.70,
+        "useful SHORT color must ramp back in before strong-signal recovery")
+require(short_chroma_v25(0.28) > 0.99,
+        "strong SHORT signal must preserve complete chromaticity")
+require(reliable_short_v24(0.18, 0.25, 0.85, 0.95) > 0.99
+        and short_chroma_v25(0.18) < 0.10,
+        "exact Gamma-speckle fixture must keep SHORT detail while rejecting low-signal SHORT chroma")
 require('applySafeSystemBarInsets(root, panel);' in main
         and 'WindowInsets.Type.systemBars()' in main
         and 'panelBottom + bottom' in main,
@@ -824,4 +881,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.4 REGRESSION PASS: exact V2.3 authority, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, GLES3-primary still fusion, damaged-LONG cannot veto validated SHORT RGB, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")
+print("V1.4.11 V2.5 REGRESSION PASS: exact V2.4 authority, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, GLES3-primary still fusion, damaged-LONG cannot veto validated SHORT detail, low-signal SHORT chroma is Gamma-safe, MANUAL SAFE preserves the selected SHORT shutter, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")

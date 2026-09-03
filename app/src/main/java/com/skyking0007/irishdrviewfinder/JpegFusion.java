@@ -108,12 +108,28 @@ final class JpegFusion {
                 float textureRecoveryWeight = smoothstep(0.35f, 0.65f, ownershipEvidence);
                 float shortWeight = Math.max(highlightWeight, textureRecoveryWeight);
 
-                // V2.4 remains a V2.3/V2.2 JPEG-domain fusion. Once bright LONG is
-                // plausibly damaged and SHORT proves its own signal/headroom, complete
-                // normalized SHORT RGB owns the pixel; damaged LONG cannot veto it.
+                // V2.5 keeps V2.4 SHORT luminance/detail ownership, but low-signal
+                // SHORT JPEG chroma gets a stricter confidence gate before Gamma can
+                // magnify it into rainbow speckle. Strong SHORT signal still carries
+                // complete SHORT chromaticity, so damaged LONG cannot regain veto.
                 float mr = lr + (sr - lr) * shortWeight;
                 float mg = lg + (sg - lg) * shortWeight;
                 float mb = lb + (sb - lb) * shortWeight;
+                if (textureRecoveryWeight > 0.0005f) {
+                    float shortChromaConfidence = smoothstep(0.16f, 0.28f, shortEncodedY);
+                    float shortChromaWeight = shortWeight * shortChromaConfidence;
+                    float targetY = linearLuma(mr, mg, mb);
+                    float cr = lr + (sr - lr) * shortChromaWeight;
+                    float cg = lg + (sg - lg) * shortChromaWeight;
+                    float cb = lb + (sb - lb) * shortChromaWeight;
+                    float colorY = linearLuma(cr, cg, cb);
+                    if (targetY > 0.000001f && colorY > 0.000001f) {
+                        float colorScale = targetY / colorY;
+                        mr = cr * colorScale;
+                        mg = cg * colorScale;
+                        mb = cb * colorScale;
+                    }
+                }
 
                 float scenePeak = Math.max(mr, Math.max(mg, mb));
 
