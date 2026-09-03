@@ -13,6 +13,8 @@ uniform int haveLong;
 uniform float exposureRatio;
 uniform float displayBrightnessEv;
 uniform float displayGamma;
+uniform float stillRegistrationConfidence;
+uniform vec3 stillShortLinearGain;
 uniform vec2 fullFitScale;
 uniform vec2 splitFitScale;
 
@@ -165,52 +167,63 @@ vec3 highlightColorOwnership(
     return clamp(vec3(targetY) + chroma * clamp(gamutScale, 0.0, 1.0), 0.0, 1.0);
 }
 
-float shortOwnershipEvidenceAt(vec2 sampleUv) {
+float savedRadiometricRatio(vec3 shortRgb, vec3 longRgb) {
+    vec3 mappedShortScene = srgbToLinear(shortRgb) * stillShortLinearGain;
+    vec3 longScene = srgbToLinear(longRgb);
+    return linearLuma(mappedShortScene) / max(linearLuma(longScene), 0.00001);
+}
+
+float savedSupportEvidenceAt(vec2 sampleUv) {
     vec3 sampleShort = texture(shortTex, sampleUv).rgb;
     vec3 sampleLong = texture(longTex, sampleUv).rgb;
-    float shortSignal = smoothstep(0.14, 0.24, encodedLuma(sampleShort));
-    float shortHeadroom = 1.0 - smoothstep(0.985, 0.998, max3(sampleShort));
-    float longDamage = max(
-        smoothstep(0.62, 0.78, encodedLuma(sampleLong)),
-        smoothstep(0.90, 0.98, max3(sampleLong)));
-    return shortSignal * shortHeadroom * longDamage;
+    float shortSignal = smoothstep(0.06, 0.14, encodedLuma(sampleShort));
+    float shortHeadroom = 1.0 - smoothstep(0.965, 0.995, max3(sampleShort));
+    float secondLong = secondLargest3(sampleLong);
+    float radiometricRatio = savedRadiometricRatio(sampleShort, sampleLong);
+    return shortSignal * shortHeadroom
+        * smoothstep(0.45, 0.68, encodedLuma(sampleLong))
+        * smoothstep(0.72, 0.90, secondLong)
+        * smoothstep(1.10, 1.34, radiometricRatio);
 }
 
-float coherentShortOwnership(vec2 uv, vec3 centerShortRgb) {
-    // V2.6 still-only source provenance. Neighboring pixels may vote only on the
-    // scalar ownership mask; output RGB always comes from the center LONG or SHORT
-    // captured JPEG pixel. The wider 3x3 footprint prevents grass/dirt/foliage from
-    // alternating LONG/SHORT ownership pixel-by-pixel without inventing image data.
-    vec2 texel = 1.0 / vec2(textureSize(longTex, 0));
-    vec2 radius = texel * 6.0;
+float savedCardinalSupport(vec2 uv, vec2 texel, float radius) {
     float evidence = 0.0;
-    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(-radius.x, -radius.y), vec2(0.0), vec2(1.0)));
-    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(0.0, -radius.y), vec2(0.0), vec2(1.0)));
-    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(radius.x, -radius.y), vec2(0.0), vec2(1.0)));
-    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(-radius.x, 0.0), vec2(0.0), vec2(1.0)));
-    evidence += shortOwnershipEvidenceAt(uv);
-    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(radius.x, 0.0), vec2(0.0), vec2(1.0)));
-    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(-radius.x, radius.y), vec2(0.0), vec2(1.0)));
-    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(0.0, radius.y), vec2(0.0), vec2(1.0)));
-    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(radius.x, radius.y), vec2(0.0), vec2(1.0)));
-    float neighborhoodEvidence = evidence / 9.0;
-
-    float centerSignal = smoothstep(0.08, 0.14, encodedLuma(centerShortRgb));
-    float centerHeadroom = 1.0 - smoothstep(0.985, 0.998, max3(centerShortRgb));
-    return centerSignal * centerHeadroom * smoothstep(0.28, 0.58, neighborhoodEvidence);
+    evidence += savedSupportEvidenceAt(clamp(uv + vec2(-radius * texel.x, 0.0), vec2(0.0), vec2(1.0)));
+    evidence += savedSupportEvidenceAt(clamp(uv + vec2( radius * texel.x, 0.0), vec2(0.0), vec2(1.0)));
+    evidence += savedSupportEvidenceAt(clamp(uv + vec2(0.0, -radius * texel.y), vec2(0.0), vec2(1.0)));
+    evidence += savedSupportEvidenceAt(clamp(uv + vec2(0.0,  radius * texel.y), vec2(0.0), vec2(1.0)));
+    return 0.25 * evidence;
 }
 
-vec3 liftShortProvenanceRgb(vec3 shortRgb, float bracketStops) {
-    // Rendered HAL JPEG is not RAW radiance. Use the bracket only to choose a
-    // bounded display-domain lift; never multiply the saved-JPEG SHORT by the full
-    // physical exposure ratio. One scalar preserves center-pixel RGB ratios.
-    float y = encodedLuma(shortRgb);
-    if (y <= 0.000001) return shortRgb;
-    float exponent = clamp(0.82 - 0.075 * (bracketStops - 1.0), 0.58, 0.82);
-    float targetY = pow(clamp(y, 0.0, 1.0), exponent);
-    float requestedScale = targetY / y;
-    float gamutScale = 1.0 / max(max3(shortRgb), 0.000001);
-    return clamp(shortRgb * min(requestedScale, gamutScale), 0.0, 1.0);
+float coherentShortOwnership(vec2 uv, vec3 centerShortRgb, vec3 centerLongRgb) {
+    // V2.7 saved fusion: brightness alone cannot grant SHORT ownership. The
+    // registered, radiometrically mapped SHORT must prove LONG lost radiance,
+    // and fixed cardinal samples at radii 2 and 6 must support that loss unless
+    // the center is a very strong multi-channel clip. This exact sparse lattice
+    // is shared with the CPU fallback; no filtered neighborhood is substituted.
+    float shortSignal = smoothstep(0.06, 0.14, encodedLuma(centerShortRgb));
+    float shortHeadroom = 1.0 - smoothstep(0.965, 0.995, max3(centerShortRgb));
+    float longEncodedY = encodedLuma(centerLongRgb);
+    float secondLong = secondLargest3(centerLongRgb);
+    float radiometricRatio = savedRadiometricRatio(centerShortRgb, centerLongRgb);
+    float twoChannel = smoothstep(0.78, 0.94, secondLong);
+    float radiometric = smoothstep(0.50, 0.74, longEncodedY)
+        * twoChannel
+        * smoothstep(1.30, 1.75, radiometricRatio);
+    float hard = smoothstep(0.975, 0.997, secondLong)
+        * smoothstep(1.14, 1.42, radiometricRatio);
+    float primary = max(radiometric, hard);
+
+    vec2 texel = 1.0 / vec2(textureSize(longTex, 0));
+    float context2 = savedCardinalSupport(uv, texel, 2.0);
+    float context6 = savedCardinalSupport(uv, texel, 6.0);
+    float coherence = sqrt(
+        smoothstep(0.12, 0.45, context2)
+        * smoothstep(0.10, 0.40, context6));
+    float strong = hard * smoothstep(1.65, 2.20, radiometricRatio);
+    float registrationGate = smoothstep(0.58, 0.78, stillRegistrationConfidence);
+    return shortSignal * shortHeadroom * primary
+        * max(coherence, strong) * registrationGate;
 }
 
 vec3 applyPhotographicBodyTone(vec3 rgb) {
@@ -280,17 +293,15 @@ void main() {
         0.995,
         longEncodedPeak) * shortConfidence;
 
-    // V2.6: live mode==2 retains V2.5/V2.2 physical-ratio HDR ownership. Saved
-    // mode==3 is JPEG-domain source provenance: a coherent scalar mask chooses the
-    // complete center LONG or complete center SHORT RGB sample. No luma/chroma
-    // recombination and no per-pixel physical-ratio reconstruction of saved SHORT.
+    // V2.7: live mode==2 retains V2.6/V2.2 physical-ratio HDR ownership unchanged.
+    // Saved mode==3 uses registered SHORT, a robust global SHORT->LONG appearance
+    // mapping, and the accepted sparse radiometric-coherence ownership mask.
     float stillShortOwnership = mode == 3
-        ? coherentShortOwnership(uv, shortRgb)
+        ? coherentShortOwnership(uv, shortRgb, longRgb)
         : 0.0;
     vec3 mergedScene;
     if (mode == 3) {
-        vec3 shortProvenanceRgb = liftShortProvenanceRgb(shortRgb, bracketStops);
-        vec3 shortProvenanceScene = srgbToLinear(shortProvenanceRgb);
+        vec3 shortProvenanceScene = srgbToLinear(shortRgb) * stillShortLinearGain;
         mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);
     } else {
         mergedScene = mix(longScene, shortScene, highlightWeight);

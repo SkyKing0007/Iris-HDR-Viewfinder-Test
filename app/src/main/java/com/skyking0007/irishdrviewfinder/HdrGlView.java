@@ -576,6 +576,12 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "displayGamma"),
                     displayGamma);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "stillRegistrationConfidence"),
+                    0.0f);
+            GLES30.glUniform3f(
+                    GLES30.glGetUniformLocation(displayProgram, "stillShortLinearGain"),
+                    1.0f, 1.0f, 1.0f);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 
@@ -599,6 +605,20 @@ final class HdrGlView extends GLSurfaceView {
                 JpegFusion.recycleBitmap(longBitmap);
                 throw new IllegalStateException("Short/long JPEG dimensions do not match for GPU fusion");
             }
+
+            JpegFusion.Registration registration = JpegFusion.estimateRegistration(shortBitmap, longBitmap);
+            Bitmap alignedShort = JpegFusion.alignShortToLong(shortBitmap, registration);
+            JpegFusion.recycleBitmap(shortBitmap);
+            shortBitmap = alignedShort;
+            JpegFusion.AppearanceGain appearanceGain =
+                    JpegFusion.estimateAppearanceGain(shortBitmap, longBitmap, exposureRatio);
+            RuntimeLogger.event(
+                    "GPU_STILL_REGISTRATION",
+                    String.format(java.util.Locale.US,
+                            "sampleDx=%+.3f sampleDy=%+.3f score=%.4f margin=%.4f cycle=%.3f confidence=%.3f gain=%.3f/%.3f/%.3f",
+                            registration.sampleDx, registration.sampleDy, registration.score,
+                            registration.margin, registration.cycleError, registration.confidence,
+                            appearanceGain.r, appearanceGain.g, appearanceGain.b));
 
             int width = shortBitmap.getWidth();
             int height = shortBitmap.getHeight();
@@ -672,6 +692,12 @@ final class HdrGlView extends GLSurfaceView {
                 GLES30.glUniform1f(
                         GLES30.glGetUniformLocation(displayProgram, "displayGamma"),
                         Math.max(0.50f, Math.min(2.00f, gamma)));
+                GLES30.glUniform1f(
+                        GLES30.glGetUniformLocation(displayProgram, "stillRegistrationConfidence"),
+                        registration.confidence);
+                GLES30.glUniform3f(
+                        GLES30.glGetUniformLocation(displayProgram, "stillShortLinearGain"),
+                        appearanceGain.r, appearanceGain.g, appearanceGain.b);
                 GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
 
                 ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4)

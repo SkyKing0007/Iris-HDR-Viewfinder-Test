@@ -1,64 +1,86 @@
-Iris HDR Viewfinder Test V1.4.11 V2.6
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.7 V1.1 COMPILER-CORRECTION PACKAGE INFO
 
-STATUS BEFORE ACTIONS: PREPARED / UPLOAD-READY - NOT BUILD-PROVEN
-TARGET BRANCH: experiment-v1.4.11-v2-brightness-4ev
-BACKUP: NOT CREATED, per user instruction.
+STATUS
+PREPARED / UPLOAD-READY, NOT BUILD-PROVEN.
+This V1.1 correction supersedes failed V2.7 run 33812132460; it restores only the exact V2.6 mapLut helper in runtime math and adds the failure as a regression assertion.
+No source commit or push performed by ChatGPT.
+No backup created; this is a localized saved-fusion correction and preserves successful V2.6 capture/exposure architecture.
 
-RUNTIME AUTHORITY
-- Exact successful V1.4.11 V2.5 GitHub Actions compiled candidate.
-- Commit: ac7b2d133f9a36d70a4e34a5011c2b3f6718d7de
-- Tree: ed574a002f27f88b4904983f0632865d022451a0
-- Actions run: 33712399624
-- Artifact ID: 9877374563
-- Artifact digest: sha256:8ffe2c930a7cc794087f87d652d6ebb6e6bae834c78980cbf9878876b05e237e
-- APK SHA-256: b78b9ccabb2fae492309d950e4ce37802833ec26599e070b649564711c0fe97c
-- Source candidate TAR SHA-256: 86de2cd3db784947010cf456b1b76dba2a0b2c42b8244bb5570106905ba0ff67
-- Runtime manifest SHA-256: 3c56ae7b9bb24d27492439897c532ff1ceb19b2939d5af00b9482324d447d603
-- Repository manifest SHA-256: 406080fc167cced85f17bdf88796a0f97ff3c33a232ad2954d8a806219e21fdc
-- REGRESSIONS SHA-256: c74fee5727a12079adc3606cc9d2671a20f4d22c03a466f86ff75c00ba09de02
+TARGET
+Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
+Branch: experiment-v1.4.11-v2-brightness-4ev
+Target versionCode: 24
+Target versionName: 1.0-v1.4.11-v2.7
+Application ID: com.skyking0007.irishdrviewfinder.v1411v2
+
+RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
+Commit: baea5c2f5ee865d1cededa42d3b14f42dc5f23bd
+Tree: ca44fa112e4f4c11bf8aaaee2dd84d02a0809515
+GitHub Actions run: 33785286598 — SUCCESS
+Artifact ID: 9905210635
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.6
+Artifact digest: sha256:7fb51dffd02de94badb75f496b330c3f471f93e012e563b74dd7d67fb63f6266
+V2.6 APK SHA-256: 11ce0746db94f59c49c44955ddb0b4b253f2efa9c34602d6fc8554ef8dfb7b8a
+V2.6 source-candidate TAR SHA-256: e1c7d31ef0ad2b31f3f51f728d5b797b4fc9a43364bd9bb01f629e67f76a021b
+V2.6 runtime manifest SHA-256: f229c5846acd14f2db05d896e7003bf116105444a4456ed6f6dfb39ec35278a7
+V2.6 repository manifest SHA-256: f38dbf2192dbd099ea723884d74575283bd3e00d2109daed2e2b48eb4b066cc3
+V2.6 regressions SHA-256: 954a4e74285f9e6134265ee0063ab44a3dddccda6c4bd6cec4c64d1900b0c446
 
 VERIFICATION-MECHANICS AUTHORITY
-- Exact successful V1.4.11 V2.5 workflow implementation and gate order.
-- 25 tracked files / 12 runtime files retained; no runtime file is added or deleted.
-- Exact authority artifact reconstruction/manifests/path-set/byte-equality, embedded-Python syntax, complete GLSL reserved scan, pinned glslangValidator, project Java compiler, deterministic full-index patches, PRE-BUILD SAFETY PROOF, full assembleDebug, one-APK proof, post-build invariance and final artifact export remain in the same order.
+Exact successful V2.6 workflow/build implementation and 15-step order.
+No compiler/build/patch/freeze stage is added, removed, reordered, simplified or substituted.
+Infrastructure changes are narrow authority/version/hash/allowlist/protected-set/regression-pin advances only. V1.1 does not add/remove/reorder any workflow step.
 
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST: EXACTLY 2
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 3
 - app/src/main/assets/shaders/hdr_display.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 
-INFRASTRUCTURE CHANGED-FILE LIST
+INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - .github/workflows/build.yml
 - BUILD_WORKFLOW_COPY.yml
 - scripts/verify_orientation.py
 
-INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION: YES, NARROWLY
-- Authority/version/hash/allowlist/regression pins advance to V2.6.
-- Compiler/build/patch/provenance gate order remains unchanged.
+CANDIDATE METADATA / DELIVERY CHANGES
+- PACKAGE_INFO.txt
+- PACKAGE_MANIFEST_SHA256.txt
+- README.md
+- VSCODE_DEV_UPLOAD.txt
+- app/build.gradle.kts
 
-FUNCTIONAL CHANGE 1 - TRUE SHORT JPEG PROVENANCE
-- V2.5 still fusion could alternate source ownership pixel-by-pixel and then synthesize luminance from one exposure with chroma from another.
-- V2.6 removes the saved-still luma/chroma hybrid.
-- A 3x3 low-frequency neighborhood (radius 6 pixels) votes only on a scalar source-ownership mask.
-- The center pixel RGB itself is never spatially filtered, filled, sharpened, or synthesized.
-- LONG remains the base. Damaged bright LONG can hand ownership to SHORT only when SHORT has useful signal and headroom.
-- When SHORT owns, all three channels come from the same captured SHORT JPEG pixel.
-- SHORT receives a bounded bracket-aware rendered-JPEG display lift rather than full RAW-style physical-ratio multiplication.
-- Live mode=2 retains the successful V2.5 physical-ratio HDR behavior.
+INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
+YES, NARROWLY. Only exact authority pins, target version, candidate runtime digest, protected-file set, changed-file allowlist, artifact names and applicable V2.7 regressions advance. The proven V2.6 15-step verification/build procedure itself is unchanged.
 
-FUNCTIONAL CHANGE 2 - GLOBAL PHOTOGRAPHIC SDR BODY CURVE
-- Capture exposure/AUTO policy is unchanged.
-- A global RGB-ratio-preserving curve anchors near-black, lifts the body/midtones modestly, and fades exactly to zero before the existing 0.70 highlight shoulder.
-- No local tone mapping, local contrast/pop, inpainting, sharpening, or UltraHDR path is added.
-- Brightness and Gamma remain optional presentation controls after the normalized base rendering.
+V2.7 RUNTIME DIGEST
+f4b955d149910554f6429df491e5511964bd4b99ea9f6e222c8c4bfe80237faa
+Runtime universe remains exactly 12 files; no runtime file is added or deleted.
 
-PRESERVED SUCCESSFUL V2.5 BEHAVIOR
-- MANUAL SAFE keeps the selected physical SHORT shutter; only LONG may snap for flicker.
-- Immediate scene-cut AUTO and fixed ~8x / 3EV bracket.
-- Brightness -16..+1EV and Gamma 0.50..2.00.
-- GLES3-primary saved fusion with explicit CPU fallback.
-- DNG + SHORT/LONG JPEG saving, orientation/FIT, app identity and fixed-height status.
+V2.7 SAVED-FUSION ARCHITECTURE
+- LONG remains output geometry and overall appearance/reference authority.
+- SHORT is registered into LONG coordinates first using bounded forward/backward log-luma-gradient registration with cycle consistency.
+- One robust per-channel linear-light SHORT->LONG appearance calibration is estimated from registered non-clipped overlap.
+- SHORT ownership requires usable SHORT signal/headroom plus proof that LONG lost radiance; brightness alone never grants ownership.
+- Smooth genuinely clipped whites/lights remain valid recovery targets when mapped SHORT contains usable radiance; texture is not required merely because the surface is smooth.
+- One-channel saturation, clipped SHORT, invalid borders and low registration confidence fail closed to LONG.
+- Spatial coherence uses only four cardinal samples at radius 2 and four at radius 6. No Gaussian/box/OpenCV/variable-kernel runtime operation is used.
+- Owned pixels use complete registered mapped SHORT RGB. Unowned pixels remain complete LONG RGB. No V2.5 luma/chroma hybrid, neighbor RGB fill, inpainting, sharpening or local tone map.
+- V2.6 global photographic body tone and HDR shoulder remain downstream.
+- Live mode=2, AUTO/MANUAL exposure, MANUAL SHORT shutter behavior, DNG ownership and capture routing remain protected.
 
-COMPILER STATUS BEFORE ACTIONS
-- Pinned real glslangValidator: NOT RUN locally; Actions required.
-- Real project Java compiler: NOT RUN locally; Actions required.
-- Full :app:assembleDebug: NOT RUN locally; Actions required.
+REAL-PHOTO SIMULATION ACCEPTANCE
+Exact re-uploaded 1536x2048 pairs were used before source translation.
+- WINDOW 133823: positive SHORT highlight recovery; source-equivalent ownership >0.5 ~1.113%.
+- DESK 134010: positive SHORT recovery of clipped ceiling/light/paper/desk areas; source-equivalent ownership >0.5 ~8.235%.
+- UNDER-DESK 134056: leakage protection; source-equivalent ownership >0.5 ~0.103% and known gray bottle/binder contamination absent.
+- Source-equivalent Android registration remained subpixel and full-confidence on all three pairs.
+- Adversarial low-confidence, clipped-SHORT, one-channel saturation and noisy-SHORT conditions fail closed as applicable.
+
+LOCAL COMPILER / BUILD STATUS
+GLSL RESERVED IDENTIFIER SCAN: PASS.
+PINNED REAL GLSLANG COMPILE: NOT RUN locally; no substitute counted.
+REAL PROJECT JAVA COMPILE: NOT RUN locally; Android/Gradle toolchain unavailable here.
+FULL ANDROID :app:assembleDebug: NOT RUN locally.
+GitHub Actions remains authoritative for all unrun compiler/build gates.
+
+FINAL ACTIONS AUTHORITY
+Until V2.7 Actions succeeds, final authority remains V2.6 run 33785286598 / artifact 9905210635.

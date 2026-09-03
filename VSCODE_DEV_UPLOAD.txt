@@ -1,16 +1,20 @@
-V1.4.11 V2.6 vscode.dev upload
+V1.4.11 V2.7 V1.1 vscode.dev retry upload
 
 TARGET BRANCH
 experiment-v1.4.11-v2-brightness-4ev
 
-1. Confirm the branch is still at exact successful V2.5 commit:
-   ac7b2d133f9a36d70a4e34a5011c2b3f6718d7de
+1. IMPORTANT: the failed V2.7 commit 0116960d85dd62762742b498a238c1d09bcc8790 must NOT remain as HEAD/parent for this retry.
+   Restore this branch to the exact successful V2.6 authority first:
+   baea5c2f5ee865d1cededa42d3b14f42dc5f23bd
+   This preserves the successful V2.6 workflow mechanic that requires HEAD^ to equal the exact successful authority.
 
-2. In vscode.dev on that branch, upload/replace the complete contents of the V2.6 FULL-UPLOAD ZIP at repository root. Do not add extra files.
+2. In vscode.dev on that branch, upload/replace the complete contents of the V2.7 FULL-UPLOAD ZIP at repository root. Do not add extra files.
 
 3. Commit exactly once. Suggested message:
-   V1.4.11 V2.6 true SHORT provenance + photographic body tone
+   V1.4.11 V2.7 V1.1 restore V2.6 mapLut compiler helper
 
 4. Push and let the branch-isolated GitHub Actions workflow run.
 
-GitHub Actions is authoritative compiler/build proof. Do not add another commit before the V2.6 build because the workflow intentionally requires HEAD^ to equal the exact successful V2.5 authority commit.
+GitHub Actions is the authoritative compiler/build proof. Do not add another commit before the V2.7 build because the workflow intentionally requires HEAD^ to equal the exact successful V2.6 authority commit.
+
+Do not upload this package to main or dev. Do not push APK files.

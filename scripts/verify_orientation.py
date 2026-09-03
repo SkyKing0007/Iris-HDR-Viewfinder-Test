@@ -19,7 +19,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.6 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.7 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -49,7 +49,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.6 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.7 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -231,7 +231,7 @@ require('shortConfidence' in hdr_shader and 'shortScenePeak / longScenePeak' in 
 require('float stillShortOwnership = mode == 3' in hdr_shader
         and 'mergedScene = mix(longScene, shortScene, highlightWeight);' in hdr_shader
         and 'mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);' in hdr_shader,
-        "shared shader must keep V2.5 live highlight ownership while V2.6 saved still uses provenance")
+        "shared shader must keep V2.5 live highlight ownership while V2.7 saved still uses registered provenance")
 require('float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));' in hdr_shader
         and 'applyPhotographicBodyTone(mergedScene * brightnessGain)' in hdr_shader
         and 'adaptiveHdrToneMap(bodyToned, ratio, bracketStops)' in hdr_shader,
@@ -248,14 +248,14 @@ require('float requestedScale = mappedY / y;' in hdr_shader
         "live Gamma must be luminance-driven, RGB-ratio preserving and gamut-safe")
 require('adaptiveClipStart(bracketStops)' in hdr_shader and '0.995' in hdr_shader,
         "live mode must retain V2.5 near-clipping SHORT admission")
-require('float shortOwnership = centerSignal * centerHeadroom' in fusion
+require('float shortOwnership = computeShortOwnership(' in fusion
         and 'float mr = lr + (sr - lr) * shortOwnership;' in fusion
         and 'float mg = lg + (sg - lg) * shortOwnership;' in fusion
         and 'float mb = lb + (sb - lb) * shortOwnership;' in fusion,
-        "CPU fallback must use V2.6 complete-RGB provenance ownership")
+        "CPU fallback must use V2.7 complete-RGB registered SHORT ownership")
 require('mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);' in hdr_shader
         and 'mergedScene = mix(longScene, shortScene, highlightWeight);' in hdr_shader,
-        "shared shader must separate V2.6 saved provenance from unchanged live physical-ratio merge")
+        "shared shader must separate V2.7 saved registered provenance from unchanged live physical-ratio merge")
 require('brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
         and 'float tr = mr * brightnessGain;' in fusion
         and 'targetBodyY = bodyY + 0.45f * toe * highlightProtect' in fusion,
@@ -264,6 +264,10 @@ require('buildGammaLut(clampedGamma)' in fusion
         and 'float mappedGammaY = mapLut(gammaY, gammaLut);' in fusion
         and 'float gammaScale = Math.min(requestedGammaScale, gammaGamutScale);' in fusion,
         "saved Gamma must use one per-image LUT and RGB-ratio-preserving gamut-safe scaling")
+require('private static float mapLut(float value, float[] lut) {' in fusion
+        and 'float scaled = clamp(value, 0.0f, 1.0f) * (lut.length - 1);' in fusion
+        and 'return lut[lo] + (lut[hi] - lut[lo]) * t;' in fusion,
+        "V2.7 Java compiler regression: V2.6 mapLut helper required by saved Gamma must remain present")
 require('const float knee = 0.70;' in hdr_shader and 'HDR_KNEE = 0.70f' in fusion,
         "live/save V1.4.7 HDR knee must be restored")
 require('0.82 - 0.04 * (bracketStops - 1.0)' in hdr_shader
@@ -596,15 +600,15 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.5' in workflow
-        and 'run-id: 33712399624' in workflow,
-        "workflow must download the exact successful V1.4.11 V2.5 Actions authority")
-require('run-id: 33708991821' not in workflow
+# 038 / 042 / V2.7 - Exact current pre-handoff authority pin regression.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.6' in workflow
+        and 'run-id: 33785286598' in workflow,
+        "workflow must download the exact successful V1.4.11 V2.6 Actions authority")
+require('run-id: 33712399624' not in workflow
+        and 'run-id: 33708991821' not in workflow
         and 'run-id: 33691180722' not in workflow
-        and 'run-id: 33678538693' not in workflow
-        and 'run-id: 33675083158' not in workflow,
-        "V1.4.11 V2.6 must never fall back behind successful V2.5 authority")
+        and 'run-id: 33678538693' not in workflow,
+        "V1.4.11 V2.7 must never fall back behind successful V2.6 authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -622,9 +626,9 @@ require('colorSafeFromSources' not in hdr_shader and 'colorSafeFromSources' not 
         and 'adaptiveAppearanceLift' not in hdr_shader,
         "global chroma/appearance repair must not return")
 require('mode != 3 && highlightWeight > 0.0005' in hdr_shader,
-        "legacy LONG-first highlight color owner must remain live-only in V2.6")
+        "legacy LONG-first highlight color owner must remain live-only in V2.7")
 require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
-        "V2.6 must not use textureOffset/texelFetch neighborhood RGB filtering")
+        "V2.7 must not use textureOffset/texelFetch neighborhood RGB filtering")
 
 # Brightness and Gamma are explicit WYSIWYG controls with frozen shutter-time ownership.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in main
@@ -696,75 +700,126 @@ require('root.put("displayBrightnessEv", displayBrightnessEv);' in saver
         and 'root.put("displayGamma", displayGamma);' in saver,
         "capture metadata must record the applied Brightness EV and Gamma")
 
-# V2.6 permanent regressions: coherent source provenance replaces the V2.5
-# luma/chroma hybrid while preserving the damaged-LONG fail-closed contract.
-require('shortOwnershipEvidenceAt' in hdr_shader
-        and 'coherentShortOwnership' in hdr_shader
-        and 'textureSize(longTex, 0)' in hdr_shader
-        and 'vec2 radius = texel * 6.0;' in hdr_shader
-        and hdr_shader.count('shortOwnershipEvidenceAt(') == 10,
-        "GPU still provenance must use the exact 3x3/radius-6 scalar ownership vote")
-require('smoothstep(0.14, 0.24, encodedLuma(sampleShort))' in hdr_shader
-        and 'smoothstep(0.62, 0.78, encodedLuma(sampleLong))' in hdr_shader
-        and 'smoothstep(0.90, 0.98, max3(sampleLong))' in hdr_shader
-        and 'smoothstep(0.28, 0.58, neighborhoodEvidence)' in hdr_shader,
-        "GPU coherent SHORT validity/LONG-damage thresholds changed")
-require('exposureAgreementRatio' not in hdr_shader
-        and 'exposureAgreementRatio' not in fusion
-        and '1.2746' not in hdr_shader and '1.6818' not in hdr_shader,
-        "damaged LONG JPEG radiometric agreement must never veto SHORT provenance")
-require('liftShortProvenanceRgb(shortRgb, bracketStops)' in hdr_shader
-        and 'shortProvenanceScene = srgbToLinear(shortProvenanceRgb)' in hdr_shader
+# V2.7 permanent regressions: exact accepted real-photo architecture. LONG is
+# geometry/appearance authority. Registered SHORT may contribute complete mapped
+# RGB only when SHORT has signal/headroom and proves LONG lost radiance. Fixed
+# cardinal radii 2/6 provide spatial coherence; uncertainty fails closed.
+require('static Registration estimateRegistration(Bitmap shortBitmap, Bitmap longBitmap)' in fusion
+        and 'estimateOneWayRegistration(shortBitmap, longBitmap)' in fusion
+        and 'estimateOneWayRegistration(longBitmap, shortBitmap)' in fusion
+        and 'cycleConfidence = 1.0f - smoothstep(0.45f, 1.50f, cycleError)' in fusion,
+        "V2.7 forward/backward registration with cycle consistency is missing")
+require('smoothstep(0.22f, 0.52f, bestScore)' in fusion
+        and 'smoothstep(0.002f, 0.012f, margin)' in fusion
+        and 'Math.abs(bestX) < radius && Math.abs(bestY) < radius' in fusion,
+        "V2.7 registration must remain quality/uniqueness/boundary fail-closed")
+require('matrix.postTranslate(-registration.sampleDx, -registration.sampleDy);' in fusion,
+        "registered SHORT must be drawn into unchanged LONG coordinates")
+require('JpegFusion.estimateRegistration(shortBitmap, longBitmap)' in gl
+        and 'JpegFusion.alignShortToLong(shortBitmap, registration)' in gl
+        and 'shortBitmap = alignedShort;' in gl
+        and 'estimateAppearanceGain(shortBitmap, longBitmap, exposureRatio)' in gl,
+        "GPU saved path must register SHORT before gain estimation and texture upload")
+require('Registration registration = estimateRegistration(shortBitmap, longBitmap);' in fusion
+        and 'Bitmap alignedShort = alignShortToLong(shortBitmap, registration);' in fusion
+        and 'shortBitmap = alignedShort;' in fusion
+        and 'AppearanceGain appearanceGain = estimateAppearanceGain(shortBitmap, longBitmap, exposureRatio);' in fusion,
+        "CPU fallback must use the same registered SHORT before gain estimation")
+require('final int stride = 4;' in fusion
+        and 'medianOrFallback(redRatios, redCount, fallback)' in fusion
+        and 'medianOrFallback(greenRatios, greenCount, fallback)' in fusion
+        and 'medianOrFallback(blueRatios, blueCount, fallback)' in fusion,
+        "V2.7 bounded-memory per-channel SHORT->LONG appearance calibration changed")
+require('uniform float stillRegistrationConfidence;' in hdr_shader
+        and 'uniform vec3 stillShortLinearGain;' in hdr_shader
+        and 'glUniform1f' in gl and 'stillRegistrationConfidence' in gl
+        and 'glUniform3f' in gl and 'stillShortLinearGain' in gl,
+        "GPU saved path must receive registration confidence and calibrated RGB gain")
+require('savedRadiometricRatio' in hdr_shader
+        and 'srgbToLinear(shortRgb) * stillShortLinearGain' in hdr_shader
+        and 'linearLuma(mappedShortScene) / max(linearLuma(longScene), 0.00001)' in hdr_shader,
+        "GPU radiometric SHORT->LONG comparison changed")
+require('savedCardinalSupport(uv, texel, 2.0)' in hdr_shader
+        and 'savedCardinalSupport(uv, texel, 6.0)' in hdr_shader
+        and 'savedSupportEvidenceAt' in hdr_shader,
+        "GPU ownership must use the exact fixed cardinal radii 2/6 lattice")
+require('ownershipRadius = 6' in fusion
+        and 'cardinalSupportAverage(' in fusion
+        and 'x, globalY, 2)' in fusion
+        and 'x, globalY, 6)' in fusion,
+        "CPU ownership must use the exact fixed cardinal radii 2/6 lattice")
+for token in [
+        'smoothstep(0.06, 0.14, encodedLuma(centerShortRgb))',
+        'smoothstep(0.965, 0.995, max3(centerShortRgb))',
+        'smoothstep(0.78, 0.94, secondLong)',
+        'smoothstep(0.50, 0.74, longEncodedY)',
+        'smoothstep(1.30, 1.75, radiometricRatio)',
+        'smoothstep(0.975, 0.997, secondLong)',
+        'smoothstep(1.14, 1.42, radiometricRatio)',
+        'smoothstep(0.12, 0.45, context2)',
+        'smoothstep(0.10, 0.40, context6)',
+        'smoothstep(1.65, 2.20, radiometricRatio)',
+        'smoothstep(0.58, 0.78, stillRegistrationConfidence)']:
+    require(token in hdr_shader, f"GPU accepted ownership constant changed: {token}")
+for token in [
+        'smoothstep(0.06f, 0.14f, shortEncodedY)',
+        'smoothstep(0.965f, 0.995f, shortPeak)',
+        'smoothstep(0.78f, 0.94f, secondLong)',
+        'smoothstep(0.50f, 0.74f, longEncodedY)',
+        'smoothstep(1.30f, 1.75f, radiometricRatio)',
+        'smoothstep(0.975f, 0.997f, secondLong)',
+        'smoothstep(1.14f, 1.42f, radiometricRatio)',
+        'smoothstep(0.12f, 0.45f, context2)',
+        'smoothstep(0.10f, 0.40f, context6)',
+        'smoothstep(1.65f, 2.20f, radiometricRatio)',
+        'smoothstep(0.58f, 0.78f, registrationConfidence)']:
+    require(token in fusion, f"CPU accepted ownership constant changed: {token}")
+require('vec3 shortProvenanceScene = srgbToLinear(shortRgb) * stillShortLinearGain;' in hdr_shader
         and 'mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);' in hdr_shader,
-        "saved GPU RGB must come from complete center LONG/SHORT provenance sources")
-still_branch = hdr_shader[hdr_shader.index('if (mode == 3) {'):hdr_shader.index('} else {', hdr_shader.index('if (mode == 3) {'))]
-require('* ratio' not in still_branch and 'shortScene' not in still_branch,
-        "saved mode=3 must not treat the rendered SHORT JPEG as RAW radiance")
-require('mergeStillLumaAndChroma' not in hdr_shader
-        and 'shortChromaWeight' not in hdr_shader
-        and 'textureRecoveryWeight' not in hdr_shader
-        and 'mergeStillLumaAndChroma' not in fusion
-        and 'shortChromaWeight' not in fusion,
-        "V2.5 synthesized luma/chroma hybrid must never return")
-require('ownershipNeighborhood' in fusion
-        and 'ownershipRadius = 6' in fusion
-        and 'smoothstep(0.14f, 0.24f, shortY)' in fusion
-        and 'smoothstep(0.62f, 0.78f, longY)' in fusion
-        and 'smoothstep(0.90f, 0.98f, longPeak)' in fusion
-        and 'smoothstep(0.28f, 0.58f, neighborhoodEvidence)' in fusion,
-        "CPU fallback must mirror the exact V2.6 coherent source-ownership mask")
-require('buildShortProvenanceLiftLut(bracketStops)' in fusion
-        and 'decodeEncoded(srEncoded * shortScale)' in fusion
-        and 'mr = lr + (sr - lr) * shortOwnership' in fusion,
-        "CPU fallback must use complete center SHORT RGB with the bounded provenance lift")
-require(fusion.index('buildShortProvenanceLiftLut(bracketStops)') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
-        "SHORT provenance pow must be LUT-built once before full-resolution loops")
+        "saved GPU output must mix complete LONG RGB with complete mapped registered SHORT RGB")
+require('float sr = SRGB_TO_LINEAR[sr8] * appearanceGain.r;' in fusion
+        and 'float sg = SRGB_TO_LINEAR[sg8] * appearanceGain.g;' in fusion
+        and 'float sb = SRGB_TO_LINEAR[sb8] * appearanceGain.b;' in fusion
+        and 'float mr = lr + (sr - lr) * shortOwnership;' in fusion,
+        "CPU output must mix complete LONG RGB with complete mapped registered SHORT RGB")
+require('liftShortProvenanceRgb' not in hdr_shader
+        and 'buildShortProvenanceLiftLut' not in fusion
+        and 'mergeStillLumaAndChroma' not in hdr_shader
+        and 'mergeStillLumaAndChroma' not in fusion,
+        "V2.6 power lift or old luma/chroma hybrid must not survive V2.7")
+require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
+        "saved V2.7 may sample fixed scalar support only; no alternate neighborhood RGB fetch path")
+require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kts').read_text().lower(),
+        "OpenCV must remain simulation-only and absent from runtime")
 
-# Exact scalar fixtures for source ownership. Neighborhood evidence is supplied as
-# the local coherent vote; no LONG/SHORT radiometric agreement is part of the test.
-def short_evidence_v26(short_y, short_peak, long_y, long_peak):
-    signal = smoothstep_math(0.14, 0.24, short_y)
-    headroom = 1.0 - smoothstep_math(0.985, 0.998, short_peak)
-    damage = max(smoothstep_math(0.62, 0.78, long_y), smoothstep_math(0.90, 0.98, long_peak))
-    return signal * headroom * damage
+# Exact final scalar acceptance contract. Smooth clipped whites are valid SHORT
+# recovery targets when mapped SHORT proves missing radiance; healthy bright LONG,
+# one-channel clipping, clipped SHORT, and low registration confidence fail closed.
+def short_ownership_v27(short_y, short_peak, long_y, second_long, rr, c2, c6, reg):
+    short_signal = smoothstep_math(0.06, 0.14, short_y)
+    short_headroom = 1.0 - smoothstep_math(0.965, 0.995, short_peak)
+    two_channel = smoothstep_math(0.78, 0.94, second_long)
+    radiometric = (smoothstep_math(0.50, 0.74, long_y) * two_channel
+                   * smoothstep_math(1.30, 1.75, rr))
+    hard = smoothstep_math(0.975, 0.997, second_long) * smoothstep_math(1.14, 1.42, rr)
+    primary = max(radiometric, hard)
+    coherence = math.sqrt(smoothstep_math(0.12, 0.45, c2) * smoothstep_math(0.10, 0.40, c6))
+    strong = hard * smoothstep_math(1.65, 2.20, rr)
+    reg_gate = smoothstep_math(0.58, 0.78, reg)
+    return short_signal * short_headroom * primary * max(coherence, strong) * reg_gate
 
-def ownership_v26(center_short_y, center_short_peak, neighborhood_evidence):
-    center_signal = smoothstep_math(0.08, 0.14, center_short_y)
-    center_headroom = 1.0 - smoothstep_math(0.985, 0.998, center_short_peak)
-    return center_signal * center_headroom * smoothstep_math(0.28, 0.58, neighborhood_evidence)
-
-ground_evidence = short_evidence_v26(0.27, 0.50, 0.80, 0.92)
-ceiling_evidence = short_evidence_v26(0.20, 0.26, 0.58, 0.67)
-dark_evidence = short_evidence_v26(0.10, 0.20, 0.34, 0.40)
-clipped_evidence = short_evidence_v26(0.30, 0.999, 0.90, 1.00)
-require(ground_evidence > 0.95 and ownership_v26(0.27, 0.50, ground_evidence) > 0.95,
-        "office-window ground fixture must hand complete RGB provenance to SHORT")
-require(ceiling_evidence < 0.01 and ownership_v26(0.20, 0.26, ceiling_evidence) < 0.01,
-        "Gamma-speckle ceiling fixture must remain LONG-owned unless LONG is truly damaged")
-require(dark_evidence < 0.01 and ownership_v26(0.10, 0.20, dark_evidence) < 0.01,
-        "dark/no-signal SHORT must fail closed to LONG")
-require(clipped_evidence < 0.01 and ownership_v26(0.30, 0.999, clipped_evidence) < 0.01,
-        "clipped SHORT must fail closed even when LONG is damaged")
+require(short_ownership_v27(0.30, 0.55, 0.72, 0.76, 1.05, 0.8, 0.8, 1.0) < 0.001,
+        "healthy bright LONG must remain exact LONG when SHORT does not prove lost radiance")
+require(short_ownership_v27(0.30, 0.55, 0.99, 0.999, 2.0, 0.8, 0.8, 1.0) > 0.95,
+        "genuinely clipped smooth LONG with usable SHORT radiance must be recoverable")
+require(short_ownership_v27(0.995, 0.999, 0.99, 0.999, 2.0, 0.8, 0.8, 1.0) < 0.001,
+        "clipped SHORT must fail closed")
+require(short_ownership_v27(0.30, 0.55, 0.90, 0.55, 2.0, 0.8, 0.8, 1.0) < 0.001,
+        "one-channel LONG saturation must not surrender complete RGB ownership")
+require(short_ownership_v27(0.30, 0.55, 0.99, 0.999, 2.0, 0.8, 0.8, 0.45) < 0.001,
+        "low registration confidence must force exact LONG fallback")
+require(short_ownership_v27(0.30, 0.55, 0.90, 0.92, 1.8, 0.9, 0.9, 1.0) > 0.50,
+        "broad damaged LONG with coherent valid SHORT must remain eligible")
 
 # Global photographic body tone is tone reproduction only: black stays anchored,
 # body/midtones rise, and extra lift is zero before the 0.70 HDR shoulder.
@@ -792,9 +847,9 @@ require(body_tone_v26(0.20) > 0.26 and body_tone_v26(0.40) > 0.49,
 require(math.isclose(body_tone_v26(0.68), 0.68, abs_tol=1e-6)
         and math.isclose(body_tone_v26(0.75), 0.75, abs_tol=1e-6),
         "body lift must be zero before and throughout recovered-highlight shoulder")
-# No local tone map / local contrast operator is introduced by V2.6.
+# No local tone map / local contrast operator is introduced by V2.7.
 require('localTone' not in hdr_shader and 'unsharp' not in hdr_shader and 'sharpen' not in hdr_shader,
-        "V2.6 must remain a restrained global SDR tone curve without local pop/sharpening")
+        "V2.7 must remain a restrained global SDR tone curve without local pop/sharpening")
 
 require('applySafeSystemBarInsets(root, panel);' in main
         and 'WindowInsets.Type.systemBars()' in main
@@ -810,6 +865,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
+require('versionCode = 24' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.7"' in Path('app/build.gradle.kts').read_text(),
+        "V2.7 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -839,8 +897,8 @@ require('captureShortExposureNs' in still_burst and 'captureLongExposureNs' in s
 require('CAPTURE_INPUTS' in camera and 'acquiredMs=' in camera and 'totalMs=' in camera,
         "minimal capture timing evidence must separate sensor acquisition from post-processing")
 
-# 041 / 043 / V2.6 - Full-resolution CPU fallback stays allocation-light. All
-# pow work (Brightness, Gamma, SHORT provenance lift) is computed once per image.
+# 041 / 043 / V2.7 - Full-resolution CPU fallback stays allocation-light. Expensive
+# power/LUT setup is outside the per-pixel output loop; sparse support reuses strip buffers.
 inner = fusion[fusion.index('for (int row = 0; row < rows; row++)'):fusion.index('output.setPixels')]
 for forbidden in ['Math.exp(', 'Math.pow(', 'Math.sqrt(', 'Math.log(', 'new float[']:
     require(forbidden not in inner, f"expensive/per-pixel saved-fusion operation returned: {forbidden}")
@@ -850,11 +908,8 @@ require('float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in 
 require('buildGammaLut(clampedGamma)' in fusion
         and fusion.index('buildGammaLut(clampedGamma)') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
         "Gamma LUT must be computed once before full-resolution loops")
-require('buildShortProvenanceLiftLut(bracketStops)' in fusion
-        and fusion.index('buildShortProvenanceLiftLut(bracketStops)') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
-        "SHORT provenance lift LUT must be computed once before full-resolution loops")
-require('float[] ownershipEvidence = new float[width * maxReadRows];' in fusion,
-        "coherent ownership evidence must reuse one strip buffer rather than allocate per pixel")
+require('float[] supportEvidence = new float[width * maxReadRows];' in fusion,
+        "radiometric coherence support must reuse one strip buffer rather than allocate per pixel")
 
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
@@ -916,4 +971,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.6 REGRESSION PASS: exact V2.5 authority, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, real MANUAL SHORT shutter, coherent center-pixel SHORT provenance, Gamma-safe damaged-LONG gating, global photographic body tone, GLES3-primary saved fusion, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")
+print("V1.4.11 V2.7 REGRESSION PASS: exact successful V2.6 authority, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, real MANUAL SHORT shutter, LONG-reference registered SHORT, radiometric lost-LONG proof, clipped desk/window recovery, under-desk fail-closed, global photographic body tone, GLES3-primary saved fusion, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")
