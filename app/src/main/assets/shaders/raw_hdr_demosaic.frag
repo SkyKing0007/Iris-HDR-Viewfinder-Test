@@ -206,13 +206,23 @@ ivec2 quadOrigin(ivec2 p) {
     return p - ivec2(p.x & 1, p.y & 1);
 }
 
-float quadColorRisk(ivec2 origin) {
+float quadMinPhysicalTrust(ivec2 origin) {
     float minPhysicalTrust = 1.0;
+    for (int y = 0; y < 2; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            minPhysicalTrust = min(minPhysicalTrust,
+                clamp(fetchFusionState(origin + ivec2(x, y)).g, 0.0, 1.0));
+        }
+    }
+    return minPhysicalTrust;
+}
+
+float quadColorRisk(ivec2 origin) {
+    float minPhysicalTrust = quadMinPhysicalTrust(origin);
     float maxPhysicalClipRisk = 0.0;
     for (int y = 0; y < 2; ++y) {
         for (int x = 0; x < 2; ++x) {
             vec4 state = fetchFusionState(origin + ivec2(x, y));
-            minPhysicalTrust = min(minPhysicalTrust, clamp(state.g, 0.0, 1.0));
             maxPhysicalClipRisk = max(maxPhysicalClipRisk, clamp(state.b, 0.0, 1.0));
         }
     }
@@ -223,13 +233,18 @@ float quadColorRisk(ivec2 origin) {
 
 float coherentHighlightColorRisk(ivec2 p) {
     ivec2 q = quadOrigin(p);
+    float currentTrust = quadMinPhysicalTrust(q);
     float risk = quadColorRisk(q);
-    // Expand only the trust decision by one Bayer quad around a strong clipping
-    // boundary. RGB itself is never blurred and no neighboring hue is borrowed.
+    // Neighbor risk still protects a genuinely incomplete clipping boundary, but a
+    // complete physically proven current Bayer quad is sovereign: uncertainty next
+    // door may not bleach valid SHORT color. RGB itself is never blurred and no
+    // neighboring hue is borrowed.
+    float neighborPermission = 1.0 - smoothstep(0.80, 0.98, currentTrust);
     for (int qy = -1; qy <= 1; ++qy) {
         for (int qx = -1; qx <= 1; ++qx) {
             if (qx == 0 && qy == 0) continue;
-            risk = max(risk, 0.85 * quadColorRisk(q + ivec2(2 * qx, 2 * qy)));
+            risk = max(risk, 0.85 * neighborPermission
+                * quadColorRisk(q + ivec2(2 * qx, 2 * qy)));
         }
     }
     return smoothstep(0.035, 0.45, clamp(risk, 0.0, 1.0));

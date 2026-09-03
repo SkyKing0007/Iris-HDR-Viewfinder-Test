@@ -193,9 +193,11 @@ final class RawHdrFusion {
         RuntimeLogger.event(
                 "RAW_HDR_ALIGN",
                 String.format(java.util.Locale.US,
-                        "globalDx=%.3f globalDy=%.3f meanConfidence=%.3f ms=%d",
+                        "globalDx=%.3f globalDy=%.3f meanConfidence=%.3f safeLocal=%d safeNeighbor=%d safeGlobal=%d ms=%d",
                         alignment.globalDxRaw, alignment.globalDyRaw,
-                        alignment.meanConfidence, elapsedMs(stageStart)));
+                        alignment.meanConfidence, alignment.localProvenCells,
+                        alignment.neighborFallbackCells, alignment.globalFallbackCells,
+                        elapsedMs(stageStart)));
 
         stageStart = System.nanoTime();
         PhotometricField photometric = PhotometricField.estimate(
@@ -700,12 +702,20 @@ final class RawHdrFusion {
         final float globalDxRaw;
         final float globalDyRaw;
         final float meanConfidence;
+        final int localProvenCells;
+        final int neighborFallbackCells;
+        final int globalFallbackCells;
 
-        AlignmentField(float[] rgba, float globalDxRaw, float globalDyRaw, float meanConfidence) {
+        AlignmentField(
+                float[] rgba, float globalDxRaw, float globalDyRaw, float meanConfidence,
+                int localProvenCells, int neighborFallbackCells, int globalFallbackCells) {
             this.rgba = rgba;
             this.globalDxRaw = globalDxRaw;
             this.globalDyRaw = globalDyRaw;
             this.meanConfidence = meanConfidence;
+            this.localProvenCells = localProvenCells;
+            this.neighborFallbackCells = neighborFallbackCells;
+            this.globalFallbackCells = globalFallbackCells;
         }
 
         static AlignmentField estimate(Guide longGuide, Guide shortGuide) {
@@ -742,13 +752,26 @@ final class RawHdrFusion {
                 }
             }
 
+            // Geometry authority is resolved here, before fusion. A low-confidence
+            // local vector is not a valid sampling location merely because the patch
+            // contained many pixels. Every output cell therefore carries one SAFE flow:
+            // locally proven -> coherent-neighbor fallback -> global fallback. Fusion may
+            // later decide exposure ownership, but it never samples SHORT through a vector
+            // that this stage has already rejected. Alpha is local-geometry authority:
+            // 1 for locally proven geometry, 0 for inherited/fallback geometry.
             float[] smooth = raw.clone();
             float confidenceSum = 0.0f;
+            int localProvenCells = 0;
+            int neighborFallbackCells = 0;
+            int globalFallbackCells = 0;
             for (int gy = 0; gy < FLOW_HEIGHT; gy++) {
                 for (int gx = 0; gx < FLOW_WIDTH; gx++) {
-                    float sumX = 0.0f;
-                    float sumY = 0.0f;
-                    float sumW = 0.0f;
+                    int index = (gy * FLOW_WIDTH + gx) * 4;
+                    float localConfidence = raw[index + 2];
+
+                    float strongX = 0.0f;
+                    float strongY = 0.0f;
+                    float strongW = 0.0f;
                     int strongNeighbors = 0;
                     for (int oy = -1; oy <= 1; oy++) {
                         int ny = clampInt(gy + oy, 0, FLOW_HEIGHT - 1);
@@ -756,63 +779,82 @@ final class RawHdrFusion {
                             int nx = clampInt(gx + ox, 0, FLOW_WIDTH - 1);
                             int ni = (ny * FLOW_WIDTH + nx) * 4;
                             float w = raw[ni + 2];
-                            if (w >= 0.35f) strongNeighbors++;
-                            sumX += raw[ni] * w;
-                            sumY += raw[ni + 1] * w;
-                            sumW += w;
+                            if (w < 0.35f) continue;
+                            strongX += raw[ni] * w;
+                            strongY += raw[ni + 1] * w;
+                            strongW += w;
+                            strongNeighbors++;
                         }
                     }
-                    int index = (gy * FLOW_WIDTH + gx) * 4;
-                    float localConfidence = raw[index + 2];
-                    float localEvidence = raw[index + 3];
-                    float meanX = sumW > 0.0001f ? sumX / sumW : global.dx * GUIDE_FACTOR;
-                    float meanY = sumW > 0.0001f ? sumY / sumW : global.dy * GUIDE_FACTOR;
+                    float meanX = strongW > 0.0001f
+                            ? strongX / strongW : global.dx * GUIDE_FACTOR;
+                    float meanY = strongW > 0.0001f
+                            ? strongY / strongW : global.dy * GUIDE_FACTOR;
                     float spread = 0.0f;
                     float spreadW = 0.0f;
-                    for (int oy = -1; oy <= 1; oy++) {
-                        int ny = clampInt(gy + oy, 0, FLOW_HEIGHT - 1);
-                        for (int ox = -1; ox <= 1; ox++) {
-                            int nx = clampInt(gx + ox, 0, FLOW_WIDTH - 1);
-                            int ni = (ny * FLOW_WIDTH + nx) * 4;
-                            float w = raw[ni + 2];
-                            if (w <= 0.0f) continue;
-                            float dx = raw[ni] - meanX;
-                            float dy = raw[ni + 1] - meanY;
-                            spread += (dx * dx + dy * dy) * w;
-                            spreadW += w;
+                    if (strongW > 0.0001f) {
+                        for (int oy = -1; oy <= 1; oy++) {
+                            int ny = clampInt(gy + oy, 0, FLOW_HEIGHT - 1);
+                            for (int ox = -1; ox <= 1; ox++) {
+                                int nx = clampInt(gx + ox, 0, FLOW_WIDTH - 1);
+                                int ni = (ny * FLOW_WIDTH + nx) * 4;
+                                float w = raw[ni + 2];
+                                if (w < 0.35f) continue;
+                                float dx = raw[ni] - meanX;
+                                float dy = raw[ni + 1] - meanY;
+                                spread += (dx * dx + dy * dy) * w;
+                                spreadW += w;
+                            }
                         }
                     }
                     float rmsSpread = spreadW > 0.0001f
                             ? (float) Math.sqrt(spread / spreadW) : 99.0f;
 
-                    if (localConfidence >= 0.35f && sumW > 0.0001f) {
-                        // Smooth only a locally proven vector; keep its own confidence.
-                        smooth[index] = meanX;
-                        smooth[index + 1] = meanY;
-                    } else if (localEvidence < 0.25f) {
-                        // Saturated/textureless interiors have no contradictory local
-                        // evidence. They may inherit coherent surrounding/global geometry.
-                        if (strongNeighbors >= 3 && rmsSpread <= 1.75f) {
+                    if (localConfidence >= 0.35f) {
+                        // Preserve local motion only when the forward/backward proof passed.
+                        // Neighbor smoothing remains allowed when the neighborhood itself is
+                        // coherent, but it never upgrades the cell's original confidence.
+                        if (strongNeighbors >= 2 && rmsSpread <= 1.50f) {
                             smooth[index] = meanX;
                             smooth[index + 1] = meanY;
-                            float neighborConfidence = clamp(sumW / 4.0f, 0.0f, 1.0f);
-                            smooth[index + 2] = Math.max(
-                                    localConfidence,
-                                    Math.min(0.85f, globalConfidence * neighborConfidence));
-                        } else if (globalConfidence >= 0.70f) {
-                            smooth[index] = global.dx * GUIDE_FACTOR;
-                            smooth[index + 1] = global.dy * GUIDE_FACTOR;
-                            smooth[index + 2] = Math.max(localConfidence, 0.60f * globalConfidence);
+                        } else {
+                            smooth[index] = raw[index];
+                            smooth[index + 1] = raw[index + 1];
                         }
+                        smooth[index + 2] = localConfidence;
+                        smooth[index + 3] = 1.0f;
+                        localProvenCells++;
+                    } else if (strongNeighbors >= 2 && rmsSpread <= 1.50f) {
+                        // Rejected local vectors inherit only a coherent proven neighborhood.
+                        // This applies equally to textureless and high-evidence inconsistent
+                        // patches: rejected geometry can never remain the SHORT sampler.
+                        float meanStrongConfidence = clamp(
+                                strongW / Math.max(1, strongNeighbors), 0.0f, 1.0f);
+                        float coherence = 1.0f - smoothstep(0.50f, 1.50f, rmsSpread);
+                        smooth[index] = meanX;
+                        smooth[index + 1] = meanY;
+                        smooth[index + 2] = Math.min(0.90f, meanStrongConfidence
+                                * Math.max(0.55f, coherence));
+                        smooth[index + 3] = 0.0f;
+                        neighborFallbackCells++;
+                    } else {
+                        // Final fail-closed geometry is the single coherent global warp.
+                        // Even when global confidence is modest, this is safer than an
+                        // already-rejected independent local vector; confidence remains
+                        // honest so the pre-clipping blend can stay conservative.
+                        smooth[index] = global.dx * GUIDE_FACTOR;
+                        smooth[index + 1] = global.dy * GUIDE_FACTOR;
+                        smooth[index + 2] = Math.min(0.85f, 0.75f * globalConfidence);
+                        smooth[index + 3] = 0.0f;
+                        globalFallbackCells++;
                     }
-                    // High-evidence but inconsistent local motion is never rescued by
-                    // neighbors: it remains low confidence and SHORT fails closed there.
                     confidenceSum += smooth[index + 2];
                 }
             }
             return new AlignmentField(
                     smooth, global.dx * GUIDE_FACTOR, global.dy * GUIDE_FACTOR,
-                    confidenceSum / (FLOW_WIDTH * FLOW_HEIGHT));
+                    confidenceSum / (FLOW_WIDTH * FLOW_HEIGHT),
+                    localProvenCells, neighborFallbackCells, globalFallbackCells);
         }
 
         void sampleRaw(float u, float v, float[] out) {

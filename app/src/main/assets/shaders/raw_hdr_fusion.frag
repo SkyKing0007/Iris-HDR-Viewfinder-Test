@@ -1,7 +1,7 @@
 #version 300 es
 precision highp float;
 precision highp int;
-// V1.5.4: R=fused scene-linear CFA, G=physical color trust,
+// V1.5.4 V1.1: R=fused scene-linear CFA, G=physical color trust,
 // B=physical LONG clipping risk, A=SHORT ownership.
 // Keeping provenance beside the CFA value lets demosaic make one coherent
 // color-trust decision per Bayer quad instead of guessing from brightness.
@@ -265,7 +265,13 @@ void main() {
     vec4 flowState = sampleMapBilinear(flowTex, flowUv);
     vec2 sourcePos = vec2(globalPos) + flowState.rg;
     vec2 photoState = rowPhotometric(qCenter.y + flowState.g);
-    vec2 shortState = sampleShortSamePhase(sourcePos, channel, photoState.x);
+    // The metadata exposure ratio + robust global residual are radiometric authority.
+    // A local row correction is optional refinement only: its confidence must control
+    // whether its VALUE is consumed. Confidence=0 therefore means exactly 1.0 local
+    // correction, not "apply an unproven scale but remember that it was uncertain".
+    float rowCorrectionWeight = smoothstep(0.30, 0.70, clamp(photoState.y, 0.0, 1.0));
+    float effectiveRowScale = mix(1.0, photoState.x, rowCorrectionWeight);
+    vec2 shortState = sampleShortSamePhase(sourcePos, channel, effectiveRowScale);
 
     float longPeak = quadLongPeak(qOrigin);
     // SHORT is the designated highlight exposure. Begin the coherent hand-off well
@@ -275,23 +281,21 @@ void main() {
     float longHighlightNeed = smoothstep(0.70, 0.92, longPeak);
     float hardLongClip = smoothstep(0.985, 0.997, longPeak);
     vec2 quadValidation = quadShortSupportAndCorrespondence(
-        qOrigin, flowState.rg, photoState.x);
+        qOrigin, flowState.rg, effectiveRowScale);
     float shortSupport = smoothstep(0.35, 0.78, quadValidation.x);
     float hardShortAvailable = smoothstep(0.10, 0.35, quadValidation.x);
     float correspondenceConfidence = quadValidation.y;
     float flowConfidence = clamp(flowState.b, 0.0, 1.0);
     float localFlowEvidence = clamp(flowState.a, 0.0, 1.0);
-    float photometricConfidence = clamp(photoState.y, 0.0, 1.0);
-
     // Alignment confidence may shape the pre-clipping transition, but it may not
-    // resurrect clipped LONG. The flow vector remains the best registered SHORT
-    // correspondence; at hard clipping the only radiometrically valid source is SHORT.
-    float inheritedFlow = 1.0 - smoothstep(0.24, 0.48, localFlowEvidence);
+    // resurrect clipped LONG. Java has already resolved one safe SHORT geometry per
+    // cell (local proof -> coherent-neighbor -> global). Alpha now means LOCAL geometry
+    // authority only; inherited geometry remains conservative across sharp boundaries.
+    float inheritedFlow = 1.0 - smoothstep(0.70, 0.95, localFlowEvidence);
     float boundaryContrast = quadBoundaryContrast(qOrigin);
     float inheritedBoundaryGate = 1.0
         - inheritedFlow * smoothstep(0.08, 0.28, boundaryContrast);
     float geometricAdmission = flowConfidence
-        * smoothstep(0.35, 0.70, photometricConfidence)
         * correspondenceConfidence * inheritedBoundaryGate;
 
     float softOwnership = clamp(
@@ -307,25 +311,12 @@ void main() {
 
     float longPhysicalTrust =
         1.0 - smoothstep(0.985, 0.997, longSensor);
-    // Exposure ownership and color trust are deliberately independent. A clipped
-    // LONG quad may be 100% SHORT-owned even when alignment/support only proves part
-    // of SHORT chroma. Never promote hard takeover itself to perfect R/G1/G2/B trust:
-    // that was the V1.5.3 producer for green/magenta/orange fragments at highlight
-    // boundaries. Missing chroma trust is handled downstream without returning LONG.
-    float shortSupportTrust = smoothstep(0.15, 0.85, quadValidation.x);
-    float shortGeometryTrust = smoothstep(0.20, 0.70, flowConfidence);
-    float shortPhotometricTrust = smoothstep(0.20, 0.65, photometricConfidence);
-    float shortValidated = shortSupportTrust
-        * mix(0.35, 1.0, shortGeometryTrust)
-        * mix(0.55, 1.0, shortPhotometricTrust)
-        * correspondenceConfidence * inheritedBoundaryGate;
-    if (quadValidation.x >= 0.85
-            && flowConfidence >= 0.60
-            && photometricConfidence >= 0.55
-            && correspondenceConfidence >= 0.55
-            && inheritedBoundaryGate >= 0.70) {
-        shortValidated = 1.0;
-    }
+    // Exposure, geometry, radiometry and color have separate authorities. Geometry
+    // was resolved before this shader and weak local radiometry has already collapsed
+    // to the proven global scale. SHORT color is therefore proven by SHORT itself:
+    // all four Bayer phases must have usable unsaturated same-phase support. Clipped
+    // LONG is not allowed to "validate" or bleach color it can no longer measure.
+    float shortValidated = smoothstep(0.55, 0.90, quadValidation.x);
     float physicalColorTrust = mix(
         longPhysicalTrust, shortValidated, ownership);
     float longPhysicalClipRisk = 1.0 - longPhysicalTrust;

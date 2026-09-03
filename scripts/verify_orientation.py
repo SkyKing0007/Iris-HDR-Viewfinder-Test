@@ -22,7 +22,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.5.4 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.5.4 V1.1 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -466,10 +466,12 @@ require('outFusionState = vec4(' in raw_fusion_shader
         and 'allocateRgba16f(fusedCfaTexture' in raw_fusion,
         "V1.5.1 fused CFA must carry ownership-weighted physical highlight provenance in RGBA16F")
 require('quadColorRisk' in raw_demosaic_shader
+        and 'quadMinPhysicalTrust' in raw_demosaic_shader
         and 'minPhysicalTrust' in raw_demosaic_shader
         and 'maxPhysicalClipRisk' in raw_demosaic_shader
-        and '0.85 * quadColorRisk' in raw_demosaic_shader,
-        "V1.5.1 Bayer-quad color trust/coherence regression missing")
+        and '0.85 * neighborPermission' in raw_demosaic_shader
+        and 'quadColorRisk(q + ivec2(2 * qx, 2 * qy))' in raw_demosaic_shader,
+        "V1.5.1 Bayer-quad color trust/coherence regression missing or weakened by V1.5.4 V1.1 neighbor gating")
 require('mirrorParityCoord' in raw_demosaic_shader
         and 'mirrorParityPoint' in raw_demosaic_shader,
         "V1.5.1 CFA-parity-safe true-photo boundary regression missing")
@@ -1017,13 +1019,13 @@ require('float fieldLumaTrust = mix(1.0, clamp(fieldState.g, 0.0, 1.0), guardReq
         and 'float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);' in hdr_shader,
         "phase-sensitive SHORT must fail closed at pair rate while safe SHORT bypasses mandatory field trust")
 
-# 056 / 074 / 080 / V1.5.4 - Exact current pre-handoff authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.5.3' in workflow
-        and 'run-id: 33701431592' in workflow,
-        "workflow must download the exact successful V1.5.3 Actions authority")
-require('8497636a2ab94a4740b48b6b1c2a2aef43fb6557' in workflow
-        and '7898da26fa5479175bc1821f313dddb679628b46' in workflow,
-        "V1.5.3 authority commit/tree pins missing")
+# 056 / 074 / 080 / V1.5.4 V1.1 - Exact current pre-handoff authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.5.4' in workflow
+        and 'run-id: 33706757668' in workflow,
+        "workflow must download the exact successful V1.5.4 Actions authority")
+require('b352a4f12f011496f8c0eeb3a51553b35cc33c48' in workflow
+        and '8b09e5ab8e647a82cea1330473a4c259c9738f54' in workflow,
+        "V1.5.4 authority commit/tree pins missing")
 require('backup-' not in workflow,
         "build workflow must not depend on the safety backup branch")
 
@@ -1050,8 +1052,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 33' in gradle and 'versionName = "1.0-v1.5.4"' in gradle,
-        "V1.5.4 version/build pin missing")
+require('versionCode = 34' in gradle and 'versionName = "1.0-v1.5.4-v1.1"' in gradle,
+        "V1.5.4 V1.1 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -1365,9 +1367,10 @@ require('float hardLongClip = smoothstep(0.985, 0.997, longPeak);' in raw_fusion
         and 'ownership = 1.0;' in raw_fusion_shader,
         "clipped-LONG leakage regression: valid SHORT must become unconditional whole-quad authority")
 require('shortValidated = max(shortValidated, hardShortTakeover);' not in raw_fusion_shader
-        and 'float shortSupportTrust = smoothstep(0.15, 0.85, quadValidation.x);' in raw_fusion_shader
-        and 'float shortGeometryTrust = smoothstep(0.20, 0.70, flowConfidence);' in raw_fusion_shader,
-        "V1.5.4 ownership/trust regression: hard SHORT takeover must not falsely promote weak chroma evidence to perfect trust")
+        and 'float shortValidated = smoothstep(0.55, 0.90, quadValidation.x);' in raw_fusion_shader
+        and 'shortGeometryTrust' not in raw_fusion_shader
+        and 'shortPhotometricTrust' not in raw_fusion_shader,
+        "V1.5.4/V1.1 ownership-trust regression: hard takeover must not manufacture perfect chroma; after geometry/radiometry are resolved, complete SHORT CFA support owns SHORT color")
 
 def v153_raw_ownership(long_peak, short_min_support, geometric):
     highlight = smoothstep_local(0.70, 0.92, long_peak)
@@ -1470,13 +1473,85 @@ require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in camera
         and 'Math.max(-16.0f, Math.min(1.0f, displayBrightnessEv))' in saver,
         "brightness regression 137: UI/controller/capture metadata must share -16..+1 EV")
 
+# 138 - Exact AUTO/MANUAL device failure: a local flow vector that failed its
+# forward/backward proof may never remain the hard-SHORT sampling geometry. Geometry
+# authority is resolved once in Java before fusion: local proof -> coherent neighbor
+# -> global fallback. Alpha is local geometry authority, not raw sample-count evidence.
+require('locally proven -> coherent-neighbor fallback -> global fallback' in raw_fusion
+        and 'if (localConfidence >= 0.35f)' in raw_fusion
+        and 'else if (strongNeighbors >= 2 && rmsSpread <= 1.50f)' in raw_fusion
+        and 'smooth[index] = global.dx * GUIDE_FACTOR;' in raw_fusion
+        and 'smooth[index + 3] = 1.0f;' in raw_fusion
+        and raw_fusion.count('smooth[index + 3] = 0.0f;') >= 2
+        and 'High-evidence but inconsistent local motion is never rescued' not in raw_fusion,
+        "geometry regression 138: rejected local flow must be replaced by coherent-neighbor/global geometry before SHORT sampling")
+
+# 139 - The metadata ratio + robust global residual are radiometric authority. Local
+# row/PWM correction is optional and its confidence must control consumption of its
+# value. Confidence below the proof band means effective local scale exactly 1.0.
+require('float rowCorrectionWeight = smoothstep(0.30, 0.70, clamp(photoState.y, 0.0, 1.0));' in raw_fusion_shader
+        and 'float effectiveRowScale = mix(1.0, photoState.x, rowCorrectionWeight);' in raw_fusion_shader
+        and 'sampleShortSamePhase(sourcePos, channel, effectiveRowScale)' in raw_fusion_shader
+        and 'qOrigin, flowState.rg, effectiveRowScale' in raw_fusion_shader
+        and 'sampleShortSamePhase(sourcePos, channel, photoState.x)' not in raw_fusion_shader,
+        "radiometry regression 139: unproven row scale must collapse to 1.0 instead of being consumed at full strength")
+
+def v154v11_effective_row_scale(scale, confidence):
+    w = smoothstep_local(0.30, 0.70, max(0.0, min(1.0, confidence)))
+    return 1.0 + (scale - 1.0) * w
+require(math.isclose(v154v11_effective_row_scale(1.25, 0.0), 1.0, abs_tol=1e-12)
+        and math.isclose(v154v11_effective_row_scale(0.75, 0.20), 1.0, abs_tol=1e-12)
+        and math.isclose(v154v11_effective_row_scale(1.25, 1.0), 1.25, abs_tol=1e-12),
+        "radiometry regression 139 math: confidence must actually own local scale consumption")
+
+# 140 - Once geometry/radiometry are resolved, a complete unsaturated SHORT Bayer
+# quad proves its own color. Clipped LONG and local row confidence cannot validate or
+# bleach color they do not measure. Incomplete SHORT support still fails closed in
+# chroma without returning LONG.
+require('float shortValidated = smoothstep(0.55, 0.90, quadValidation.x);' in raw_fusion_shader
+        and 'shortGeometryTrust' not in raw_fusion_shader
+        and 'shortPhotometricTrust' not in raw_fusion_shader
+        and 'shortValidated = max(shortValidated, hardShortTakeover)' not in raw_fusion_shader,
+        "SHORT color regression 140: internal complete CFA support must own SHORT color after safe geometry/radiometry")
+require(math.isclose(smoothstep_local(0.55, 0.90, 0.90), 1.0, abs_tol=1e-12)
+        and math.isclose(smoothstep_local(0.55, 0.90, 1.0), 1.0, abs_tol=1e-12)
+        and math.isclose(smoothstep_local(0.55, 0.90, 0.35), 0.0, abs_tol=1e-12),
+        "SHORT color regression 140 math: complete support must be fully trusted while weak support remains untrusted")
+
+# 141 - Broad-pink boundary protection may propagate risk only into an incomplete
+# current quad. A fully proven current SHORT quad is sovereign and cannot be bleached
+# by uncertainty in an adjacent Bayer quad. Neutralization still cannot add luminance.
+require('float currentTrust = quadMinPhysicalTrust(q);' in raw_demosaic_shader
+        and 'float neighborPermission = 1.0 - smoothstep(0.80, 0.98, currentTrust);' in raw_demosaic_shader
+        and '0.85 * neighborPermission' in raw_demosaic_shader
+        and 'vec3 neutralCameraRgb = vec3(g);' in raw_demosaic_shader
+        and 'max(g, median3' not in raw_demosaic_shader,
+        "neighbor-risk regression 141: adjacent uncertainty may not bleach complete current SHORT color or create white luminance")
+require(math.isclose(1.0 - smoothstep_local(0.80, 0.98, 1.0), 0.0, abs_tol=1e-12),
+        "neighbor-risk regression 141 math: fully trusted current quad must block borrowed risk")
+
+# 142 - This correction is saved-RAW only. The successful V1.5.4 control/live path
+# must remain byte-identical so the reconstruction fix cannot regress scene-cut AE,
+# anti-flicker hysteresis, MANUAL SAFE SHORT, -16..+1 EV Brightness, or live GTM.
+protected_v154 = {
+    'app/src/main/assets/shaders/hdr_display.frag':'45483186243cffb220c00a23e4de78396a2d482168452cec22238da79eb1dcb8',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java':'3377d4f3ebac7a46cfb5887ca4592174ea6586e7d84a46af390bed6302a6f9fe',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java':'a87d34672d7e4efb16d5cd84c84fb82cc4a4abd567f74d012f1f665eb679ac37',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java':'cbd76d5a21cddd1ac3e48ad57896ef50d7770f6415d10749df2cb9f82650f1e4',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java':'87d58462eb3822b2135f423be9ba12c6d61f87d3d9fb091ddde3b0a2ed3a9178'}
+for rel, want in protected_v154.items():
+    require(hashlib.sha256((ROOT / rel).read_bytes()).hexdigest() == want,
+            f"V1.5.4 protected-control regression 142: byte drift in {rel}")
+
 # 130 remains applicable as a general lineage lesson: never assume ancestry without
-# proving the exact current successful authority. V1.5.4 is intentionally a direct
-# child of successful V1.5.3, so the workflow must prove that exact parent.
+# proving the exact current successful authority. V1.5.4 V1.1 must be a direct child
+# of successful V1.5.4 and reconstruct its base from the exact Actions artifact.
 workflow = (ROOT / '.github/workflows/build.yml').read_text()
 require('fetch-depth: 2' in workflow
-        and "authority='8497636a2ab94a4740b48b6b1c2a2aef43fb6557'" in workflow
-        and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow,
-        "authority-lineage regression 130: V1.5.4 must prove direct parent is exact successful V1.5.3")
+        and "authority='b352a4f12f011496f8c0eeb3a51553b35cc33c48'" in workflow
+        and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow
+        and 'run-id: 33706757668' in workflow
+        and 'name: Iris-HDR-Viewfinder-Test-V1.5.4' in workflow,
+        "authority-lineage regression 130: V1.5.4 V1.1 must prove direct parent and exact successful V1.5.4 Actions authority")
 
-print("V1.5.4 REGRESSION PASS: exact V1.5.3 Actions authority, no broad pink, no luminance-raising white paint, no false-perfect SHORT chroma, continuous demosaic trust, clipped-LONG SHORT authority, stable no-LTM live path, instant scene-cut AE with steady-state hysteresis, responsive MANUAL SHORT, -16..+1 EV brightness")
+print("V1.5.4 V1.1 REGRESSION PASS: exact V1.5.4 Actions authority; rejected local flow never survives as SHORT geometry; row confidence owns local radiometry; complete SHORT CFA owns its color; complete current quads block borrowed bleaching; clipped-LONG SHORT authority, no broad pink/peach/white-paint regression, and all successful V1.5.4 live/control behavior remain protected")

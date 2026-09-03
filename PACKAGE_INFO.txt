@@ -1,39 +1,39 @@
-Iris HDR Viewfinder Test V1.5.4
+Iris HDR Viewfinder Test V1.5.4 V1.1
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
-Status: PREPARED / UPLOAD-READY - NOT V1.5.4 BUILD-PROVEN
+Status: PREPARED / UPLOAD-READY - NOT V1.5.4 V1.1 BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.5.3 V1.2 GitHub Actions compiled candidate/artifact
-- Commit: 8497636a2ab94a4740b48b6b1c2a2aef43fb6557
-- Tree: 7898da26fa5479175bc1821f313dddb679628b46
-- Actions run: 33701431592
-- Job: 100481369617
-- Artifact ID: 9873681588
-- Artifact name: Iris-HDR-Viewfinder-Test-V1.5.3
-- Artifact digest: sha256:9fc948c99db3bf527d9a801b19f2b1b451d0a4910681530c7b80dad71ffcc33b
-- APK SHA-256: 43d81b63b1b9fd6bb272afa4470237086096a3963d3d48103afe1f85c3872017
-- Source-candidate TAR SHA-256: 24d4be2631ede7bd16bcdbf2a49695fcf3392e8148b3cf64a6bf2ee71e48392d
-- Runtime manifest SHA-256: afa56c9e92e55c46da87a74cba8ec6f83ffe112f2a4721e8ed61eafc1d3a8cef
-- Repository manifest SHA-256: 235b4c7e4ca2625f1e438178132b8e30a6060444d32d43ea39481b1391f3ac20
-- Regressions SHA-256: c5a53a97775a22bb6b4cef05455c2019625da69a03b1feeba90f037b6f6d219e
+- Exact successful V1.5.4 GitHub Actions compiled candidate/artifact
+- Commit: b352a4f12f011496f8c0eeb3a51553b35cc33c48
+- Tree: 8b09e5ab8e647a82cea1330473a4c259c9738f54
+- Actions run: 33706757668
+- Job: 100497419969
+- Artifact ID: 9875501146
+- Artifact name: Iris-HDR-Viewfinder-Test-V1.5.4
+- Artifact digest: sha256:f72440fd34b51f91378058d79f29ab14fb95a3b55a9c721e51bf7ec846fd991b
+- APK SHA-256: 53f9a84767b92c088e88d882bb2e7ba1a6fef8489a9f759db3498eab25b326e6
+- Source-candidate TAR SHA-256: 99139eb5df3000656608a60cff112d07744ab63d20a17f64df0eb3f0c3ec110d
+- Runtime manifest SHA-256: eafb637ae41d304e75afc4376957ec16570381f1022b27cd760ad9fcf675c485
+- Repository manifest SHA-256: 1ec9c43c432267c2cbfe6a0740978f401170b146db6ad0dc019755ce5a19217a
+- Regressions SHA-256: c0cafba33deb4d56865408adbcb6c31c6a53e7b13dba55db6ce9648b52fb4e3b
+- V1.5.3->V1.5.4 forward patch SHA-256: 5c2a312b0f85dba6c3c223552222a835ebd64ef99f8a0f1ce9b030315459685c
+- V1.5.4->V1.5.3 rollback patch SHA-256: f50624db4dbe8a6cf750c3f943b2a43e0689fc7ee885cc359c27f04e68225218
 
 Verification-mechanics authority:
-- Exact successful V1.5.3 16-stage authority-seeded compiler/build/invariance sequence.
-- Same Java 17, Android 37, Gradle 9.6.0, stable signing, pinned glslang, shader compile, Java compile, patch proof, :app:assembleDebug and post-build invariance mechanics.
-- Infrastructure changes only update V1.5.4 authority/version/allowlists/protected hashes/regressions/output naming; compiler/build mechanics are not redesigned.
+- Exact successful V1.5.4 16-stage authority-seeded compiler/build/invariance sequence.
+- Same Java 17, Android 37, Gradle 9.6.0, stable signing, pinned glslang, real GLSL compile, real Java compile, patch proof, :app:assembleDebug and post-build invariance mechanics.
+- Infrastructure changes only update V1.5.4 V1.1 authority/version/allowlists/protected hashes/regressions/output naming; compiler/build mechanics are not redesigned.
 
 Backup status:
-- backup-v1.5.3-v1.2-pre-es31-gpu-transition exists and is verified at exact authority commit 8497636a2ab94a4740b48b6b1c2a2aef43fb6557.
-- V1.5.4 does not depend on the backup branch. It is reserved for the later ES 3.1/GPU architectural transition.
+- No new backup requested or created.
+- Existing backup-v1.5.3-v1.2-pre-es31-gpu-transition remains reserved for the later ES 3.1/GPU transition.
 
-V1.5.4 intended runtime changed-file allowlist: exactly 5 files
+V1.5.4 V1.1 intended runtime changed-file allowlist: exactly 3 files
 - app/src/main/assets/shaders/raw_hdr_demosaic.frag
 - app/src/main/assets/shaders/raw_hdr_fusion.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java
 
-Infrastructure changed-file list: exactly 8 files
+Infrastructure/package changed-file list: exactly 8 files
 - .github/workflows/build.yml
 - BUILD_WORKFLOW_COPY.yml
 - PACKAGE_INFO.txt
@@ -43,27 +43,26 @@ Infrastructure changed-file list: exactly 8 files
 - app/build.gradle.kts
 - scripts/verify_orientation.py
 
-V1.5.4 runtime intent:
-- preserve whole-2x2 Bayer-quad LONG/SHORT ownership;
-- preserve unconditional SHORT authority when LONG is physically clipped and SHORT is usable;
-- separate 100% SHORT exposure ownership from partial SHORT chroma trust;
-- preserve broad-pink/ceiling-magenta protection without creating white luminance fill;
-- remove discontinuous trust thresholds that produced blocks/stair-step color fragments;
-- preserve V1.5.3 HdrGlView live calibration and hdr_display 8-EV global no-LTM GTM byte-identically;
-- add >=0.90-EV scene-cut fast exposure response while retaining steady-state 0.18-EV/two-sample hysteresis;
-- MANUAL SAFE SHORT slider owns the immediate requested bracket; measured safety may only add darker headroom later;
-- Brightness contract exactly -16.0..+1.0 EV everywhere it is owned/stored.
+V1.5.4 V1.1 runtime intent:
+- keep physical whole-quad SHORT authority when LONG clips;
+- resolve geometry before fusion: local proof -> coherent-neighbor -> global fallback;
+- never consume an already-rejected local vector during hard SHORT takeover;
+- make row-local radiometric confidence control whether that row scale is consumed, with unproven correction collapsing to 1.0;
+- prove complete SHORT color from SHORT CFA support itself after safe geometry/radiometry;
+- prevent neighboring clipping-risk expansion from bleaching a fully proven current SHORT quad;
+- preserve broad-pink protection, no peach/orange synthetic fill, no luminance-raising neutralization, and continuous demosaic trust;
+- preserve V1.5.4 CameraController/MainActivity/CaptureSetSaver/HdrGlView/hdr_display behavior byte-identically.
 
 Build/version:
-- versionCode 33
-- versionName 1.0-v1.5.4
+- versionCode 34
+- versionName 1.0-v1.5.4-v1.1
 
 Prepared candidate runtime manifest:
 - app/src file count: 16
-- expected SHA-256 after runtime transform: eafb637ae41d304e75afc4376957ec16570381f1022b27cd760ad9fcf675c485
+- expected SHA-256 after runtime transform: 505eaeb9384a62cf24e000a4ff06f3ab36f535fcda2bbd61807376c17e99899f
 
 Compiler status in this environment:
-- REAL GLSL COMPILE: NOT RUN (pinned Ubuntu glslang package could not be obtained in this container)
+- REAL GLSL COMPILE: NOT RUN
 - REAL JAVA COMPILE: NOT RUN
 - FULL ANDROID ASSEMBLE: NOT RUN
 - GitHub Actions remains authoritative.
