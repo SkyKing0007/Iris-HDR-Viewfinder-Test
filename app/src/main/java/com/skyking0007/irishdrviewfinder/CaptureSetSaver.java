@@ -83,7 +83,7 @@ final class CaptureSetSaver {
         this.captureOrientationDegrees = ((captureOrientationDegrees % 360) + 360) % 360;
         this.jpegOutputSize = jpegOutputSize;
         this.dngOrientation = dngOrientationForDegrees(captureOrientationDegrees);
-        this.displayBrightnessEv = Math.max(-5.0f, Math.min(2.0f, displayBrightnessEv));
+        this.displayBrightnessEv = Math.max(-16.0f, Math.min(1.0f, displayBrightnessEv));
         this.expectedPhysicalId = expectedPhysicalId;
         this.viewfinderSensorCrop = viewfinderSensorCrop == null
                 ? null : new Rect(viewfinderSensorCrop);

@@ -1,20 +1,20 @@
-Iris HDR Viewfinder Test V1.5.3 V1.2 - vscode.dev upload
+Iris HDR Viewfinder Test V1.5.4 - vscode.dev upload
 
 1. Open https://github.dev/SkyKing0007/Iris-HDR-Viewfinder-Test (or press . from the GitHub repository).
-2. Confirm branch main currently points to failed V1.5.3 V1.1 commit 02224874fe78eccfec2e05415691edcaed3229d2. Its parent must be failed V1.5.3 commit 33e93e528a69750da79f5847cb033d810f2d7251, whose parent is successful V1.5.2 commit 2ed7072212bc1e9571163a914be6497c6254b702.
-3. Upload/replace the complete contents of this FULL-UPLOAD ZIP at repository root.
-4. Do not add APKs, DNGs, JPEGs, build/, .cxx/, __pycache__ or other generated files.
-5. Commit with: V1.5.3 V1.2 fix exact failed-lineage authority proof
-6. Push main once. The packaged workflow uses the unchanged V1.5.2-proven compiler/build procedure for authoritative proof.
+2. Confirm branch main points exactly to successful V1.5.3 V1.2 commit 8497636a2ab94a4740b48b6b1c2a2aef43fb6557 before replacing files.
+3. Confirm backup branch backup-v1.5.3-v1.2-pre-es31-gpu-transition exists at that same commit.
+4. Upload/replace the complete contents of this FULL-UPLOAD ZIP at repository root.
+5. Do not add APKs, DNGs, JPEGs, build/, .cxx/, __pycache__ or other generated files.
+6. Commit with: V1.5.4 artifact-safe HDR + instant stable controls
+7. Push main once. The packaged workflow performs authoritative real GLSL/Java/full Android compiler proof.
 
-No backup branch is required, per explicit instruction.
+Expected version after replacement: versionCode 33 / versionName 1.0-v1.5.4.
 
-Expected version after replacement: versionCode 32 / versionName 1.0-v1.5.3.
-Expected runtime changes relative to exact successful V1.5.2 Actions candidate: exactly two files:
-- app/src/main/assets/shaders/hdr_display.frag
+Expected runtime changes relative to exact successful V1.5.3 Actions candidate: exactly five files:
+- app/src/main/assets/shaders/raw_hdr_demosaic.frag
 - app/src/main/assets/shaders/raw_hdr_fusion.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
-Expected compiler-only runtime delta relative to failed V1.5.3 commit: exactly one file:
-- app/src/main/assets/shaders/hdr_display.frag
-
-The V1.5.3 highlight reconstruction/ownership math is unchanged; V1.1 repairs local GLSL variable scope and V1.2 only repairs exact failed-lineage authority proof.
+V1.5.4 does NOT perform the ES 3.1 compute/GPU migration. It establishes the corrected IQ/live-control baseline first; the verified backup protects the later architectural transition.

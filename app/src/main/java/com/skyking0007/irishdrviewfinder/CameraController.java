@@ -88,8 +88,8 @@ final class CameraController {
     private static final long ONE_SECOND_NS = 1_000_000_000L;
     private static final long SIXTY_FPS_DURATION_NS = 16_666_666L;
     private static final long THIRTY_FPS_DURATION_NS = 33_333_333L;
-    private static final float DISPLAY_BRIGHTNESS_MIN_EV = -5.0f;
-    private static final float DISPLAY_BRIGHTNESS_MAX_EV = 2.0f;
+    private static final float DISPLAY_BRIGHTNESS_MIN_EV = -16.0f;
+    private static final float DISPLAY_BRIGHTNESS_MAX_EV = 1.0f;
     private static final int AUTO_METER_MIN_FRAMES = 4;
     private static final int AUTO_METER_MAX_FRAMES = 12;
     private static final int AUTO_METER_STABLE_FRAMES = 3;
@@ -98,7 +98,6 @@ final class CameraController {
     private static final double AUTO_BRACKET_MIN_EV = 2.0;
     private static final double AUTO_BRACKET_MAX_EV = 7.0;
     private static final double MANUAL_BRACKET_MAX_EV = 6.0;
-    private static final double MANUAL_EXTRA_HEADROOM_EV = 0.25;
     private static final double LONG_CLIP_TRIGGER_FRACTION = 0.005;
     private static final double AUTO_SHORT_CLIP_TARGET = 0.0025;
     private static final double MANUAL_SHORT_CLIP_TARGET = 0.0015;
@@ -124,6 +123,11 @@ final class CameraController {
     private static final double AUTO_BODY_HYSTERESIS_EV = 0.10;
     private static final double AUTO_BODY_MAX_STEP_EV = 0.18;
     private static final int AUTO_BODY_CONFIRM_SAMPLES = 2;
+    // V1.5.4 scene-cut fast path. Large coherent body errors are real scene changes,
+    // not the small noise/flicker that the conservative steady-state controller filters.
+    // Jump most of the way immediately, then return to the proven 0.18-EV/2-sample loop.
+    private static final double AUTO_BODY_SCENE_CUT_EV = 0.90;
+    private static final double AUTO_BODY_SCENE_CUT_MAX_STEP_EV = 4.0;
     // LONG is a scene-appearance exposure, not a highlight-protecting AE exposure.
     // Meter the robust P25-P50 scene body. Broad/high histogram tails raise the
     // appearance target because SHORT owns them; genuinely low-light scenes lower
@@ -1586,17 +1590,21 @@ final class CameraController {
         }
     }
 
-    private void resetAutoShortSearchLocked() {
+    private void resetAutoShortProbeEvidenceLocked() {
         bracketIncreaseEvidence = 0;
         bracketDecreaseEvidence = 0;
-        autoFastShortRecovery = false;
         autoShortProbePending = false;
+        autoShortProbeEvidence = 0;
         autoShortSearchExhausted = false;
+    }
+
+    private void resetAutoShortSearchLocked() {
+        resetAutoShortProbeEvidenceLocked();
+        autoFastShortRecovery = false;
         autoShortProbeBaselineEv = AUTO_BRACKET_DEFAULT_EV;
         autoShortProbeBaselineUsable = 0.0f;
         autoShortProbeBaselineNearClip = 1.0f;
         autoShortProbeBaselineFast = false;
-        autoShortProbeEvidence = 0;
         autoShortSearchLongCells = 0;
         autoShortSearchP98 = -1.0f;
         autoShortSearchLongProduct = -1.0;
@@ -1646,17 +1654,46 @@ final class CameraController {
 
         long now = System.nanoTime();
         boolean pairNeedsUpdate = false;
+        boolean fastPairUpdate = false;
         if (autoHdrExposure) {
             if (!haveAeSample) return;
             double brightnessGain = Math.pow(2.0, clampBrightnessEv(displayBrightnessEv));
             double bodyMid = robustSceneBodyMid(stats);
-            if (bodyMid > 0.002) {
+            if (bodyMid > 0.00005) {
                 double baseBodyTarget = adaptiveSceneBodyTargetLocked(stats);
                 autoAdaptiveBodyTargetLinear = baseBodyTarget;
-                double desiredBody = clampDouble(baseBodyTarget * brightnessGain, 0.018, 0.70);
+                double desiredBody = clampDouble(baseBodyTarget * brightnessGain, 0.0000001, 0.70);
                 double errorEv = Math.log(desiredBody / bodyMid) / Math.log(2.0);
+                boolean sceneCut = Math.abs(errorEv) >= AUTO_BODY_SCENE_CUT_EV;
 
-                if (errorEv > AUTO_BODY_HYSTERESIS_EV) {
+                if (sceneCut) {
+                    bodyRaiseEvidence = 0;
+                    bodyLowerEvidence = 0;
+                    double stepEv = clampDouble(
+                            errorEv, -AUTO_BODY_SCENE_CUT_MAX_STEP_EV,
+                            AUTO_BODY_SCENE_CUT_MAX_STEP_EV);
+                    autoSceneBaseLongProduct = Math.max(1.0,
+                            autoSceneBaseLongProduct * Math.pow(2.0, stepEv));
+                    pairNeedsUpdate = true;
+                    fastPairUpdate = true;
+                    // A real bright-scene cut must not wait through the normal SHORT
+                    // tier-confirmation ladder while highlights clip. Give SHORT one
+                    // immediate extra stop of headroom when the current matched pair
+                    // directly proves unresolved LONG-damaged highlight cells.
+                    if (stats.shortRecoveryNearClipCells > 0
+                            && autoAdaptiveBracketEv < AUTO_BRACKET_MAX_EV - 0.01) {
+                        autoAdaptiveBracketEv = Math.min(
+                                AUTO_BRACKET_MAX_EV, autoAdaptiveBracketEv + 1.0);
+                        autoFastShortRecovery = true;
+                        resetAutoShortProbeEvidenceLocked();
+                    }
+                    RuntimeLogger.event(
+                            "AUTO_SCENE_CUT",
+                            String.format(
+                                    Locale.US,
+                                    "body=%.4f target=%.4f err=%+.2fEV jump=%+.2fEV bracket=%.2fEV",
+                                    bodyMid, desiredBody, errorEv, stepEv, autoAdaptiveBracketEv));
+                } else if (errorEv > AUTO_BODY_HYSTERESIS_EV) {
                     bodyRaiseEvidence++;
                     bodyLowerEvidence = 0;
                     if (bodyRaiseEvidence >= AUTO_BODY_CONFIRM_SAMPLES) {
@@ -1697,7 +1734,7 @@ final class CameraController {
                 pairNeedsUpdate = true;
             }
 
-            if (pairNeedsUpdate && (lastAdaptivePairUpdateNs == 0L
+            if (pairNeedsUpdate && (fastPairUpdate || lastAdaptivePairUpdateNs == 0L
                     || now - lastAdaptivePairUpdateNs >= ADAPTIVE_PAIR_UPDATE_MIN_NS)) {
                 long oldShortNs = autoShortExposureNs;
                 long oldLongNs = autoLongExposureNs;
@@ -1781,8 +1818,10 @@ final class CameraController {
             double currentEv, HdrGlView.SceneStats stats, boolean manual) {
         if (!manual) return adaptAutoShortHeadroomEvLocked(currentEv, stats);
 
-        double minEv = Math.max(
-                manualBracketFloorEv, AUTO_BRACKET_DEFAULT_EV + MANUAL_EXTRA_HEADROOM_EV);
+        // User-selected SHORT is the baseline in MANUAL SAFE. Safety may add
+        // headroom only after measured clipping evidence; it may not impose the old
+        // hidden 3.25-EV floor that made the SHORT slider appear unresponsive.
+        double minEv = manualBracketFloorEv;
         double maxEv = MANUAL_BRACKET_MAX_EV;
         boolean meaningfulLongClip = stats.longMeaningfulClipFraction >= LONG_CLIP_TRIGGER_FRACTION;
         boolean manualShortFragile = stats.shortDarkFraction > 0.94f
@@ -2133,10 +2172,11 @@ final class CameraController {
         double requestedShortProduct = Math.max(1.0, (double) shortExposureNs * minIso);
         double requestedBracket = Math.log(requestedLongProduct / requestedShortProduct) / Math.log(2.0);
         manualBracketFloorEv = clampDouble(
-                requestedBracket, AUTO_BRACKET_MIN_EV, MANUAL_BRACKET_MAX_EV);
-        manualAdaptiveBracketEv = clampDouble(
-                Math.max(manualBracketFloorEv, AUTO_BRACKET_DEFAULT_EV + MANUAL_EXTRA_HEADROOM_EV),
-                AUTO_BRACKET_MIN_EV, MANUAL_BRACKET_MAX_EV);
+                requestedBracket, 0.0, MANUAL_BRACKET_MAX_EV);
+        // Manual SHORT is a direct live control baseline. Start exactly at the
+        // user's requested bracket on every slider change; measured highlight safety
+        // may subsequently make SHORT darker, but it cannot silently ignore the move.
+        manualAdaptiveBracketEv = manualBracketFloorEv;
     }
 
     private boolean recomputeManualAdaptivePairLocked() {
@@ -2163,9 +2203,9 @@ final class CameraController {
                 targetShortProduct, manualEffectiveLongExposureNs, achievedLongProduct,
                 MANUAL_BRACKET_MAX_EV, false);
 
-        // In MANUAL SAFE the Short slider is a headroom ceiling, not a lock. The
-        // adaptive engine may go darker/shorter when highlights require it, but never
-        // make SHORT longer than the user's requested integration.
+        // In MANUAL SAFE the Short slider owns the immediate live integration.
+        // The adaptive safety engine may later go darker/shorter only when measured
+        // highlight evidence requires extra headroom, never longer than requested.
         long shortExposure = Math.min(shortSetting.exposureNs, clampExposure(shortExposureNs));
         int shortIso = solveIsoForProduct(targetShortProduct, shortExposure);
         if (shortIso < minIso) shortIso = minIso;

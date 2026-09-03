@@ -57,8 +57,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private static final String STATE_AUTO_HDR = "autoHdr";
     private static final String STATE_ALLOW_CROPPED_60 = "allowCropped60";
     private static final String STATE_DISPLAY_BRIGHTNESS_EV = "displayBrightnessEv";
-    private static final float DISPLAY_BRIGHTNESS_MIN_EV = -5.0f;
-    private static final float DISPLAY_BRIGHTNESS_MAX_EV = 2.0f;
+    private static final float DISPLAY_BRIGHTNESS_MIN_EV = -16.0f;
+    private static final float DISPLAY_BRIGHTNESS_MAX_EV = 1.0f;
     private static final int DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10;
     private static final long[] EXPOSURES_NS = {
             1_000_000_000L / 8000,
@@ -347,7 +347,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
                     this,
                     autoHdrEnabled
                             ? "AUTO HDR continuously adapts LONG appearance while SHORT adds only needed highlight headroom"
-                            : "MANUAL SAFE: you own LONG appearance; SHORT remains adaptive with extra highlight headroom",
+                            : "MANUAL SAFE: you own LONG and the immediate SHORT exposure; safety may add headroom only when needed",
                     Toast.LENGTH_SHORT).show();
         });
 

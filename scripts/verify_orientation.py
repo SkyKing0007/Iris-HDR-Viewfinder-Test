@@ -22,7 +22,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.5.3 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.5.4 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -452,7 +452,7 @@ require('raw_hdr_fusion.frag' in raw_fusion and 'raw_hdr_demosaic.frag' in raw_f
 require('whiteBalanceGains' in raw_demosaic_shader
         and 'float fetchTrust(ivec2 globalPos)' in raw_demosaic_shader
         and 'trustedOpponentPair' in raw_demosaic_shader
-        and 'if (highOrderTrust >= 0.95)' in raw_demosaic_shader
+        and 'smoothstep(0.70, 0.95, highOrderTrust)' in raw_demosaic_shader
         and 'vec3 balancedCameraRgb = vec3(r, g, b);' in raw_demosaic_shader
         and 'coherentHighlightColorRisk(p)' in raw_demosaic_shader
         and 'balancedCameraRgb = mix(balancedCameraRgb, neutralCameraRgb, colorRisk);' in raw_demosaic_shader
@@ -696,8 +696,9 @@ require('manualEffectiveShortExposureNs' in camera and 'manualEffectiveLongExpos
         "requested and effective MANUAL shutters must remain separate")
 require('manualAdaptiveBracketEv' in camera and 'manualBracketFloorEv' in camera,
         "MANUAL adaptive headroom state missing")
-require('MANUAL_EXTRA_HEADROOM_EV = 0.25' in camera,
-        "MANUAL must retain modest extra highlight headroom")
+require('MANUAL_EXTRA_HEADROOM_EV' not in camera
+        and 'manualAdaptiveBracketEv = manualBracketFloorEv;' in camera,
+        "MANUAL SHORT must start at the user-requested bracket without hidden extra headroom")
 require('nextBracket = Math.max(manualBracketFloorEv, nextBracket);' in camera,
         "MANUAL user short-headroom floor must not be overridden")
 require('Math.min(shortSetting.exposureNs, clampExposure(shortExposureNs))' in camera,
@@ -777,7 +778,7 @@ require('60 FPS CROP ON: request fixed 60/60 preview' in main,
 # required before increasing headroom; release remains slower. MANUAL retains the
 # prior global clipping contract and user SHORT-ceiling behavior.
 def adapt_bracket_sequence(current_ev, samples, manual=False, floor=2.0):
-    min_ev=max(floor,3.25) if manual else 3.0
+    min_ev=floor if manual else 3.0
     max_ev=6.0 if manual else 7.0
     up=down=0
     out=current_ev
@@ -817,8 +818,8 @@ require(math.isclose(adapt_bracket_sequence(3.0,[(1,1.0,0.995,0.0),(1,1.0,0.995,
         "LONG-damaged cells without usable SHORT signal must not chase darker exposure")
 require(adapt_bracket_sequence(4.0,[(0,0.0,0.0,0.0)]*3) < 4.0,
         "AUTO headroom must release slowly after localized LONG damage disappears")
-require(adapt_bracket_sequence(3.25,[(0.02,0.01,True),(0.02,0.01,True)],manual=True,floor=3.0)>3.25,
-        "MANUAL must retain adaptive extra headroom")
+require(adapt_bracket_sequence(2.0,[(0.02,0.01,True),(0.02,0.01,True)],manual=True,floor=2.0)>2.0,
+        "MANUAL safety must still add headroom after measured SHORT clipping")
 
 # 60-Hz direct-light regression from the chandelier set. At 1/120 + sensor-min ISO
 # the current build can still clip. Once localized evidence confirms that failure,
@@ -1016,23 +1017,23 @@ require('float fieldLumaTrust = mix(1.0, clamp(fieldState.g, 0.0, 1.0), guardReq
         and 'float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);' in hdr_shader,
         "phase-sensitive SHORT must fail closed at pair rate while safe SHORT bypasses mandatory field trust")
 
-# 056 / 074 / 080 / V1.5.3 - Exact current pre-handoff authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.5.2' in workflow
-        and 'run-id: 33682632400' in workflow,
-        "workflow must download the exact successful V1.5.2 Actions authority")
-require('2ed7072212bc1e9571163a914be6497c6254b702' in workflow
-        and '7108e37bb9e4c9ab15d0b97661dcc6c9d93687c8' in workflow,
-        "V1.5.2 authority commit/tree pins missing")
+# 056 / 074 / 080 / V1.5.4 - Exact current pre-handoff authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.5.3' in workflow
+        and 'run-id: 33701431592' in workflow,
+        "workflow must download the exact successful V1.5.3 Actions authority")
+require('8497636a2ab94a4740b48b6b1c2a2aef43fb6557' in workflow
+        and '7898da26fa5479175bc1821f313dddb679628b46' in workflow,
+        "V1.5.3 authority commit/tree pins missing")
 require('backup-' not in workflow,
-        "V1.5.3 narrow correction must not depend on or create a backup branch")
+        "build workflow must not depend on the safety backup branch")
 
-# 048 / 049 / 052 / 054 - Brightness remains user LONG intent in AUTO and MANUAL.
-require('DISPLAY_BRIGHTNESS_MIN_EV = -5.0f' in main
-        and 'DISPLAY_BRIGHTNESS_MAX_EV = 2.0f' in main
+# 048 / 049 / 052 / 054 / 137 - Brightness remains user LONG intent in AUTO and MANUAL.
+require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in main
+        and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in main
         and 'DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10' in main,
-        "Brightness slider must remain -5..+2 EV in 0.1 EV increments")
-require('DISPLAY_BRIGHTNESS_MIN_EV = -5.0f' in camera
-        and 'DISPLAY_BRIGHTNESS_MAX_EV = 2.0f' in camera,
+        "Brightness slider must be -16..+1 EV in 0.1 EV increments")
+require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in camera
+        and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in camera,
         "Camera Brightness clamp must match UI")
 require('LONG_APPEARANCE_SHORT_ADAPTIVE' in camera,
         "runtime Brightness ownership must be LONG appearance + adaptive SHORT")
@@ -1049,8 +1050,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 32' in gradle and 'versionName = "1.0-v1.5.3"' in gradle,
-        "V1.5.3 version/build pin missing")
+require('versionCode = 33' in gradle and 'versionName = "1.0-v1.5.4"' in gradle,
+        "V1.5.4 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -1363,8 +1364,10 @@ require('float hardLongClip = smoothstep(0.985, 0.997, longPeak);' in raw_fusion
         and 'if (longPeak >= 0.997 && quadValidation.x >= 0.10)' in raw_fusion_shader
         and 'ownership = 1.0;' in raw_fusion_shader,
         "clipped-LONG leakage regression: valid SHORT must become unconditional whole-quad authority")
-require('shortValidated = max(shortValidated, hardShortTakeover);' in raw_fusion_shader,
-        "hard SHORT takeover must retain SHORT physical color trust and never fall into clipped-LONG neutralization")
+require('shortValidated = max(shortValidated, hardShortTakeover);' not in raw_fusion_shader
+        and 'float shortSupportTrust = smoothstep(0.15, 0.85, quadValidation.x);' in raw_fusion_shader
+        and 'float shortGeometryTrust = smoothstep(0.20, 0.70, flowConfidence);' in raw_fusion_shader,
+        "V1.5.4 ownership/trust regression: hard SHORT takeover must not falsely promote weak chroma evidence to perfect trust")
 
 def v153_raw_ownership(long_peak, short_min_support, geometric):
     highlight = smoothstep_local(0.70, 0.92, long_peak)
@@ -1400,31 +1403,80 @@ def v153_gtm_peak(scene_peak):
 require(v153_gtm_peak(64.0) < v153_gtm_peak(96.0) < v153_gtm_peak(128.0) < v153_gtm_peak(192.0) < 0.9995,
         "recoverable 6-7+ EV SHORT structure must retain ordered display separation rather than collapse to white")
 
-# Successful V1.5.1/V1.5.2 visual protections remain byte-frozen.
-require(hashlib.sha256((ROOT / 'app/src/main/assets/shaders/raw_hdr_demosaic.frag').read_bytes()).hexdigest()
-        == 'e7950bde3c9d478a0432befcf094fac087d130e75c8fb956cba21f7c811e7b2e',
-        "broad-pink/ceiling-magenta and trust-aware anti-peach demosaic must remain byte-identical to successful V1.5.2")
+# 131-134 - V1.5.4 device-artifact protections. Preserve the proven broad-pink
+# strategy while removing the V1.5.3 white-paint and false-perfect-chroma producers.
+require('quadColorRisk' in raw_demosaic_shader and 'coherentHighlightColorRisk' in raw_demosaic_shader,
+        "broad-pink protection: physical clipping/trust risk path must remain")
+require('vec3 neutralCameraRgb = vec3(g);' in raw_demosaic_shader
+        and 'max(g, median3' not in raw_demosaic_shader
+        and 'float neutralLevel = max(' not in raw_demosaic_shader,
+        "white-paint regression 131: uncertain highlight chroma may not increase green/luminance")
+require('if (support < 1.10)' not in raw_demosaic_shader
+        and 'if (support < 1.50)' not in raw_demosaic_shader
+        and 'if (highOrderTrust >= 0.95)' not in raw_demosaic_shader
+        and 'smoothstep(0.70, 0.95, highOrderTrust)' in raw_demosaic_shader,
+        "block/stair regression 132: demosaic trust must transition continuously")
+require('quadLongPeak' in raw_fusion_shader
+        and 'float softOwnership = clamp(' in raw_fusion_shader
+        and 'if (longPeak >= 0.997 && quadValidation.x >= 0.10)' in raw_fusion_shader,
+        "peach/checkerboard regression 133: source ownership must remain coherent per Bayer quad")
+
+# HdrGlView live response/GTM are intentionally untouched in this saved-RAW artifact fix.
 require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java').read_bytes()).hexdigest()
         == '3377d4f3ebac7a46cfb5887ca4592174ea6586e7d84a46af390bed6302a6f9fe',
-        "V1.5.2 generation-stable live calibration must remain byte-identical")
-require('quadColorRisk' in raw_demosaic_shader and 'coherentHighlightColorRisk' in raw_demosaic_shader
-        and 'balancedCameraRgb = mix(balancedCameraRgb, neutralCameraRgb, colorRisk);' in raw_demosaic_shader,
-        "proven clipped-highlight chroma completion path missing")
+        "generation-stable live calibration must remain byte-identical to successful V1.5.3")
+require(hashlib.sha256((ROOT / 'app/src/main/assets/shaders/hdr_display.frag').read_bytes()).hexdigest()
+        == '45483186243cffb220c00a23e4de78396a2d482168452cec22238da79eb1dcb8',
+        "V1.5.3 live fusion + 8-EV no-LTM GTM must remain byte-identical")
 require('local tone' not in hdr_shader.lower() and 'bilateral tone' not in hdr_shader.lower(),
-        "V1.5.3 must remain no-LTM")
+        "V1.5.4 must remain no-LTM")
 
+# 135 - Instant scene changes without steady-state flicker. Only >=0.90-EV body
+# errors bypass the old 0.18-EV/2-sample controller; normal fluctuations retain it.
+require('AUTO_BODY_SCENE_CUT_EV = 0.90' in camera
+        and 'AUTO_BODY_SCENE_CUT_MAX_STEP_EV = 4.0' in camera
+        and 'boolean sceneCut = Math.abs(errorEv) >= AUTO_BODY_SCENE_CUT_EV;' in camera
+        and 'fastPairUpdate = true;' in camera
+        and 'AUTO_BODY_MAX_STEP_EV = 0.18' in camera
+        and 'AUTO_BODY_CONFIRM_SAMPLES = 2' in camera,
+        "scene-cut regression 135: fast response must coexist with proven steady-state hysteresis")
+def v154_body_step(error_ev):
+    if abs(error_ev) >= 0.90:
+        return max(-4.0,min(4.0,error_ev)), True
+    if error_ev > 0.10:
+        return min(0.18,error_ev), False
+    if error_ev < -0.10:
+        return max(-0.18,error_ev), False
+    return 0.0, False
+require(v154_body_step(3.2) == (3.2, True),
+        "3.2-EV real scene cut must jump in one stats update")
+require(v154_body_step(0.12) == (0.12, False),
+        "small steady-state error must remain on conservative path")
+require(v154_body_step(0.08) == (0.0, False),
+        "sub-hysteresis fluctuation must not cause exposure pumping")
 
-# 130 - V1.5.3 V1.1 authority-lineage regression (Actions run 33691567856):
-# V1.1 was a child of failed V1.5.3, so the old HEAD^ == successful V1.5.2
-# guard aborted under set -e before compilers. Preserve V1.5.2 as sole runtime
-# authority but prove the exact failed-candidate chain with sufficient checkout depth.
+# 136 - MANUAL SAFE SHORT slider is now an immediate exposure control baseline.
+require('manualAdaptiveBracketEv = manualBracketFloorEv;' in camera
+        and 'double minEv = manualBracketFloorEv;' in camera
+        and 'requestedBracket, 0.0, MANUAL_BRACKET_MAX_EV' in camera
+        and 'MANUAL_EXTRA_HEADROOM_EV' not in camera,
+        "manual SHORT regression 136: hidden adaptive bracket floor must not ignore user slider")
+
+# 137 - Brightness contract is exactly -16..+1 EV everywhere it is owned/stored.
+require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in camera
+        and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in camera
+        and 'DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in main
+        and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in main
+        and 'Math.max(-16.0f, Math.min(1.0f, displayBrightnessEv))' in saver,
+        "brightness regression 137: UI/controller/capture metadata must share -16..+1 EV")
+
+# 130 remains applicable as a general lineage lesson: never assume ancestry without
+# proving the exact current successful authority. V1.5.4 is intentionally a direct
+# child of successful V1.5.3, so the workflow must prove that exact parent.
 workflow = (ROOT / '.github/workflows/build.yml').read_text()
-require('fetch-depth: 4' in workflow
-        and "failed_v153='33e93e528a69750da79f5847cb033d810f2d7251'" in workflow
-        and "failed_v153_v11='02224874fe78eccfec2e05415691edcaed3229d2'" in workflow
-        and 'test "$(git rev-parse HEAD^)" = "$failed_v153_v11"' in workflow
-        and 'test "$(git rev-parse HEAD~2)" = "$failed_v153"' in workflow
-        and 'test "$(git rev-parse HEAD~3)" = "$authority"' in workflow,
-        "authority-lineage regression 130: exact V1.5.2 -> failed V1.5.3 -> failed V1.5.3 V1.1 -> V1.2 chain proof missing")
+require('fetch-depth: 2' in workflow
+        and "authority='8497636a2ab94a4740b48b6b1c2a2aef43fb6557'" in workflow
+        and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow,
+        "authority-lineage regression 130: V1.5.4 must prove direct parent is exact successful V1.5.3")
 
-print("V1.5.3 V1.2 REGRESSION PASS: exact V1.5.2 Actions authority, clipped-LONG unconditional SHORT takeover, coherent pre-clipping SHORT shoulder, preserved broad-pink/peach-edge protections, stable live calibration, shared 8-EV global GTM, no LTM")
+print("V1.5.4 REGRESSION PASS: exact V1.5.3 Actions authority, no broad pink, no luminance-raising white paint, no false-perfect SHORT chroma, continuous demosaic trust, clipped-LONG SHORT authority, stable no-LTM live path, instant scene-cut AE with steady-state hysteresis, responsive MANUAL SHORT, -16..+1 EV brightness")

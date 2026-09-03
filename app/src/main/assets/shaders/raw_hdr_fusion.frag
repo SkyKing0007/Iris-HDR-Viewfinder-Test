@@ -1,7 +1,7 @@
 #version 300 es
 precision highp float;
 precision highp int;
-// V1.5.3: R=fused scene-linear CFA, G=physical color trust,
+// V1.5.4: R=fused scene-linear CFA, G=physical color trust,
 // B=physical LONG clipping risk, A=SHORT ownership.
 // Keeping provenance beside the CFA value lets demosaic make one coherent
 // color-trust decision per Bayer quad instead of guessing from brightness.
@@ -307,10 +307,17 @@ void main() {
 
     float longPhysicalTrust =
         1.0 - smoothstep(0.985, 0.997, longSensor);
-    float shortValidated =
-        smoothstep(0.55, 0.85, quadValidation.x)
-        * smoothstep(0.45, 0.70, flowConfidence)
-        * smoothstep(0.40, 0.65, photometricConfidence)
+    // Exposure ownership and color trust are deliberately independent. A clipped
+    // LONG quad may be 100% SHORT-owned even when alignment/support only proves part
+    // of SHORT chroma. Never promote hard takeover itself to perfect R/G1/G2/B trust:
+    // that was the V1.5.3 producer for green/magenta/orange fragments at highlight
+    // boundaries. Missing chroma trust is handled downstream without returning LONG.
+    float shortSupportTrust = smoothstep(0.15, 0.85, quadValidation.x);
+    float shortGeometryTrust = smoothstep(0.20, 0.70, flowConfidence);
+    float shortPhotometricTrust = smoothstep(0.20, 0.65, photometricConfidence);
+    float shortValidated = shortSupportTrust
+        * mix(0.35, 1.0, shortGeometryTrust)
+        * mix(0.55, 1.0, shortPhotometricTrust)
         * correspondenceConfidence * inheritedBoundaryGate;
     if (quadValidation.x >= 0.85
             && flowConfidence >= 0.60
@@ -319,14 +326,6 @@ void main() {
             && inheritedBoundaryGate >= 0.70) {
         shortValidated = 1.0;
     }
-    // Trust belongs to the actual fused sample, not merely to the existence of
-    // some valid evidence. If a clipped/untrusted LONG value still owns part of
-    // the output, that fraction remains color-incomplete even when SHORT itself
-    // is valid. Full trust is recovered only as validated SHORT actually owns it.
-    // A hard SHORT takeover carries complete physical color evidence from SHORT.
-    // Do not send it through the clipped-LONG neutralization path merely because the
-    // alignment cell was inherited or photometric overlap was unavailable in the core.
-    shortValidated = max(shortValidated, hardShortTakeover);
     float physicalColorTrust = mix(
         longPhysicalTrust, shortValidated, ownership);
     float longPhysicalClipRisk = 1.0 - longPhysicalTrust;

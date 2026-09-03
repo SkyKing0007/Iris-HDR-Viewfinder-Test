@@ -106,38 +106,47 @@ float greenAt(ivec2 p) {
         min(min(fetchTrust(pl2), fetchTrust(pr2)),
             min(fetchTrust(pu2), fetchTrust(pd2))));
 
-    // Exact V1.5.1 detail path remains byte-mathematically equivalent wherever
-    // every contributing CFA site has physical authority.
-    if (highOrderTrust >= 0.95) {
-        float cL2 = fetchBalanced(pl2);
-        float cR2 = fetchBalanced(pr2);
-        float cU2 = fetchBalanced(pu2);
-        float cD2 = fetchBalanced(pd2);
-        float gradH = abs(gl - gr) + abs(2.0 * center - cL2 - cR2);
-        float gradV = abs(gu - gd) + abs(2.0 * center - cU2 - cD2);
-        float gh = 0.5 * (gl + gr);
-        float gv = 0.5 * (gu + gd);
-        if (gradH < gradV * 0.75) return gh;
-        if (gradV < gradH * 0.75) return gv;
-        float wh = 1.0 / max(0.0001, gradH);
-        float wv = 1.0 / max(0.0001, gradV);
-        return (gh * wh + gv * wv) / (wh + wv);
+    // Preserve the proven high-order edge estimator when trust is complete, but
+    // approach it continuously. V1.5.3 switched abruptly at trust=0.95 and at
+    // support=0.30, which turned tiny provenance changes into visible blocks.
+    float cL2 = fetchBalanced(pl2);
+    float cR2 = fetchBalanced(pr2);
+    float cU2 = fetchBalanced(pu2);
+    float cD2 = fetchBalanced(pd2);
+    float gradH = abs(gl - gr) + abs(2.0 * center - cL2 - cR2);
+    float gradV = abs(gu - gd) + abs(2.0 * center - cU2 - cD2);
+    float highGh = 0.5 * (gl + gr);
+    float highGv = 0.5 * (gu + gd);
+    float highOrderGreen;
+    if (gradH < gradV * 0.75) highOrderGreen = highGh;
+    else if (gradV < gradH * 0.75) highOrderGreen = highGv;
+    else {
+        float highWh = 1.0 / max(0.0001, gradH);
+        float highWv = 1.0 / max(0.0001, gradV);
+        highOrderGreen = (highGh * highWh + highGv * highWv)
+            / max(0.0001, highWh + highWv);
     }
 
-    // At a rejected/partly unproven highlight boundary, an untrusted green sample
-    // may contribute brightness but may not steer edge direction by itself.
+    // A partially trusted site contributes proportionally; there is no discrete
+    // support threshold that suddenly changes reconstruction family.
     float supportH = tl + tr;
     float supportV = tu + td;
     float gh = (gl * tl + gr * tr) / max(0.0001, supportH);
     float gv = (gu * tu + gd * td) / max(0.0001, supportV);
-    if (supportH < 0.30 && supportV < 0.30) {
-        return 0.25 * (gl + gr + gu + gd);
-    }
-    if (supportH < 0.30) return gv;
-    if (supportV < 0.30) return gh;
-    float wh = supportH / max(0.002, abs(gl - gr) + 0.002);
-    float wv = supportV / max(0.002, abs(gu - gd) + 0.002);
-    return (gh * wh + gv * wv) / max(0.0001, wh + wv);
+    float hAvail = smoothstep(0.02, 0.60, supportH);
+    float vAvail = smoothstep(0.02, 0.60, supportV);
+    float wh = hAvail * supportH / max(0.002, abs(gl - gr) + 0.002);
+    float wv = vAvail * supportV / max(0.002, abs(gu - gd) + 0.002);
+    float directionalWeight = wh + wv;
+    float directionalGreen = (gh * wh + gv * wv)
+        / max(0.0001, directionalWeight);
+    float localMean = 0.25 * (gl + gr + gu + gd);
+    float fallbackGreen = mix(
+        localMean, directionalGreen,
+        smoothstep(0.02, 0.20, directionalWeight));
+    return mix(
+        fallbackGreen, highOrderGreen,
+        smoothstep(0.70, 0.95, highOrderTrust));
 }
 
 float trustedOpponentPair(
@@ -146,10 +155,11 @@ float trustedOpponentPair(
     float t1 = fetchTrust(p1);
     float d0 = fetchBalanced(p0) - greenAt(p0);
     float d1 = fetchBalanced(p1) - greenAt(p1);
-    if (min(t0, t1) >= 0.95) return gCenter + 0.5 * (d0 + d1);
     float support = t0 + t1;
-    if (support < 1.10) return gCenter;
-    return gCenter + (d0 * t0 + d1 * t1) / max(0.0001, support);
+    float residual = (d0 * t0 + d1 * t1) / max(0.0001, support);
+    float trustStrength = smoothstep(0.30, 1.70, support)
+        * smoothstep(0.05, 0.85, min(t0, t1));
+    return gCenter + residual * trustStrength;
 }
 
 float colorAt(int targetChannel, ivec2 p, float gCenter) {
@@ -183,14 +193,13 @@ float colorAt(int targetChannel, ivec2 p, float gCenter) {
     float d1 = fetchBalanced(q1) - greenAt(q1);
     float d2 = fetchBalanced(q2) - greenAt(q2);
     float d3 = fetchBalanced(q3) - greenAt(q3);
-    if (min(min(t0, t1), min(t2, t3)) >= 0.95) {
-        return max(0.0, gCenter + 0.25 * (d0 + d1 + d2 + d3));
-    }
     float support = t0 + t1 + t2 + t3;
-    if (support < 1.50) return gCenter;
     float residual = (d0 * t0 + d1 * t1 + d2 * t2 + d3 * t3)
         / max(0.0001, support);
-    return max(0.0, gCenter + residual);
+    float meanTrust = 0.25 * support;
+    float trustStrength = smoothstep(0.60, 3.40, support)
+        * smoothstep(0.08, 0.80, meanTrust);
+    return max(0.0, gCenter + residual * trustStrength);
 }
 
 ivec2 quadOrigin(ivec2 p) {
@@ -226,12 +235,6 @@ float coherentHighlightColorRisk(ivec2 p) {
     return smoothstep(0.035, 0.45, clamp(risk, 0.0, 1.0));
 }
 
-float median3(vec3 value) {
-    return value.r + value.g + value.b
-        - min(value.r, min(value.g, value.b))
-        - max(value.r, max(value.g, value.b));
-}
-
 void main() {
     ivec2 outputLocal = ivec2(gl_FragCoord.xy);
     ivec2 p = outputGlobalOrigin + outputLocal;
@@ -243,15 +246,14 @@ void main() {
     // sensor-domain trust during interpolation, then makes one Bayer-quad color
     // decision AFTER LSC/WB balancing and BEFORE the Camera2 color matrix.
     //
-    // Fully physically proven color is unchanged. If clipping left a phase
-    // unproven, preserve the majority/green-derived brightness but progressively
-    // drive only opponent chroma (R-G and B-G) toward zero. This is the proven
-    // Iris fail-closed contract and is intentionally NOT a brightness-triggered
-    // "anything above 70% becomes white" repair.
+    // Fully physically proven color is unchanged. If clipping left opponent
+    // chroma unproven, reduce only R-G/B-G. V1.5.3 used max(g, median(rgb)) as the
+    // neutral target; that could raise brightness and paint white strokes/blocks.
+    // The neutral fallback is now exactly the reconstructed green/luminance anchor:
+    // uncertainty may remove chroma, but it may never create luminance.
     vec3 balancedCameraRgb = vec3(r, g, b);
     float colorRisk = coherentHighlightColorRisk(p);
-    float neutralLevel = max(g, median3(balancedCameraRgb));
-    vec3 neutralCameraRgb = vec3(neutralLevel);
+    vec3 neutralCameraRgb = vec3(g);
     balancedCameraRgb = mix(balancedCameraRgb, neutralCameraRgb, colorRisk);
 
     vec3 linearSrgb = vec3(
