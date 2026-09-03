@@ -1,36 +1,29 @@
-Iris HDR Viewfinder Test V1.4.11 V2.5
+Iris HDR Viewfinder Test V1.4.11 V2.6
 
 STATUS BEFORE ACTIONS: PREPARED / UPLOAD-READY - NOT BUILD-PROVEN
 TARGET BRANCH: experiment-v1.4.11-v2-brightness-4ev
-BACKUP: NOT CREATED, per user instruction; this is a localized three-runtime-file correction with deterministic rollback patch proof.
+BACKUP: NOT CREATED, per user instruction.
 
 RUNTIME AUTHORITY
-- Exact successful V1.4.11 V2.4 GitHub Actions compiled candidate.
-- Commit: 603de4980e454f6b6ec2f1acdd5cc5c1c5d05368
-- Tree: df5679c85f02b9594ae5c076b90d0ad0476b9382
-- Actions run: 33708991821
-- Artifact ID: 9876275406
-- Artifact digest: sha256:8a5737ae0dcec7f462329dfb4a663904281b9f6982fb7c7bd34fb973ce335e1c
-- APK SHA-256: 58de03fa3a4eb0cf6c0bd2387cabb67730865da7043e280379a7dad746f32b72
-- Source candidate TAR SHA-256: dac77d19668e60192e855ff43a9686a79a7505198fec5c6c4689a44f271a1db0
-- Runtime manifest SHA-256: 1fd197bb7dd682453e7f6c8b40f51e7ce44150f790020a3ccffb0a4afe57c5cc
-- Repository manifest SHA-256: 51aaf403b9e2207fdc0d81bc381902fe3f6eb067e19eee075de0a6db5d761582
-- REGRESSIONS SHA-256: f8e34bb0f0e1dfb56442766d054dfd072fa461056eeb57aa8e362eee4e4dd0a1
+- Exact successful V1.4.11 V2.5 GitHub Actions compiled candidate.
+- Commit: ac7b2d133f9a36d70a4e34a5011c2b3f6718d7de
+- Tree: ed574a002f27f88b4904983f0632865d022451a0
+- Actions run: 33712399624
+- Artifact ID: 9877374563
+- Artifact digest: sha256:8ffe2c930a7cc794087f87d652d6ebb6e6bae834c78980cbf9878876b05e237e
+- APK SHA-256: b78b9ccabb2fae492309d950e4ce37802833ec26599e070b649564711c0fe97c
+- Source candidate TAR SHA-256: 86de2cd3db784947010cf456b1b76dba2a0b2c42b8244bb5570106905ba0ff67
+- Runtime manifest SHA-256: 3c56ae7b9bb24d27492439897c532ff1ceb19b2939d5af00b9482324d447d603
+- Repository manifest SHA-256: 406080fc167cced85f17bdf88796a0f97ff3c33a232ad2954d8a806219e21fdc
+- REGRESSIONS SHA-256: c74fee5727a12079adc3606cc9d2671a20f4d22c03a466f86ff75c00ba09de02
 
 VERIFICATION-MECHANICS AUTHORITY
-- Exact successful V1.4.11 V2.4 workflow implementation and gate order.
-- fetch-depth remains 3.
-- Authority artifact reconstruction/manifests/path-set/byte-equality proof retained.
-- Embedded Python heredoc syntax preflight retained.
-- Complete GLSL reserved-identifier scan retained.
-- Pinned real glslangValidator, real project Java compiler and full :app:assembleDebug order retained.
-- Deterministic full-index forward/rollback proof retained at core.abbrev 7/12/40 with git apply + GNU patch fuzz=0.
-- Post-build candidate/protected invariance and exactly-one-APK proof retained.
+- Exact successful V1.4.11 V2.5 workflow implementation and gate order.
 - 25 tracked files / 12 runtime files retained; no runtime file is added or deleted.
+- Exact authority artifact reconstruction/manifests/path-set/byte-equality, embedded-Python syntax, complete GLSL reserved scan, pinned glslangValidator, project Java compiler, deterministic full-index patches, PRE-BUILD SAFETY PROOF, full assembleDebug, one-APK proof, post-build invariance and final artifact export remain in the same order.
 
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST: EXACTLY 3
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST: EXACTLY 2
 - app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 
 INFRASTRUCTURE CHANGED-FILE LIST
@@ -38,51 +31,34 @@ INFRASTRUCTURE CHANGED-FILE LIST
 - BUILD_WORKFLOW_COPY.yml
 - scripts/verify_orientation.py
 
-CANDIDATE METADATA/VERSION/HASH FILES
-- PACKAGE_INFO.txt
-- PACKAGE_MANIFEST_SHA256.txt
-- README.md
-- VSCODE_DEV_UPLOAD.txt
-- app/build.gradle.kts
-
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION: YES, NARROWLY
-- Authority pins advance only from exact successful V2.4 to the V2.5 candidate.
-- Exact changed-file allowlist/protected set/runtime digest advance to V2.5.
-- Permanent regressions 054-056 record the Gamma-exposed low-signal SHORT chroma failure and MANUAL SAFE SHORT-shutter failure.
-- Compiler/build/patch/provenance gate order is unchanged.
+- Authority/version/hash/allowlist/regression pins advance to V2.6.
+- Compiler/build/patch/provenance gate order remains unchanged.
 
-VERSION
-- versionCode: 22
-- versionName: 1.0-v1.4.11-v2.5
-- applicationId: com.skyking0007.irishdrviewfinder.v1411v2
+FUNCTIONAL CHANGE 1 - TRUE SHORT JPEG PROVENANCE
+- V2.5 still fusion could alternate source ownership pixel-by-pixel and then synthesize luminance from one exposure with chroma from another.
+- V2.6 removes the saved-still luma/chroma hybrid.
+- A 3x3 low-frequency neighborhood (radius 6 pixels) votes only on a scalar source-ownership mask.
+- The center pixel RGB itself is never spatially filtered, filled, sharpened, or synthesized.
+- LONG remains the base. Damaged bright LONG can hand ownership to SHORT only when SHORT has useful signal and headroom.
+- When SHORT owns, all three channels come from the same captured SHORT JPEG pixel.
+- SHORT receives a bounded bracket-aware rendered-JPEG display lift rather than full RAW-style physical-ratio multiplication.
+- Live mode=2 retains the successful V2.5 physical-ratio HDR behavior.
 
-FUNCTIONAL CHANGE 1 - GAMMA-EXPOSED RAINBOW/CHROMA SPECKLE
-- V2.4 correctly allowed damaged LONG to stop vetoing useful SHORT structure, but it treated useful SHORT luminance/detail and useful SHORT chroma as the same confidence decision.
-- In very dark SHORT JPEG samples, low-level RGB/chroma noise can therefore enter a smooth bright LONG region and become highly visible after positive Gamma.
-- V2.5 preserves V2.4 SHORT luminance/detail ownership exactly, but adds a stricter still-only SHORT chroma confidence ramp from encoded SHORT luma 0.16 to 0.28.
-- Low-signal SHORT can still supply real exposure-normalized luminance/detail while chromaticity remains LONG-owned; strong SHORT signal retains complete SHORT chromaticity.
-- The split happens before Gamma in both GLES3-primary saved fusion and CPU fallback.
-- No neighborhood filtering, fill, synthesis, sharpening, or V1.5/RAW runtime path is introduced.
+FUNCTIONAL CHANGE 2 - GLOBAL PHOTOGRAPHIC SDR BODY CURVE
+- Capture exposure/AUTO policy is unchanged.
+- A global RGB-ratio-preserving curve anchors near-black, lifts the body/midtones modestly, and fades exactly to zero before the existing 0.70 highlight shoulder.
+- No local tone mapping, local contrast/pop, inpainting, sharpening, or UltraHDR path is added.
+- Brightness and Gamma remain optional presentation controls after the normalized base rendering.
 
-FUNCTIONAL CHANGE 2 - MANUAL SHORT SHUTTER SLIDER
-- V2.4 MANUAL SAFE replaced both requested SHORT and LONG shutters with one common flicker-safe LONG integration, so moving the SHORT slider could change only the requested label while actual/frozen SHORT exposure stayed unchanged.
-- V2.5 makes selected SHORT shutter the actual MANUAL SHORT physical integration at sensor-minimum ISO.
-- Under detected flicker, only LONG may snap to a 50/60-Hz-safe integration; LONG ISO compensates to preserve the requested LONG exposure product.
-- If requested SHORT crosses LONG, SHORT clamps at LONG rather than silently swapping the controls.
-- The existing 60-fps frame-duration cap remains authoritative when cropped-60 is explicitly enabled.
-- Shutter-time frozen still capture continues to use activeShortExposureNs(), so the corrected effective SHORT shutter reaches preview and saved SHORT JPEG/DNG capture.
-
-PRESERVED SUCCESSFUL V2.4 BEHAVIOR
-- V2.4 damaged-LONG cannot veto validated SHORT luminance/detail recovery.
-- Immediate scene-cut AUTO response and 100ms live statistics.
-- Fixed ~8x / 3EV AUTO SHORT/LONG bracket.
-- Brightness -16..+1EV, 0.1EV steps.
-- Gamma 0.50..2.00, 0.05 steps, 1.00 neutral; Gamma math itself is unchanged.
-- GLES3-primary saved fusion and explicit CPU-only failure fallback.
-- Live HDR mode=2 ownership, capture routing, DNG/JPEG saving, orientation/FIT, app identity, and fixed-height status row.
+PRESERVED SUCCESSFUL V2.5 BEHAVIOR
+- MANUAL SAFE keeps the selected physical SHORT shutter; only LONG may snap for flicker.
+- Immediate scene-cut AUTO and fixed ~8x / 3EV bracket.
+- Brightness -16..+1EV and Gamma 0.50..2.00.
+- GLES3-primary saved fusion with explicit CPU fallback.
+- DNG + SHORT/LONG JPEG saving, orientation/FIT, app identity and fixed-height status.
 
 COMPILER STATUS BEFORE ACTIONS
-- Complete GLSL reserved-identifier scan: PASS locally on all four runtime shaders.
 - Pinned real glslangValidator: NOT RUN locally; Actions required.
 - Real project Java compiler: NOT RUN locally; Actions required.
 - Full :app:assembleDebug: NOT RUN locally; Actions required.

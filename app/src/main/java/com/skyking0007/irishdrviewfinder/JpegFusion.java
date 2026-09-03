@@ -10,6 +10,7 @@ import java.io.ByteArrayOutputStream;
 
 final class JpegFusion {
     private static final float[] SRGB_TO_LINEAR = buildLinearLut();
+    private static final float[] ENCODED_TO_LINEAR = buildEncodedLinearLut();
     private static final int[] LINEAR_TO_SRGB = buildEncodeLut();
     private static final double LOG_2 = Math.log(2.0);
     private static final float HDR_KNEE = 0.70f;
@@ -40,11 +41,13 @@ final class JpegFusion {
         int width = shortBitmap.getWidth();
         int height = shortBitmap.getHeight();
         Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        int rowsPerStrip = 32;
-        int[] shortPixels = new int[width * rowsPerStrip];
-        int[] longPixels = new int[width * rowsPerStrip];
+        final int rowsPerStrip = 32;
+        final int ownershipRadius = 6;
+        int maxReadRows = rowsPerStrip + 2 * ownershipRadius;
+        int[] shortPixels = new int[width * maxReadRows];
+        int[] longPixels = new int[width * maxReadRows];
+        float[] ownershipEvidence = new float[width * maxReadRows];
         int[] outPixels = new int[width * rowsPerStrip];
-        float[] colorOwned = new float[3];
 
         float clampedBrightnessEv = clamp(displayBrightnessEv, -16.0f, 1.0f);
         float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);
@@ -54,141 +57,127 @@ final class JpegFusion {
                 : buildGammaLut(clampedGamma);
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
         float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 1.0f, 6.0f);
-        float clipStart = clamp(0.90f + 0.01f * (bracketStops - 1.0f), 0.90f, 0.95f);
+        float[] shortLiftLut = buildShortProvenanceLiftLut(bracketStops);
         float whiteAnchor = clamp(0.82f - 0.04f * (bracketStops - 1.0f), 0.68f, 0.82f);
         float displayCeiling = clamp(whiteAnchor + 0.14f, 0.84f, 0.96f);
         float headroomLog2 = Math.max(log2(Math.max(ratio, 1.0001f)), 0.0001f);
 
         for (int y = 0; y < height; y += rowsPerStrip) {
             int rows = Math.min(rowsPerStrip, height - y);
-            int count = width * rows;
-            shortBitmap.getPixels(shortPixels, 0, width, 0, y, width, rows);
-            longBitmap.getPixels(longPixels, 0, width, 0, y, width, rows);
+            int readY = Math.max(0, y - ownershipRadius);
+            int readBottom = Math.min(height, y + rows + ownershipRadius);
+            int readRows = readBottom - readY;
+            int readCount = width * readRows;
+            shortBitmap.getPixels(shortPixels, 0, width, 0, readY, width, readRows);
+            longBitmap.getPixels(longPixels, 0, width, 0, readY, width, readRows);
 
-            for (int i = 0; i < count; i++) {
-                int s = shortPixels[i];
-                int l = longPixels[i];
+            // V2.6 neighborhood values are scalar source-ownership evidence only.
+            // RGB is never spatially filtered or filled: the final pixel always uses
+            // the center captured LONG or center captured SHORT RGB sample.
+            for (int i = 0; i < readCount; i++) {
+                ownershipEvidence[i] = shortOwnershipEvidence(shortPixels[i], longPixels[i]);
+            }
 
-                int sr8 = (s >>> 16) & 0xFF;
-                int sg8 = (s >>> 8) & 0xFF;
-                int sb8 = s & 0xFF;
-                int lr8 = (l >>> 16) & 0xFF;
-                int lg8 = (l >>> 8) & 0xFF;
-                int lb8 = l & 0xFF;
+            for (int row = 0; row < rows; row++) {
+                int globalY = y + row;
+                int centerRow = globalY - readY;
+                for (int x = 0; x < width; x++) {
+                    int centerIndex = centerRow * width + x;
+                    int outIndex = row * width + x;
+                    int s = shortPixels[centerIndex];
+                    int l = longPixels[centerIndex];
 
-                float sr = SRGB_TO_LINEAR[sr8] * ratio;
-                float sg = SRGB_TO_LINEAR[sg8] * ratio;
-                float sb = SRGB_TO_LINEAR[sb8] * ratio;
-                float lr = SRGB_TO_LINEAR[lr8];
-                float lg = SRGB_TO_LINEAR[lg8];
-                float lb = SRGB_TO_LINEAR[lb8];
+                    int sr8 = (s >>> 16) & 0xFF;
+                    int sg8 = (s >>> 8) & 0xFF;
+                    int sb8 = s & 0xFF;
+                    int lr8 = (l >>> 16) & 0xFF;
+                    int lg8 = (l >>> 8) & 0xFF;
+                    int lb8 = l & 0xFF;
 
-                float longEncodedPeak = Math.max(lr8, Math.max(lg8, lb8)) / 255.0f;
-                float longScenePeak = Math.max(0.000001f, Math.max(lr, Math.max(lg, lb)));
-                float shortScenePeak = Math.max(sr, Math.max(sg, sb));
-                float shortConfidence = smoothstep(
-                        0.35f,
-                        0.65f,
-                        shortScenePeak / longScenePeak);
-                float highlightWeight = smoothstep(
-                        clipStart,
-                        HDR_CLIP_END,
-                        longEncodedPeak) * shortConfidence;
-                float shortEncodedY = linearLuma(
-                        sr8 / 255.0f, sg8 / 255.0f, sb8 / 255.0f);
-                float longEncodedY = linearLuma(
-                        lr8 / 255.0f, lg8 / 255.0f, lb8 / 255.0f);
-                float shortEncodedPeak = Math.max(sr8, Math.max(sg8, sb8)) / 255.0f;
-                float shortSignal = smoothstep(0.08f, 0.16f, shortEncodedY);
-                float shortHeadroom = 1.0f - smoothstep(0.985f, 0.998f, shortEncodedPeak);
-                float longDamage = Math.max(
-                        smoothstep(0.55f, 0.75f, longEncodedY),
-                        smoothstep(0.88f, 0.97f, longEncodedPeak));
-                float ownershipEvidence = shortSignal * shortHeadroom * longDamage;
-                float textureRecoveryWeight = smoothstep(0.35f, 0.65f, ownershipEvidence);
-                float shortWeight = Math.max(highlightWeight, textureRecoveryWeight);
+                    float srEncoded = sr8 / 255.0f;
+                    float sgEncoded = sg8 / 255.0f;
+                    float sbEncoded = sb8 / 255.0f;
+                    float shortEncodedY = linearLuma(srEncoded, sgEncoded, sbEncoded);
+                    float shortEncodedPeak = Math.max(srEncoded, Math.max(sgEncoded, sbEncoded));
+                    float centerSignal = smoothstep(0.08f, 0.14f, shortEncodedY);
+                    float centerHeadroom = 1.0f - smoothstep(0.985f, 0.998f, shortEncodedPeak);
+                    float neighborhoodEvidence = ownershipNeighborhood(
+                            ownershipEvidence, width, height, readY, readRows,
+                            x, globalY, ownershipRadius);
+                    float shortOwnership = centerSignal * centerHeadroom
+                            * smoothstep(0.28f, 0.58f, neighborhoodEvidence);
 
-                // V2.5 keeps V2.4 SHORT luminance/detail ownership, but low-signal
-                // SHORT JPEG chroma gets a stricter confidence gate before Gamma can
-                // magnify it into rainbow speckle. Strong SHORT signal still carries
-                // complete SHORT chromaticity, so damaged LONG cannot regain veto.
-                float mr = lr + (sr - lr) * shortWeight;
-                float mg = lg + (sg - lg) * shortWeight;
-                float mb = lb + (sb - lb) * shortWeight;
-                if (textureRecoveryWeight > 0.0005f) {
-                    float shortChromaConfidence = smoothstep(0.16f, 0.28f, shortEncodedY);
-                    float shortChromaWeight = shortWeight * shortChromaConfidence;
-                    float targetY = linearLuma(mr, mg, mb);
-                    float cr = lr + (sr - lr) * shortChromaWeight;
-                    float cg = lg + (sg - lg) * shortChromaWeight;
-                    float cb = lb + (sb - lb) * shortChromaWeight;
-                    float colorY = linearLuma(cr, cg, cb);
-                    if (targetY > 0.000001f && colorY > 0.000001f) {
-                        float colorScale = targetY / colorY;
-                        mr = cr * colorScale;
-                        mg = cg * colorScale;
-                        mb = cb * colorScale;
+                    float liftedShortY = mapLut(shortEncodedY, shortLiftLut);
+                    float shortScale = shortEncodedY > 0.000001f
+                            ? liftedShortY / shortEncodedY
+                            : 1.0f;
+                    shortScale = Math.min(shortScale, 1.0f / Math.max(shortEncodedPeak, 0.000001f));
+                    float sr = decodeEncoded(srEncoded * shortScale);
+                    float sg = decodeEncoded(sgEncoded * shortScale);
+                    float sb = decodeEncoded(sbEncoded * shortScale);
+                    float lr = SRGB_TO_LINEAR[lr8];
+                    float lg = SRGB_TO_LINEAR[lg8];
+                    float lb = SRGB_TO_LINEAR[lb8];
+
+                    float mr = lr + (sr - lr) * shortOwnership;
+                    float mg = lg + (sg - lg) * shortOwnership;
+                    float mb = lb + (sb - lb) * shortOwnership;
+
+                    // Presentation Brightness stays post-fusion. Then a restrained
+                    // global photographic body curve anchors black, lifts body/mids,
+                    // and fades completely before the 0.70 recovered-highlight knee.
+                    float tr = mr * brightnessGain;
+                    float tg = mg * brightnessGain;
+                    float tb = mb * brightnessGain;
+                    float bodyY = linearLuma(tr, tg, tb);
+                    if (bodyY > 0.000001f) {
+                        float toe = smoothstep(0.015f, 0.090f, bodyY);
+                        float highlightProtect = 1.0f - smoothstep(0.45f, 0.68f, bodyY);
+                        float targetBodyY = bodyY + 0.45f * toe * highlightProtect
+                                * bodyY * (1.0f - clamp(bodyY, 0.0f, 1.0f));
+                        float bodyScale = targetBodyY / bodyY;
+                        float bodyPeak = Math.max(tr, Math.max(tg, tb));
+                        bodyScale = Math.min(bodyScale, 1.0f / Math.max(bodyPeak, 0.000001f));
+                        tr *= bodyScale;
+                        tg *= bodyScale;
+                        tb *= bodyScale;
                     }
-                }
 
-                float scenePeak = Math.max(mr, Math.max(mg, mb));
-
-                // Brightness is a presentation exposure applied only after SHORT/LONG
-                // fusion has finished. It cannot change capture, exposure ratio, or
-                // highlight admission. V1.4.7 HDR mapping then spends only the
-                // highlight headroom needed to keep that requested lift displayable.
-                float boostedPeak = scenePeak * brightnessGain;
-                float mappedPeak = boostedPeak;
-                if (boostedPeak > HDR_KNEE) {
-                    if (boostedPeak <= 1.0f) {
-                        float t = clamp((boostedPeak - HDR_KNEE) / (1.0f - HDR_KNEE), 0.0f, 1.0f);
-                        mappedPeak = HDR_KNEE + (whiteAnchor - HDR_KNEE) * t;
-                    } else {
-                        float t = clamp(log2(boostedPeak) / headroomLog2, 0.0f, 1.0f);
-                        mappedPeak = whiteAnchor + (displayCeiling - whiteAnchor) * t;
+                    float scenePeak = Math.max(tr, Math.max(tg, tb));
+                    float mappedPeak = scenePeak;
+                    if (scenePeak > HDR_KNEE) {
+                        if (scenePeak <= 1.0f) {
+                            float t = clamp((scenePeak - HDR_KNEE) / (1.0f - HDR_KNEE), 0.0f, 1.0f);
+                            mappedPeak = HDR_KNEE + (whiteAnchor - HDR_KNEE) * t;
+                        } else {
+                            float t = clamp(log2(scenePeak) / headroomLog2, 0.0f, 1.0f);
+                            mappedPeak = whiteAnchor + (displayCeiling - whiteAnchor) * t;
+                        }
                     }
+                    float toneScale = scenePeak > 0.000001f ? mappedPeak / scenePeak : 1.0f;
+                    tr *= toneScale;
+                    tg *= toneScale;
+                    tb *= toneScale;
+
+                    if (gammaLut != null) {
+                        float gammaY = linearLuma(tr, tg, tb);
+                        if (gammaY > 0.000001f) {
+                            float mappedGammaY = mapLut(gammaY, gammaLut);
+                            float requestedGammaScale = mappedGammaY / gammaY;
+                            float gammaPeak = Math.max(tr, Math.max(tg, tb));
+                            float gammaGamutScale = 1.0f / Math.max(gammaPeak, 0.000001f);
+                            float gammaScale = Math.min(requestedGammaScale, gammaGamutScale);
+                            tr *= gammaScale;
+                            tg *= gammaScale;
+                            tb *= gammaScale;
+                        }
+                    }
+
+                    int ro = encode(tr);
+                    int go = encode(tg);
+                    int bo = encode(tb);
+                    outPixels[outIndex] = 0xFF000000 | (ro << 16) | (go << 8) | bo;
                 }
-
-                float toneScale = boostedPeak > 0.000001f ? mappedPeak / boostedPeak : 1.0f;
-                float tr = mr * brightnessGain * toneScale;
-                float tg = mg * brightnessGain * toneScale;
-                float tb = mb * brightnessGain * toneScale;
-
-                // Gamma is a presentation-only midtone remap after HDR exposure/tone
-                // fitting. It preserves RGB ratios and uses a per-image LUT so the
-                // full-resolution inner loop has no per-pixel pow/exp/sqrt.
-                float gammaY = linearLuma(tr, tg, tb);
-                if (gammaLut != null && gammaY > 0.000001f) {
-                    float mappedGammaY = gammaMap(gammaY, gammaLut);
-                    float requestedGammaScale = mappedGammaY / gammaY;
-                    float gammaPeak = Math.max(tr, Math.max(tg, tb));
-                    float gammaGamutScale = 1.0f / Math.max(gammaPeak, 0.000001f);
-                    float gammaScale = Math.min(requestedGammaScale, gammaGamutScale);
-                    tr *= gammaScale;
-                    tg *= gammaScale;
-                    tb *= gammaScale;
-                }
-
-                // Preserve V1.4.7 HDR luminance. Live/fallback highlight color remains
-                // LONG-first only when the still recovery gate has not begun validated
-                // SHORT ownership; never repaint LONG chroma over recovered SHORT RGB.
-                if (highlightWeight > 0.0005f && textureRecoveryWeight < 0.05f) {
-                    applyHighlightColorOwnership(
-                            tr, tg, tb,
-                            lr, lg, lb,
-                            sr, sg, sb,
-                            lr8 / 255.0f, lg8 / 255.0f, lb8 / 255.0f,
-                            sr8 / 255.0f, sg8 / 255.0f, sb8 / 255.0f,
-                            highlightWeight, colorOwned);
-                    tr = colorOwned[0];
-                    tg = colorOwned[1];
-                    tb = colorOwned[2];
-                }
-
-                int ro = encode(tr);
-                int go = encode(tg);
-                int bo = encode(tb);
-                outPixels[i] = 0xFF000000 | (ro << 16) | (go << 8) | bo;
             }
             output.setPixels(outPixels, 0, width, 0, y, width, rows);
         }
@@ -307,8 +296,65 @@ final class JpegFusion {
         return current;
     }
 
-    private static float gammaMap(float linearLuma, float[] lut) {
-        float scaled = clamp(linearLuma, 0.0f, 1.0f) * (lut.length - 1);
+    private static float shortOwnershipEvidence(int shortPixel, int longPixel) {
+        float sr = ((shortPixel >>> 16) & 0xFF) / 255.0f;
+        float sg = ((shortPixel >>> 8) & 0xFF) / 255.0f;
+        float sb = (shortPixel & 0xFF) / 255.0f;
+        float lr = ((longPixel >>> 16) & 0xFF) / 255.0f;
+        float lg = ((longPixel >>> 8) & 0xFF) / 255.0f;
+        float lb = (longPixel & 0xFF) / 255.0f;
+        float shortY = linearLuma(sr, sg, sb);
+        float longY = linearLuma(lr, lg, lb);
+        float shortPeak = Math.max(sr, Math.max(sg, sb));
+        float longPeak = Math.max(lr, Math.max(lg, lb));
+        float shortSignal = smoothstep(0.14f, 0.24f, shortY);
+        float shortHeadroom = 1.0f - smoothstep(0.985f, 0.998f, shortPeak);
+        float longDamage = Math.max(
+                smoothstep(0.62f, 0.78f, longY),
+                smoothstep(0.90f, 0.98f, longPeak));
+        return shortSignal * shortHeadroom * longDamage;
+    }
+
+    private static float ownershipNeighborhood(
+            float[] evidence,
+            int width,
+            int height,
+            int readY,
+            int readRows,
+            int x,
+            int globalY,
+            int radius) {
+        int x0 = Math.max(0, x - radius);
+        int x1 = x;
+        int x2 = Math.min(width - 1, x + radius);
+        int y0 = Math.max(0, globalY - radius) - readY;
+        int y1 = globalY - readY;
+        int y2 = Math.min(height - 1, globalY + radius) - readY;
+        y0 = Math.max(0, Math.min(readRows - 1, y0));
+        y1 = Math.max(0, Math.min(readRows - 1, y1));
+        y2 = Math.max(0, Math.min(readRows - 1, y2));
+        return (
+                evidence[y0 * width + x0] + evidence[y0 * width + x1] + evidence[y0 * width + x2]
+                + evidence[y1 * width + x0] + evidence[y1 * width + x1] + evidence[y1 * width + x2]
+                + evidence[y2 * width + x0] + evidence[y2 * width + x1] + evidence[y2 * width + x2]) / 9.0f;
+    }
+
+    private static float[] buildShortProvenanceLiftLut(float bracketStops) {
+        float[] lut = new float[4096];
+        double exponent = clamp(0.82f - 0.075f * (bracketStops - 1.0f), 0.58f, 0.82f);
+        for (int i = 0; i < lut.length; i++) {
+            double encoded = i / (double) (lut.length - 1);
+            lut[i] = (float) Math.pow(encoded, exponent);
+        }
+        return lut;
+    }
+
+    private static float decodeEncoded(float encoded) {
+        return mapLut(encoded, ENCODED_TO_LINEAR);
+    }
+
+    private static float mapLut(float value, float[] lut) {
+        float scaled = clamp(value, 0.0f, 1.0f) * (lut.length - 1);
         int lo = (int) scaled;
         int hi = Math.min(lut.length - 1, lo + 1);
         float t = scaled - lo;
@@ -348,6 +394,17 @@ final class JpegFusion {
         float[] lut = new float[256];
         for (int i = 0; i < lut.length; i++) {
             double encoded = i / 255.0;
+            lut[i] = (float) (encoded <= 0.04045
+                    ? encoded / 12.92
+                    : Math.pow((encoded + 0.055) / 1.055, 2.4));
+        }
+        return lut;
+    }
+
+    private static float[] buildEncodedLinearLut() {
+        float[] lut = new float[4096];
+        for (int i = 0; i < lut.length; i++) {
+            double encoded = i / (double) (lut.length - 1);
             lut[i] = (float) (encoded <= 0.04045
                     ? encoded / 12.92
                     : Math.pow((encoded + 0.055) / 1.055, 2.4));

@@ -165,38 +165,66 @@ vec3 highlightColorOwnership(
     return clamp(vec3(targetY) + chroma * clamp(gamutScale, 0.0, 1.0), 0.0, 1.0);
 }
 
-float reliableShortTextureWeight(vec3 shortRgb, vec3 longRgb) {
-    // V2.4/V2.5 still-only JPEG luminance/detail ownership. A damaged/flattened
-    // bright LONG JPEG must not veto real SHORT structure merely because the two
-    // rendered JPEGs no longer agree radiometrically. SHORT proves useful signal
-    // and headroom; LONG contributes only a damage trigger.
-    float shortSignal = smoothstep(0.08, 0.16, encodedLuma(shortRgb));
-    float shortHeadroom = 1.0 - smoothstep(0.985, 0.998, max3(shortRgb));
+float shortOwnershipEvidenceAt(vec2 sampleUv) {
+    vec3 sampleShort = texture(shortTex, sampleUv).rgb;
+    vec3 sampleLong = texture(longTex, sampleUv).rgb;
+    float shortSignal = smoothstep(0.14, 0.24, encodedLuma(sampleShort));
+    float shortHeadroom = 1.0 - smoothstep(0.985, 0.998, max3(sampleShort));
     float longDamage = max(
-        smoothstep(0.55, 0.75, encodedLuma(longRgb)),
-        smoothstep(0.88, 0.97, max3(longRgb)));
-    float ownershipEvidence = shortSignal * shortHeadroom * longDamage;
-    return smoothstep(0.35, 0.65, ownershipEvidence);
+        smoothstep(0.62, 0.78, encodedLuma(sampleLong)),
+        smoothstep(0.90, 0.98, max3(sampleLong)));
+    return shortSignal * shortHeadroom * longDamage;
 }
 
-float reliableShortChromaConfidence(vec3 shortRgb) {
-    // V2.5: useful SHORT luminance/detail can exist before its chroma SNR is high
-    // enough to survive a positive display Gamma lift. Keep low-signal SHORT chroma
-    // from becoming rainbow speckle on smooth bright surfaces; once encoded SHORT
-    // luma is strong, preserve the complete SHORT chromaticity.
-    return smoothstep(0.16, 0.28, encodedLuma(shortRgb));
+float coherentShortOwnership(vec2 uv, vec3 centerShortRgb) {
+    // V2.6 still-only source provenance. Neighboring pixels may vote only on the
+    // scalar ownership mask; output RGB always comes from the center LONG or SHORT
+    // captured JPEG pixel. The wider 3x3 footprint prevents grass/dirt/foliage from
+    // alternating LONG/SHORT ownership pixel-by-pixel without inventing image data.
+    vec2 texel = 1.0 / vec2(textureSize(longTex, 0));
+    vec2 radius = texel * 6.0;
+    float evidence = 0.0;
+    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(-radius.x, -radius.y), vec2(0.0), vec2(1.0)));
+    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(0.0, -radius.y), vec2(0.0), vec2(1.0)));
+    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(radius.x, -radius.y), vec2(0.0), vec2(1.0)));
+    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(-radius.x, 0.0), vec2(0.0), vec2(1.0)));
+    evidence += shortOwnershipEvidenceAt(uv);
+    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(radius.x, 0.0), vec2(0.0), vec2(1.0)));
+    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(-radius.x, radius.y), vec2(0.0), vec2(1.0)));
+    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(0.0, radius.y), vec2(0.0), vec2(1.0)));
+    evidence += shortOwnershipEvidenceAt(clamp(uv + vec2(radius.x, radius.y), vec2(0.0), vec2(1.0)));
+    float neighborhoodEvidence = evidence / 9.0;
+
+    float centerSignal = smoothstep(0.08, 0.14, encodedLuma(centerShortRgb));
+    float centerHeadroom = 1.0 - smoothstep(0.985, 0.998, max3(centerShortRgb));
+    return centerSignal * centerHeadroom * smoothstep(0.28, 0.58, neighborhoodEvidence);
 }
 
-vec3 mergeStillLumaAndChroma(
-        vec3 longScene,
-        vec3 shortScene,
-        float shortLumaWeight,
-        float shortChromaWeight) {
-    float targetY = mix(linearLuma(longScene), linearLuma(shortScene), shortLumaWeight);
-    vec3 colorSource = mix(longScene, shortScene, shortChromaWeight);
-    float colorY = linearLuma(colorSource);
-    if (targetY <= 0.000001 || colorY <= 0.000001) return colorSource;
-    return colorSource * (targetY / colorY);
+vec3 liftShortProvenanceRgb(vec3 shortRgb, float bracketStops) {
+    // Rendered HAL JPEG is not RAW radiance. Use the bracket only to choose a
+    // bounded display-domain lift; never multiply the saved-JPEG SHORT by the full
+    // physical exposure ratio. One scalar preserves center-pixel RGB ratios.
+    float y = encodedLuma(shortRgb);
+    if (y <= 0.000001) return shortRgb;
+    float exponent = clamp(0.82 - 0.075 * (bracketStops - 1.0), 0.58, 0.82);
+    float targetY = pow(clamp(y, 0.0, 1.0), exponent);
+    float requestedScale = targetY / y;
+    float gamutScale = 1.0 / max(max3(shortRgb), 0.000001);
+    return clamp(shortRgb * min(requestedScale, gamutScale), 0.0, 1.0);
+}
+
+vec3 applyPhotographicBodyTone(vec3 rgb) {
+    // Global SDR photographic tone reproduction: anchor true blacks, lift the
+    // body/midtones modestly, and make that lift exactly disappear before the
+    // existing HDR shoulder starts at 0.70. No local contrast/pop operator.
+    float y = linearLuma(rgb);
+    if (y <= 0.000001) return rgb;
+    float toe = smoothstep(0.015, 0.090, y);
+    float highlightProtect = 1.0 - smoothstep(0.45, 0.68, y);
+    float targetY = y + 0.45 * toe * highlightProtect * y * (1.0 - clamp(y, 0.0, 1.0));
+    float requestedScale = targetY / y;
+    float gamutScale = 1.0 / max(max3(rgb), 0.000001);
+    return rgb * min(requestedScale, gamutScale);
 }
 
 void main() {
@@ -252,34 +280,34 @@ void main() {
         0.995,
         longEncodedPeak) * shortConfidence;
 
-    // mode==3 is the V2.3 off-screen still pass. Live HDR remains mode==2 and
-    // therefore retains V2.2's original SHORT admission/ownership behavior.
-    float textureRecoveryWeight = mode == 3
-        ? reliableShortTextureWeight(shortRgb, longRgb)
+    // V2.6: live mode==2 retains V2.5/V2.2 physical-ratio HDR ownership. Saved
+    // mode==3 is JPEG-domain source provenance: a coherent scalar mask chooses the
+    // complete center LONG or complete center SHORT RGB sample. No luma/chroma
+    // recombination and no per-pixel physical-ratio reconstruction of saved SHORT.
+    float stillShortOwnership = mode == 3
+        ? coherentShortOwnership(uv, shortRgb)
         : 0.0;
-    float shortWeight = max(highlightWeight, textureRecoveryWeight);
-
-    // V2.5 still-only split confidence: SHORT may own luminance/detail before its
-    // low-signal JPEG chroma is trustworthy. This removes the Gamma-exposed rainbow
-    // speckle without restoring the V2.3 damaged-LONG veto. Live mode==2 remains
-    // byte-for-behavior on the original RGB merge.
-    vec3 mergedScene = mix(longScene, shortScene, shortWeight);
-    if (mode == 3 && textureRecoveryWeight > 0.0005) {
-        float shortChromaWeight = shortWeight * reliableShortChromaConfidence(shortRgb);
-        mergedScene = mergeStillLumaAndChroma(
-                longScene, shortScene, shortWeight, shortChromaWeight);
+    vec3 mergedScene;
+    if (mode == 3) {
+        vec3 shortProvenanceRgb = liftShortProvenanceRgb(shortRgb, bracketStops);
+        vec3 shortProvenanceScene = srgbToLinear(shortProvenanceRgb);
+        mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);
+    } else {
+        mergedScene = mix(longScene, shortScene, highlightWeight);
     }
 
-    // HDR reconstruction completes before display brightness is applied. The slider
-    // cannot change capture, bracket width, SHORT admission, or fusion ownership.
+    // Brightness remains presentation-only. The photographic body curve is global,
+    // RGB-ratio preserving, and fades to zero before the 0.70 HDR shoulder, so
+    // recovered highlights retain their existing headroom while the SDR body reads
+    // brighter/cleaner without a local-HDR "pop" look.
     float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
-    vec3 displayLinear = adaptiveHdrToneMap(mergedScene * brightnessGain, ratio, bracketStops);
+    vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
+    vec3 displayLinear = adaptiveHdrToneMap(bodyToned, ratio, bracketStops);
     displayLinear = applyDisplayGamma(displayLinear, displayGamma);
 
-    // Live HDR retains V2.2 highlight color ownership. In the still pass, once
-    // validated SHORT starts owning a damaged LONG pixel, do not paint LONG chroma
-    // back over that real SHORT RGB structure.
-    if (highlightWeight > 0.0005 && textureRecoveryWeight < 0.05) {
+    // The legacy LONG-first highlight color owner remains live-preview-only. Saved
+    // V2.6 provenance never repaints LONG chroma over an owned SHORT RGB pixel.
+    if (mode != 3 && highlightWeight > 0.0005) {
         displayLinear = highlightColorOwnership(
                 displayLinear, longScene, shortScene, longRgb, shortRgb, highlightWeight);
     }

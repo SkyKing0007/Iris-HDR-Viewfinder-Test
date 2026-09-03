@@ -19,7 +19,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.5 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.6 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -49,7 +49,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.5 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.6 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -228,13 +228,14 @@ require('0.90 + 0.01 * (bracketStops - 1.0)' in hdr_shader and '0.995' in hdr_sh
         "live SHORT admission must stay near LONG saturation")
 require('shortConfidence' in hdr_shader and 'shortScenePeak / longScenePeak' in hdr_shader,
         "live clipped-highlight SHORT plausibility guard missing")
-require('float textureRecoveryWeight = mode == 3' in hdr_shader
-        and 'float shortWeight = max(highlightWeight, textureRecoveryWeight);' in hdr_shader
-        and 'vec3 mergedScene = mix(longScene, shortScene, shortWeight);' in hdr_shader,
-        "shared shader must keep live mode at V2.2 highlight ownership and finish fusion before display brightness")
+require('float stillShortOwnership = mode == 3' in hdr_shader
+        and 'mergedScene = mix(longScene, shortScene, highlightWeight);' in hdr_shader
+        and 'mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);' in hdr_shader,
+        "shared shader must keep V2.5 live highlight ownership while V2.6 saved still uses provenance")
 require('float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));' in hdr_shader
-        and 'adaptiveHdrToneMap(mergedScene * brightnessGain' in hdr_shader,
-        "live Brightness EV must apply after fusion and before HDR display fitting")
+        and 'applyPhotographicBodyTone(mergedScene * brightnessGain)' in hdr_shader
+        and 'adaptiveHdrToneMap(bodyToned, ratio, bracketStops)' in hdr_shader,
+        "Brightness must remain post-fusion and feed the global body tone before HDR fitting")
 require('displayBrightnessEv' in gl and 'glUniform1f' in gl,
         "live Brightness EV uniform plumbing missing")
 require('uniform float displayGamma;' in hdr_shader
@@ -245,22 +246,22 @@ require('float requestedScale = mappedY / y;' in hdr_shader
         and 'float gamutScale = 1.0 / max(max3(rgb), 0.000001);' in hdr_shader
         and 'return rgb * min(requestedScale, gamutScale);' in hdr_shader,
         "live Gamma must be luminance-driven, RGB-ratio preserving and gamut-safe")
-require('0.90f + 0.01f * (bracketStops - 1.0f)' in fusion and 'HDR_CLIP_END = 0.995f' in fusion,
-        "CPU fallback must retain V2.2 near-clipping SHORT admission")
-require('float shortWeight = Math.max(highlightWeight, textureRecoveryWeight);' in fusion
-        and 'float mr = lr + (sr - lr) * shortWeight;' in fusion
-        and 'float mg = lg + (sg - lg) * shortWeight;' in fusion
-        and 'float mb = lb + (sb - lb) * shortWeight;' in fusion,
-        "CPU fallback must use the same reliable-SHORT texture ownership as GPU fusion")
-require('float shortWeight = max(highlightWeight, textureRecoveryWeight);' in hdr_shader
-        and 'vec3 mergedScene = mix(longScene, shortScene, shortWeight);' in hdr_shader
-        and 'mode == 3' in hdr_shader,
-        "shared V2.2 shader must use actual normalized SHORT pixels only in still mode when reliability proves them")
+require('adaptiveClipStart(bracketStops)' in hdr_shader and '0.995' in hdr_shader,
+        "live mode must retain V2.5 near-clipping SHORT admission")
+require('float shortOwnership = centerSignal * centerHeadroom' in fusion
+        and 'float mr = lr + (sr - lr) * shortOwnership;' in fusion
+        and 'float mg = lg + (sg - lg) * shortOwnership;' in fusion
+        and 'float mb = lb + (sb - lb) * shortOwnership;' in fusion,
+        "CPU fallback must use V2.6 complete-RGB provenance ownership")
+require('mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);' in hdr_shader
+        and 'mergedScene = mix(longScene, shortScene, highlightWeight);' in hdr_shader,
+        "shared shader must separate V2.6 saved provenance from unchanged live physical-ratio merge")
 require('brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
-        and 'boostedPeak = scenePeak * brightnessGain;' in fusion,
-        "saved Brightness EV must be one per-image linear exposure gain after fusion")
+        and 'float tr = mr * brightnessGain;' in fusion
+        and 'targetBodyY = bodyY + 0.45f * toe * highlightProtect' in fusion,
+        "saved Brightness must remain post-fusion and feed the photographic body curve")
 require('buildGammaLut(clampedGamma)' in fusion
-        and 'float mappedGammaY = gammaMap(gammaY, gammaLut);' in fusion
+        and 'float mappedGammaY = mapLut(gammaY, gammaLut);' in fusion
         and 'float gammaScale = Math.min(requestedGammaScale, gammaGamutScale);' in fusion,
         "saved Gamma must use one per-image LUT and RGB-ratio-preserving gamut-safe scaling")
 require('const float knee = 0.70;' in hdr_shader and 'HDR_KNEE = 0.70f' in fusion,
@@ -596,15 +597,14 @@ require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
 # 038 / 042 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.4' in workflow
-        and 'run-id: 33708991821' in workflow,
-        "workflow must download the exact successful V1.4.11 V2.4 Actions authority")
-require('run-id: 33691180722' not in workflow
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.5' in workflow
+        and 'run-id: 33712399624' in workflow,
+        "workflow must download the exact successful V1.4.11 V2.5 Actions authority")
+require('run-id: 33708991821' not in workflow
+        and 'run-id: 33691180722' not in workflow
         and 'run-id: 33678538693' not in workflow
-        and 'run-id: 33675083158' not in workflow
-        and 'run-id: 33667545707' not in workflow
-        and 'run-id: 33464019593' not in workflow,
-        "V1.4.11 V2.5 must never fall back behind successful V2.4 authority")
+        and 'run-id: 33675083158' not in workflow,
+        "V1.4.11 V2.6 must never fall back behind successful V2.5 authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -621,10 +621,10 @@ require('shortColorNeed' in hdr_shader and 'shortColorNeed' in fusion,
 require('colorSafeFromSources' not in hdr_shader and 'colorSafeFromSources' not in fusion
         and 'adaptiveAppearanceLift' not in hdr_shader,
         "global chroma/appearance repair must not return")
-require(hdr_shader.count('texture(shortTex') == 3 and hdr_shader.count('texture(longTex') == 3,
-        "color correction must not add neighborhood texture fetches")
+require('mode != 3 && highlightWeight > 0.0005' in hdr_shader,
+        "legacy LONG-first highlight color owner must remain live-only in V2.6")
 require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
-        "no spatial/cross-edge chroma filtering is permitted")
+        "V2.6 must not use textureOffset/texelFetch neighborhood RGB filtering")
 
 # Brightness and Gamma are explicit WYSIWYG controls with frozen shutter-time ownership.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in main
@@ -696,74 +696,106 @@ require('root.put("displayBrightnessEv", displayBrightnessEv);' in saver
         and 'root.put("displayGamma", displayGamma);' in saver,
         "capture metadata must record the applied Brightness EV and Gamma")
 
-# V2.4 permanent regression: damaged LONG must never veto validated SHORT RGB.
-require('reliableShortTextureWeight' in hdr_shader
-        and 'smoothstep(0.08, 0.16' in hdr_shader
-        and 'smoothstep(0.985, 0.998, max3(shortRgb))' in hdr_shader
-        and 'smoothstep(0.55, 0.75' in hdr_shader
-        and 'smoothstep(0.88, 0.97' in hdr_shader
-        and 'smoothstep(0.35, 0.65, ownershipEvidence)' in hdr_shader
-        and 'textureRecoveryWeight < 0.05' in hdr_shader
-        and 'textureRecoveryWeight = mode == 3' in hdr_shader,
-        "GPU still fusion damaged-LONG/validated-SHORT ownership gate missing")
+# V2.6 permanent regressions: coherent source provenance replaces the V2.5
+# luma/chroma hybrid while preserving the damaged-LONG fail-closed contract.
+require('shortOwnershipEvidenceAt' in hdr_shader
+        and 'coherentShortOwnership' in hdr_shader
+        and 'textureSize(longTex, 0)' in hdr_shader
+        and 'vec2 radius = texel * 6.0;' in hdr_shader
+        and hdr_shader.count('shortOwnershipEvidenceAt(') == 10,
+        "GPU still provenance must use the exact 3x3/radius-6 scalar ownership vote")
+require('smoothstep(0.14, 0.24, encodedLuma(sampleShort))' in hdr_shader
+        and 'smoothstep(0.62, 0.78, encodedLuma(sampleLong))' in hdr_shader
+        and 'smoothstep(0.90, 0.98, max3(sampleLong))' in hdr_shader
+        and 'smoothstep(0.28, 0.58, neighborhoodEvidence)' in hdr_shader,
+        "GPU coherent SHORT validity/LONG-damage thresholds changed")
 require('exposureAgreementRatio' not in hdr_shader
         and 'exposureAgreementRatio' not in fusion
-        and '1.2746' not in hdr_shader
-        and '1.6818' not in hdr_shader
-        and '1.2746f' not in fusion
-        and '1.6818f' not in fusion,
-        "damaged LONG JPEG radiometric agreement must not veto SHORT recovery")
-require('shortHeadroom' in hdr_shader and 'shortHeadroom' in fusion
-        and 'longDamage' in hdr_shader and 'longDamage' in fusion
-        and 'ownershipEvidence' in hdr_shader and 'ownershipEvidence' in fusion,
-        "GPU and CPU fallback must share SHORT validity + LONG damage evidence")
-require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
-        "SHORT texture recovery must remain pixel-local; no neighborhood hallucination/fill operator")
-def smoothstep(a, b, x):
-    t = max(0.0, min(1.0, (x - a) / (b - a)))
-    return t * t * (3.0 - 2.0 * t)
-def reliable_short_v24(short_encoded_y, short_peak, long_encoded_y, long_peak):
-    signal = smoothstep(0.08, 0.16, short_encoded_y)
-    headroom = 1.0 - smoothstep(0.985, 0.998, short_peak)
-    damage = max(
-        smoothstep(0.55, 0.75, long_encoded_y),
-        smoothstep(0.88, 0.97, long_peak))
-    evidence = signal * headroom * damage
-    return smoothstep(0.35, 0.65, evidence)
-require(reliable_short_v24(0.24, 0.35, 0.67, 0.88) > 0.99,
-        "office-window damaged-LONG fixture must hand complete RGB ownership to SHORT")
-require(reliable_short_v24(0.10, 0.20, 0.34, 0.40) < 0.01,
-        "dark office fixture must remain LONG-owned rather than importing SHORT noise")
-require(reliable_short_v24(0.30, 0.999, 0.90, 1.00) < 0.01,
+        and '1.2746' not in hdr_shader and '1.6818' not in hdr_shader,
+        "damaged LONG JPEG radiometric agreement must never veto SHORT provenance")
+require('liftShortProvenanceRgb(shortRgb, bracketStops)' in hdr_shader
+        and 'shortProvenanceScene = srgbToLinear(shortProvenanceRgb)' in hdr_shader
+        and 'mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);' in hdr_shader,
+        "saved GPU RGB must come from complete center LONG/SHORT provenance sources")
+still_branch = hdr_shader[hdr_shader.index('if (mode == 3) {'):hdr_shader.index('} else {', hdr_shader.index('if (mode == 3) {'))]
+require('* ratio' not in still_branch and 'shortScene' not in still_branch,
+        "saved mode=3 must not treat the rendered SHORT JPEG as RAW radiance")
+require('mergeStillLumaAndChroma' not in hdr_shader
+        and 'shortChromaWeight' not in hdr_shader
+        and 'textureRecoveryWeight' not in hdr_shader
+        and 'mergeStillLumaAndChroma' not in fusion
+        and 'shortChromaWeight' not in fusion,
+        "V2.5 synthesized luma/chroma hybrid must never return")
+require('ownershipNeighborhood' in fusion
+        and 'ownershipRadius = 6' in fusion
+        and 'smoothstep(0.14f, 0.24f, shortY)' in fusion
+        and 'smoothstep(0.62f, 0.78f, longY)' in fusion
+        and 'smoothstep(0.90f, 0.98f, longPeak)' in fusion
+        and 'smoothstep(0.28f, 0.58f, neighborhoodEvidence)' in fusion,
+        "CPU fallback must mirror the exact V2.6 coherent source-ownership mask")
+require('buildShortProvenanceLiftLut(bracketStops)' in fusion
+        and 'decodeEncoded(srEncoded * shortScale)' in fusion
+        and 'mr = lr + (sr - lr) * shortOwnership' in fusion,
+        "CPU fallback must use complete center SHORT RGB with the bounded provenance lift")
+require(fusion.index('buildShortProvenanceLiftLut(bracketStops)') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
+        "SHORT provenance pow must be LUT-built once before full-resolution loops")
+
+# Exact scalar fixtures for source ownership. Neighborhood evidence is supplied as
+# the local coherent vote; no LONG/SHORT radiometric agreement is part of the test.
+def short_evidence_v26(short_y, short_peak, long_y, long_peak):
+    signal = smoothstep_math(0.14, 0.24, short_y)
+    headroom = 1.0 - smoothstep_math(0.985, 0.998, short_peak)
+    damage = max(smoothstep_math(0.62, 0.78, long_y), smoothstep_math(0.90, 0.98, long_peak))
+    return signal * headroom * damage
+
+def ownership_v26(center_short_y, center_short_peak, neighborhood_evidence):
+    center_signal = smoothstep_math(0.08, 0.14, center_short_y)
+    center_headroom = 1.0 - smoothstep_math(0.985, 0.998, center_short_peak)
+    return center_signal * center_headroom * smoothstep_math(0.28, 0.58, neighborhood_evidence)
+
+ground_evidence = short_evidence_v26(0.27, 0.50, 0.80, 0.92)
+ceiling_evidence = short_evidence_v26(0.20, 0.26, 0.58, 0.67)
+dark_evidence = short_evidence_v26(0.10, 0.20, 0.34, 0.40)
+clipped_evidence = short_evidence_v26(0.30, 0.999, 0.90, 1.00)
+require(ground_evidence > 0.95 and ownership_v26(0.27, 0.50, ground_evidence) > 0.95,
+        "office-window ground fixture must hand complete RGB provenance to SHORT")
+require(ceiling_evidence < 0.01 and ownership_v26(0.20, 0.26, ceiling_evidence) < 0.01,
+        "Gamma-speckle ceiling fixture must remain LONG-owned unless LONG is truly damaged")
+require(dark_evidence < 0.01 and ownership_v26(0.10, 0.20, dark_evidence) < 0.01,
+        "dark/no-signal SHORT must fail closed to LONG")
+require(clipped_evidence < 0.01 and ownership_v26(0.30, 0.999, clipped_evidence) < 0.01,
         "clipped SHORT must fail closed even when LONG is damaged")
 
-# V2.5 permanent regression: SHORT detail/luminance confidence is not equivalent to
-# SHORT chroma confidence. Low-signal SHORT chroma must be suppressed before Gamma
-# can reveal it as rainbow speckle, while strong SHORT signal retains full color.
-require('reliableShortChromaConfidence' in hdr_shader
-        and 'smoothstep(0.16, 0.28, encodedLuma(shortRgb))' in hdr_shader
-        and 'mergeStillLumaAndChroma' in hdr_shader
-        and 'shortChromaWeight' in hdr_shader,
-        "GPU still fusion must split SHORT luminance/detail and chroma confidence")
-require('smoothstep(0.16f, 0.28f, shortEncodedY)' in fusion
-        and 'shortChromaWeight' in fusion
-        and 'colorScale = targetY / colorY' in fusion,
-        "CPU fallback must mirror V2.5 signal-gated SHORT chroma ownership")
-require(hdr_shader.index('mergeStillLumaAndChroma') < hdr_shader.index('applyDisplayGamma(displayLinear, displayGamma)'),
-        "SHORT chroma stabilization must happen before display Gamma")
-require(fusion.index('shortChromaWeight') < fusion.index('gammaLut != null'),
-        "CPU SHORT chroma stabilization must happen before display Gamma")
-def short_chroma_v25(short_encoded_y):
-    return smoothstep(0.16, 0.28, short_encoded_y)
-require(short_chroma_v25(0.18) < 0.10,
-        "low-signal SHORT chroma must remain strongly suppressed")
-require(short_chroma_v25(0.24) > 0.70,
-        "useful SHORT color must ramp back in before strong-signal recovery")
-require(short_chroma_v25(0.28) > 0.99,
-        "strong SHORT signal must preserve complete chromaticity")
-require(reliable_short_v24(0.18, 0.25, 0.85, 0.95) > 0.99
-        and short_chroma_v25(0.18) < 0.10,
-        "exact Gamma-speckle fixture must keep SHORT detail while rejecting low-signal SHORT chroma")
+# Global photographic body tone is tone reproduction only: black stays anchored,
+# body/midtones rise, and extra lift is zero before the 0.70 HDR shoulder.
+require('applyPhotographicBodyTone' in hdr_shader
+        and '0.45 * toe * highlightProtect * y' in hdr_shader
+        and 'smoothstep(0.45, 0.68, y)' in hdr_shader
+        and 'targetBodyY = bodyY + 0.45f * toe * highlightProtect' in fusion,
+        "GPU/CPU photographic body tone curve missing or mismatched")
+require(hdr_shader.index('applyPhotographicBodyTone(mergedScene * brightnessGain)')
+        < hdr_shader.index('adaptiveHdrToneMap(bodyToned, ratio, bracketStops)')
+        < hdr_shader.index('applyDisplayGamma(displayLinear, displayGamma)'),
+        "photographic body tone must run before HDR shoulder and Gamma")
+
+def body_tone_v26(y):
+    if y <= 0.000001:
+        return y
+    toe = smoothstep_math(0.015, 0.090, y)
+    protect = 1.0 - smoothstep_math(0.45, 0.68, y)
+    return y + 0.45 * toe * protect * y * (1.0 - max(0.0, min(1.0, y)))
+
+require(math.isclose(body_tone_v26(0.0), 0.0, abs_tol=1e-9),
+        "photographic tone must keep true black anchored")
+require(body_tone_v26(0.20) > 0.26 and body_tone_v26(0.40) > 0.49,
+        "photographic tone must lift the scene body/midtones")
+require(math.isclose(body_tone_v26(0.68), 0.68, abs_tol=1e-6)
+        and math.isclose(body_tone_v26(0.75), 0.75, abs_tol=1e-6),
+        "body lift must be zero before and throughout recovered-highlight shoulder")
+# No local tone map / local contrast operator is introduced by V2.6.
+require('localTone' not in hdr_shader and 'unsharp' not in hdr_shader and 'sharpen' not in hdr_shader,
+        "V2.6 must remain a restrained global SDR tone curve without local pop/sharpening")
+
 require('applySafeSystemBarInsets(root, panel);' in main
         and 'WindowInsets.Type.systemBars()' in main
         and 'panelBottom + bottom' in main,
@@ -807,9 +839,9 @@ require('captureShortExposureNs' in still_burst and 'captureLongExposureNs' in s
 require('CAPTURE_INPUTS' in camera and 'acquiredMs=' in camera and 'totalMs=' in camera,
         "minimal capture timing evidence must separate sensor acquisition from post-processing")
 
-# 041 / 043 / V2 - Full-resolution fusion stays allocation-light. Brightness pow and
-# Gamma LUT are computed once per image; highlight color uses one reusable scratch vector.
-inner = fusion[fusion.index('for (int i = 0; i < count; i++)'):fusion.index('output.setPixels')]
+# 041 / 043 / V2.6 - Full-resolution CPU fallback stays allocation-light. All
+# pow work (Brightness, Gamma, SHORT provenance lift) is computed once per image.
+inner = fusion[fusion.index('for (int row = 0; row < rows; row++)'):fusion.index('output.setPixels')]
 for forbidden in ['Math.exp(', 'Math.pow(', 'Math.sqrt(', 'Math.log(', 'new float[']:
     require(forbidden not in inner, f"expensive/per-pixel saved-fusion operation returned: {forbidden}")
 require('float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
@@ -818,8 +850,11 @@ require('float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in 
 require('buildGammaLut(clampedGamma)' in fusion
         and fusion.index('buildGammaLut(clampedGamma)') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
         "Gamma LUT must be computed once before full-resolution loops")
-require('float[] colorOwned = new float[3];' in fusion and 'return new float[]' not in fusion,
-        "highlight color ownership must reuse one scratch vector rather than allocate per pixel")
+require('buildShortProvenanceLiftLut(bracketStops)' in fusion
+        and fusion.index('buildShortProvenanceLiftLut(bracketStops)') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
+        "SHORT provenance lift LUT must be computed once before full-resolution loops")
+require('float[] ownershipEvidence = new float[width * maxReadRows];' in fusion,
+        "coherent ownership evidence must reuse one strip buffer rather than allocate per pixel")
 
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
@@ -881,4 +916,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.5 REGRESSION PASS: exact V2.4 authority, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, GLES3-primary still fusion, damaged-LONG cannot veto validated SHORT detail, low-signal SHORT chroma is Gamma-safe, MANUAL SAFE preserves the selected SHORT shutter, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")
+print("V1.4.11 V2.6 REGRESSION PASS: exact V2.5 authority, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, real MANUAL SHORT shutter, coherent center-pixel SHORT provenance, Gamma-safe damaged-LONG gating, global photographic body tone, GLES3-primary saved fusion, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")
