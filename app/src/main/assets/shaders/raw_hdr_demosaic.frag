@@ -72,8 +72,17 @@ float fetchCfa(ivec2 globalPos) {
     return fetchFusionState(globalPos).r;
 }
 
+float fetchProvenance(ivec2 globalPos) {
+    return fetchFusionState(globalPos).g;
+}
+
 float fetchTrust(ivec2 globalPos) {
-    return clamp(fetchFusionState(globalPos).g, 0.0, 1.0);
+    // Proven Iris semantic encoding: 0=NORMAL_MEASURED,
+    // 1=CENSORED_UNKNOWN_CHROMA, 2=SHORT_VALIDATED. Reconstruction gets a
+    // binary physical-color admission mask. CENSORED may carry luminance in R,
+    // but it contributes exactly zero to directional/opponent-color authority.
+    float provenance = fetchProvenance(globalPos);
+    return abs(provenance - 1.0) < 0.25 ? 0.0 : 1.0;
 }
 
 float fetchBalanced(ivec2 globalPos) {
@@ -127,8 +136,9 @@ float greenAt(ivec2 p) {
             / max(0.0001, highWh + highWv);
     }
 
-    // A partially trusted site contributes proportionally; there is no discrete
-    // support threshold that suddenly changes reconstruction family.
+    // Proven semantic sites contribute; censored sites contribute zero. The
+    // reconstruction family still varies continuously with geometric support, but
+    // semantic meaning itself is never interpolated or re-guessed downstream.
     float supportH = tl + tr;
     float supportV = tu + td;
     float gh = (gl * tl + gr * tr) / max(0.0001, supportH);
@@ -226,8 +236,9 @@ float quadColorRisk(ivec2 origin) {
             maxPhysicalClipRisk = max(maxPhysicalClipRisk, clamp(state.b, 0.0, 1.0));
         }
     }
-    // Bright color is modified only when physical clipping exists AND at least
-    // one CFA phase lacks a validated LONG-or-SHORT measurement.
+    // Color is modified only when physical clipping exists AND at least one CFA
+    // phase is semantically CENSORED_UNKNOWN_CHROMA. NORMAL_MEASURED and
+    // SHORT_VALIDATED are equally real color evidence downstream.
     return maxPhysicalClipRisk * (1.0 - minPhysicalTrust);
 }
 
@@ -235,10 +246,11 @@ float coherentHighlightColorRisk(ivec2 p) {
     ivec2 q = quadOrigin(p);
     float currentTrust = quadMinPhysicalTrust(q);
     float risk = quadColorRisk(q);
-    // Neighbor risk still protects a genuinely incomplete clipping boundary, but a
-    // complete physically proven current Bayer quad is sovereign: uncertainty next
-    // door may not bleach valid SHORT color. RGB itself is never blurred and no
-    // neighboring hue is borrowed.
+    // Neighbor risk remains bounded to one Bayer-cell neighborhood for a genuinely
+    // incomplete boundary, but a fully measured/validated current Bayer quad is
+    // sovereign. Because trust is semantic binary now, censored neighbors cannot
+    // steer green direction or opponent chroma before this final quad decision. RGB
+    // itself is never blurred and no neighboring hue is borrowed.
     float neighborPermission = 1.0 - smoothstep(0.80, 0.98, currentTrust);
     for (int qy = -1; qy <= 1; ++qy) {
         for (int qx = -1; qx <= 1; ++qx) {

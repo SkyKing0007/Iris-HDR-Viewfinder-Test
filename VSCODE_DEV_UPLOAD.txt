@@ -1,18 +1,20 @@
-Iris HDR Viewfinder Test V1.5.4 V1.1 - vscode.dev upload
+Iris HDR Viewfinder Test V1.5.4 V1.2 - vscode.dev upload
 
 1. Open https://github.dev/SkyKing0007/Iris-HDR-Viewfinder-Test (or press . from the GitHub repository).
-2. Confirm branch main points exactly to successful V1.5.4 commit b352a4f12f011496f8c0eeb3a51553b35cc33c48 before replacing files.
-3. No new backup is required for this correction. Existing backup-v1.5.3-v1.2-pre-es31-gpu-transition remains reserved for the later ES 3.1 transition.
+2. Confirm branch main points exactly to successful V1.5.4 V1.1 commit cc45ba874776f0ce99e9503497a970d6e4b57cbe before replacing files.
+3. No new backup is required for this localized correction, as requested.
 4. Upload/replace the complete contents of this FULL-UPLOAD ZIP at repository root.
-5. Do not add APKs, DNGs, JPEGs, build/, .cxx/, __pycache__ or other generated files.
-6. Commit with: V1.5.4 V1.1 separate RAW geometry radiometry color authority
-7. Push main once. The packaged workflow performs authoritative real GLSL/Java/full Android compiler proof.
+5. Do not add APKs, DNGs, JPEGs, build/, .cxx/, __pycache__, .pyc or other generated files.
+6. Commit with: V1.5.4 V1.2 semantic CFA provenance and literal manual shutter controls
+7. Push main once. The packaged workflow reconstructs the exact successful V1.5.4 V1.1 compiled-candidate authority and performs the authoritative real GLSL/Java/full Android proof.
 
-Expected version after replacement: versionCode 34 / versionName 1.0-v1.5.4-v1.1.
+Expected version after replacement: versionCode 35 / versionName 1.0-v1.5.4-v1.2.
 
-Expected runtime changes relative to exact successful V1.5.4 Actions candidate: exactly three files:
+Expected runtime changes relative to the exact successful V1.5.4 V1.1 Actions candidate: exactly three files:
 - app/src/main/assets/shaders/raw_hdr_demosaic.frag
 - app/src/main/assets/shaders/raw_hdr_fusion.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 
-CameraController, MainActivity, CaptureSetSaver, HdrGlView, hdr_display.frag, capture routing, exposure policy and the live preview are protected byte-identically. V1.5.4 V1.1 does NOT perform the ES 3.1 compute/GPU migration.
+RawHdrFusion.java, HdrGlView.java, MainActivity.java, CaptureSetSaver.java, JpegFusion.java, hdr_display.frag, AUTO HDR exposure, geometry/radiometry ownership, WYSIWYG crop/color, global GTM and capture/DNG/JPEG routing are protected byte-identically.
+
+V1.5.4 V1.2 changes the common physical artifact producer rather than tuning this scene: terminal CFA provenance prevents censored highlight samples from steering chroma, while fully validated SHORT remains real color authority. MANUAL SAFE SHORT/LONG values are literal shutter times; SHORT=min sensor ISO and LONG uses the separate ISO slider. AUTO HDR is unchanged.

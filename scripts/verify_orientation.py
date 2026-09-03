@@ -22,7 +22,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.5.4 V1.1 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.5.4 V1.2 REGRESSION FAIL: " + message)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -460,11 +460,16 @@ require('whiteBalanceGains' in raw_demosaic_shader
         and 'outColor = vec4(max(linearSrgb, vec3(0.0)), 1.0);' in raw_demosaic_shader,
         "RAW must preserve exact trusted detail while preventing untrusted CFA sites from steering opponent chroma")
 require('outFusionState = vec4(' in raw_fusion_shader
-        and 'float physicalColorTrust = mix(' in raw_fusion_shader
-        and 'longPhysicalTrust, shortValidated, ownership' in raw_fusion_shader
+        and 'PROVENANCE_NORMAL_MEASURED = 0.0' in raw_fusion_shader
+        and 'PROVENANCE_CENSORED_UNKNOWN_CHROMA = 1.0' in raw_fusion_shader
+        and 'PROVENANCE_SHORT_VALIDATED = 2.0' in raw_fusion_shader
+        and 'float colorProvenance = PROVENANCE_NORMAL_MEASURED;' in raw_fusion_shader
         and 'longPhysicalClipRisk' in raw_fusion_shader
         and 'allocateRgba16f(fusedCfaTexture' in raw_fusion,
-        "V1.5.1 fused CFA must carry ownership-weighted physical highlight provenance in RGBA16F")
+        "fused CFA RGBA16F must carry exact semantic highlight provenance through demosaic")
+require('float fetchProvenance(ivec2 globalPos)' in raw_demosaic_shader
+        and 'abs(provenance - 1.0) < 0.25 ? 0.0 : 1.0' in raw_demosaic_shader,
+        "demosaic must decode CENSORED_UNKNOWN_CHROMA as zero color authority and never interpolate semantic meaning")
 require('quadColorRisk' in raw_demosaic_shader
         and 'quadMinPhysicalTrust' in raw_demosaic_shader
         and 'minPhysicalTrust' in raw_demosaic_shader
@@ -509,27 +514,29 @@ for radiance in [0.1,0.7,1.0,2.0,4.0,8.0,16.0,64.0,128.0,192.0]:
         require(abs(v153_shared_gtm_peak(radiance)-reference) < 1e-12,
                 f"same radiance changed appearance at {bracket_ev} EV bracket")
 
-# V1.5.1 physical color-trust contract: trust follows the source mixture and
-# brightness alone can never neutralize color.
-def fused_physical_trust(long_trust, short_trust, ownership):
-    return long_trust * (1.0-ownership) + short_trust * ownership
-require(fused_physical_trust(0.0, 1.0, 0.25) == 0.25,
-        "valid SHORT may not make a still-mostly-clipped LONG mixture fully trusted")
-require(fused_physical_trust(0.0, 1.0, 1.0) == 1.0,
-        "fully owned validated SHORT must restore physical color trust")
-require(fused_physical_trust(1.0, 0.0, 0.0) == 1.0,
-        "healthy LONG body must remain fully trusted")
+# V1.5.4 V1.2 semantic provenance contract. Confidence may select one terminal
+# state at fusion, but downstream color authority is exact: NORMAL and SHORT are
+# measured color; CENSORED retains brightness only and contributes zero chroma.
+PROV_NORMAL=0
+PROV_CENSORED=1
+PROV_SHORT=2
+def semantic_color_trust(state):
+    return 0.0 if state == PROV_CENSORED else 1.0
+require(semantic_color_trust(PROV_NORMAL) == 1.0,
+        "NORMAL_MEASURED must remain real color")
+require(semantic_color_trust(PROV_SHORT) == 1.0,
+        "SHORT_VALIDATED must remain real color")
+require(semantic_color_trust(PROV_CENSORED) == 0.0,
+        "CENSORED_UNKNOWN_CHROMA must have zero downstream color authority")
 
 def quad_color_risk(max_clip_risk, min_physical_trust):
     return max_clip_risk*(1.0-min_physical_trust)
 require(quad_color_risk(0.0,0.0) == 0.0,
         "bright-but-physically-unclipped color must never be neutralized")
 require(quad_color_risk(1.0,1.0) == 0.0,
-        "fully SHORT/LONG-proven clipped color must remain unchanged")
+        "fully NORMAL/SHORT-proven clipped color must remain unchanged")
 require(quad_color_risk(1.0,0.0) == 1.0,
-        "physically clipped color with missing CFA evidence must fail closed to neutral")
-require(quad_color_risk(0.8,0.5) == 0.4,
-        "partially proven clipped color must receive graded opponent-chroma suppression")
+        "physically clipped color with censored CFA evidence must fail closed to neutral")
 
 # 016 / 022 - V1.4.2 on-device sideways preview: producer transform owns live orientation.
 require('SCALER_AVAILABLE_ROTATE_AND_CROP_MODES' in camera,
@@ -691,24 +698,32 @@ require('CaptureRequest.CONTROL_ZOOM_RATIO' not in camera
         and 'CaptureRequest.SCALER_CROP_REGION' not in camera,
         "FOV policy must not fake parity by digitally cropping or zooming requests")
 
-# 027 / 031 / 054 - MANUAL SAFE keeps user LONG intent but retains adaptive HDR intelligence.
+# 027 / 031 / 054 / 144 - MANUAL SAFE literal shutter/ISO ownership.
 require('recomputeManualAdaptivePairLocked' in camera,
-        "MANUAL adaptive HDR exposure owner missing")
+        "MANUAL literal sensor-pair owner missing")
 require('manualEffectiveShortExposureNs' in camera and 'manualEffectiveLongExposureNs' in camera,
-        "requested and effective MANUAL shutters must remain separate")
-require('manualAdaptiveBracketEv' in camera and 'manualBracketFloorEv' in camera,
-        "MANUAL adaptive headroom state missing")
-require('MANUAL_EXTRA_HEADROOM_EV' not in camera
-        and 'manualAdaptiveBracketEv = manualBracketFloorEv;' in camera,
-        "MANUAL SHORT must start at the user-requested bracket without hidden extra headroom")
-require('nextBracket = Math.max(manualBracketFloorEv, nextBracket);' in camera,
-        "MANUAL user short-headroom floor must not be overridden")
-require('Math.min(shortSetting.exposureNs, clampExposure(shortExposureNs))' in camera,
-        "MANUAL adaptive SHORT must never become longer than the user's requested ceiling")
+        "requested and effective MANUAL shutters must remain separately observable")
+require('manualEffectiveLongExposureNs = clampExposure(longExposureNs);' in camera
+        and 'manualEffectiveLongIso = clampIso(manualIso);' in camera,
+        "LONG slider/ISO must directly own the manual LONG sensor request")
+require('manualEffectiveShortExposureNs = Math.min(' in camera
+        and 'clampExposure(shortExposureNs), manualEffectiveLongExposureNs);' in camera
+        and 'manualEffectiveShortIso = minIso;' in camera,
+        "SHORT slider must directly own integration, clamp only at LONG, and use sensor-min ISO")
+manual_recompute = camera[camera.index('private boolean recomputeManualAdaptivePairLocked()'):camera.index('private int sensorMinIsoLocked()')]
+require('solveLongSettingForProductLocked' not in manual_recompute
+        and 'solveShortSettingForProductLocked' not in manual_recompute
+        and 'solveIsoForProduct' not in manual_recompute,
+        "MANUAL literal shutter path must not call exposure-product solvers")
+manual_stats = camera[camera.index("} else {\n            // V1.5.4 V1.2: MANUAL SAFE"):camera.index('    private double robustSceneBodyMid')]
+require('deriveAdaptiveAutoPairLocked' not in manual_stats
+        and 'recomputeManualAdaptivePairLocked' not in manual_stats
+        and 'applyPreviewRepeatingLocked' not in manual_stats,
+        "live scene statistics must not rewrite literal MANUAL shutter/ISO controls")
 require('MANUAL_SAFE' in camera and 'HDR MANUAL SAFE' in main,
         "user-visible safe MANUAL ownership missing")
-require('MANUAL_LIVE_ADAPT' in camera,
-        "MANUAL live adaptive headroom decision must be logged")
+require('MANUAL_LIVE_ADAPT' not in camera,
+        "retired MANUAL live-adaptive pair regeneration must not survive")
 # 028 - Production logger for device freezes/crashes without turning logging into a frame-rate owner.
 require('final class RuntimeLogger' in main,
         "production RuntimeLogger missing")
@@ -735,8 +750,9 @@ for token in ['1_000_000_000L / 8000', '1_000_000_000L / 100', '1_000_000_000L /
     require(token in main, f"manual exposure slider step missing: {token}")
 require('SIXTY_FPS_DURATION_NS = 16_666_666L' in camera,
         "forced 60fps must use 16,666,666 ns SENSOR_FRAME_DURATION target")
-require('targetPreviewFps >= 60' in camera and 'manualEffectiveLongExposureNs' in camera,
-        "60fps mode must cap effective manual integration and preserve LONG product through ISO")
+require('if (enforcePreviewCadence && targetPreviewFps >= 60)' in camera
+        and 'exposure = Math.min(exposure, SIXTY_FPS_DURATION_NS);' in camera,
+        "60fps live preview may enforce cadence legality only at request build time")
 require('boolean enforcePreviewCadence' in camera
         and 'if (enforcePreviewCadence && targetPreviewFps >= 60)' in camera
         and 'frameDuration = SIXTY_FPS_DURATION_NS;' in camera,
@@ -1019,17 +1035,17 @@ require('float fieldLumaTrust = mix(1.0, clamp(fieldState.g, 0.0, 1.0), guardReq
         and 'float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);' in hdr_shader,
         "phase-sensitive SHORT must fail closed at pair rate while safe SHORT bypasses mandatory field trust")
 
-# 056 / 074 / 080 / V1.5.4 V1.1 - Exact current pre-handoff authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.5.4' in workflow
-        and 'run-id: 33706757668' in workflow,
-        "workflow must download the exact successful V1.5.4 Actions authority")
-require('b352a4f12f011496f8c0eeb3a51553b35cc33c48' in workflow
-        and '8b09e5ab8e647a82cea1330473a4c259c9738f54' in workflow,
-        "V1.5.4 authority commit/tree pins missing")
+# 056 / 074 / 080 / V1.5.4 V1.2 - Exact current pre-handoff authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.5.4-V1.1' in workflow
+        and 'run-id: 33711764471' in workflow,
+        "workflow must download the exact successful V1.5.4 V1.1 Actions authority")
+require('cc45ba874776f0ce99e9503497a970d6e4b57cbe' in workflow
+        and '2911c0edff409ac65e337bd7871af958cb9f675b' in workflow,
+        "V1.5.4 V1.1 authority commit/tree pins missing")
 require('backup-' not in workflow,
         "build workflow must not depend on the safety backup branch")
 
-# 048 / 049 / 052 / 054 / 137 - Brightness remains user LONG intent in AUTO and MANUAL.
+# 048 / 049 / 052 / 054 / 137 / 144 - Brightness remains AUTO LONG intent; MANUAL literal sensor controls are not rewritten by it.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in main
         and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in main
         and 'DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10' in main,
@@ -1037,8 +1053,10 @@ require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in main
 require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in camera
         and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in camera,
         "Camera Brightness clamp must match UI")
-require('LONG_APPEARANCE_SHORT_ADAPTIVE' in camera,
-        "runtime Brightness ownership must be LONG appearance + adaptive SHORT")
+require('LONG_APPEARANCE_SHORT_ADAPTIVE' in camera
+        and 'METADATA_ONLY_LITERAL_MANUAL' in camera
+        and 'MANUAL_BRIGHTNESS_METADATA_ONLY' in camera,
+        "Brightness ownership must remain AUTO LONG appearance while MANUAL literal sensor controls stay untouched")
 require('root.put("brightnessOwner", "LONG_APPEARANCE_SHORT_HIGHLIGHT_EVIDENCE");' in saver,
         "saved metadata must report LONG appearance + SHORT highlight-evidence ownership")
 require('brightnessBar.setEnabled(true);' in main and 'brightnessBar.setAlpha(1.0f);' in main,
@@ -1052,8 +1070,8 @@ require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(d
 
 # 057 - Stable update signing identity.
 gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 34' in gradle and 'versionName = "1.0-v1.5.4-v1.1"' in gradle,
-        "V1.5.4 V1.1 version/build pin missing")
+require('versionCode = 35' in gradle and 'versionName = "1.0-v1.5.4-v1.2"' in gradle,
+        "V1.5.4 V1.2 version/build pin missing")
 require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
         and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
         "stable test signing config missing")
@@ -1367,10 +1385,13 @@ require('float hardLongClip = smoothstep(0.985, 0.997, longPeak);' in raw_fusion
         and 'ownership = 1.0;' in raw_fusion_shader,
         "clipped-LONG leakage regression: valid SHORT must become unconditional whole-quad authority")
 require('shortValidated = max(shortValidated, hardShortTakeover);' not in raw_fusion_shader
-        and 'float shortValidated = smoothstep(0.55, 0.90, quadValidation.x);' in raw_fusion_shader
+        and 'float shortValidated = smoothstep(0.55, 0.90, quadValidation.x);' not in raw_fusion_shader
+        and 'float shortSemanticValidated =' in raw_fusion_shader
+        and 'PROVENANCE_CENSORED_UNKNOWN_CHROMA' in raw_fusion_shader
+        and 'PROVENANCE_SHORT_VALIDATED' in raw_fusion_shader
         and 'shortGeometryTrust' not in raw_fusion_shader
         and 'shortPhotometricTrust' not in raw_fusion_shader,
-        "V1.5.4/V1.1 ownership-trust regression: hard takeover must not manufacture perfect chroma; after geometry/radiometry are resolved, complete SHORT CFA support owns SHORT color")
+        "V1.5.4 V1.2 ownership/provenance regression: hard radiometric takeover may not imply chroma; SHORT color needs terminal semantic validation after geometry/radiometry")
 
 def v153_raw_ownership(long_peak, short_min_support, geometric):
     highlight = smoothstep_local(0.70, 0.92, long_peak)
@@ -1406,8 +1427,10 @@ def v153_gtm_peak(scene_peak):
 require(v153_gtm_peak(64.0) < v153_gtm_peak(96.0) < v153_gtm_peak(128.0) < v153_gtm_peak(192.0) < 0.9995,
         "recoverable 6-7+ EV SHORT structure must retain ordered display separation rather than collapse to white")
 
-# 131-134 - V1.5.4 device-artifact protections. Preserve the proven broad-pink
-# strategy while removing the V1.5.3 white-paint and false-perfect-chroma producers.
+# 131-134 / 143 - V1.5.4 device-artifact protections. Preserve the broad-pink,
+# white-paint, whole-quad ownership and continuous geometric reconstruction behavior,
+# while intentionally replacing fractional semantic chroma authority with terminal
+# NORMAL_MEASURED / SHORT_VALIDATED / CENSORED_UNKNOWN_CHROMA provenance.
 require('quadColorRisk' in raw_demosaic_shader and 'coherentHighlightColorRisk' in raw_demosaic_shader,
         "broad-pink protection: physical clipping/trust risk path must remain")
 require('vec3 neutralCameraRgb = vec3(g);' in raw_demosaic_shader
@@ -1418,7 +1441,9 @@ require('if (support < 1.10)' not in raw_demosaic_shader
         and 'if (support < 1.50)' not in raw_demosaic_shader
         and 'if (highOrderTrust >= 0.95)' not in raw_demosaic_shader
         and 'smoothstep(0.70, 0.95, highOrderTrust)' in raw_demosaic_shader,
-        "block/stair regression 132: demosaic trust must transition continuously")
+        "block/stair regression 132: geometric reconstruction remains continuous even though semantic color admission is binary")
+require('Proven semantic sites contribute; censored sites contribute zero.' in raw_demosaic_shader,
+        "semantic-provenance regression 143: censored sites may not partially steer directional or opponent-color reconstruction")
 require('quadLongPeak' in raw_fusion_shader
         and 'float softOwnership = clamp(' in raw_fusion_shader
         and 'if (longPeak >= 0.997 && quadValidation.x >= 0.10)' in raw_fusion_shader,
@@ -1458,12 +1483,27 @@ require(v154_body_step(0.12) == (0.12, False),
 require(v154_body_step(0.08) == (0.0, False),
         "sub-hysteresis fluctuation must not cause exposure pumping")
 
-# 136 - MANUAL SAFE SHORT slider is now an immediate exposure control baseline.
-require('manualAdaptiveBracketEv = manualBracketFloorEv;' in camera
-        and 'double minEv = manualBracketFloorEv;' in camera
-        and 'requestedBracket, 0.0, MANUAL_BRACKET_MAX_EV' in camera
-        and 'MANUAL_EXTRA_HEADROOM_EV' not in camera,
-        "manual SHORT regression 136: hidden adaptive bracket floor must not ignore user slider")
+# 136 / 144 - MANUAL SAFE sliders are literal shutter-speed controls. AUTO may
+# continue using exposure-product solvers, but MANUAL recomputation must not call them.
+manual_recompute = camera[camera.index('private boolean recomputeManualAdaptivePairLocked()'):
+        camera.index('private int sensorMinIsoLocked()', camera.index('private boolean recomputeManualAdaptivePairLocked()'))]
+require('manualEffectiveLongExposureNs = clampExposure(longExposureNs);' in manual_recompute
+        and 'manualEffectiveLongIso = clampIso(manualIso);' in manual_recompute
+        and 'manualEffectiveShortExposureNs = Math.min(' in manual_recompute
+        and 'manualEffectiveShortIso = minIso;' in manual_recompute
+        and 'solveLongSettingForProductLocked' not in manual_recompute
+        and 'solveShortSettingForProductLocked' not in manual_recompute
+        and 'solveIsoForProduct' not in manual_recompute,
+        "manual literal-shutter regression 144: MANUAL must map sliders directly to sensor time/ISO without exposure-product solving")
+require('longExposureNs = clampExposure(longNs);' in camera
+        and 'shortExposureNs = Math.min(clampExposure(shortNs), longExposureNs);' in camera
+        and 'long tmp = shortExposureNs;' not in camera,
+        "manual literal-shutter regression 144: crossing SHORT clamps to LONG instead of swapping control meanings")
+manual_stats = camera[camera.index('private void processHdrSceneStatsLocked'):
+        camera.index('private double robustSceneBodyMid', camera.index('private void processHdrSceneStatsLocked'))]
+require('MANUAL SAFE no longer rewrites either shutter from scene' in manual_stats
+        and camera.count('adaptBracketEvLocked(') == 2,
+        "manual literal-shutter regression 144: scene statistics may not silently rewrite MANUAL shutter times")
 
 # 137 - Brightness contract is exactly -16..+1 EV everywhere it is owned/stored.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in camera
@@ -1504,19 +1544,19 @@ require(math.isclose(v154v11_effective_row_scale(1.25, 0.0), 1.0, abs_tol=1e-12)
         and math.isclose(v154v11_effective_row_scale(1.25, 1.0), 1.25, abs_tol=1e-12),
         "radiometry regression 139 math: confidence must actually own local scale consumption")
 
-# 140 - Once geometry/radiometry are resolved, a complete unsaturated SHORT Bayer
-# quad proves its own color. Clipped LONG and local row confidence cannot validate or
-# bleach color they do not measure. Incomplete SHORT support still fails closed in
-# chroma without returning LONG.
-require('float shortValidated = smoothstep(0.55, 0.90, quadValidation.x);' in raw_fusion_shader
-        and 'shortGeometryTrust' not in raw_fusion_shader
-        and 'shortPhotometricTrust' not in raw_fusion_shader
-        and 'shortValidated = max(shortValidated, hardShortTakeover)' not in raw_fusion_shader,
-        "SHORT color regression 140: internal complete CFA support must own SHORT color after safe geometry/radiometry")
-require(math.isclose(smoothstep_local(0.55, 0.90, 0.90), 1.0, abs_tol=1e-12)
-        and math.isclose(smoothstep_local(0.55, 0.90, 1.0), 1.0, abs_tol=1e-12)
-        and math.isclose(smoothstep_local(0.55, 0.90, 0.35), 0.0, abs_tol=1e-12),
-        "SHORT color regression 140 math: complete support must be fully trusted while weak support remains untrusted")
+# 140 / 143 - SHORT color requires semantic proof after safe geometry/radiometry.
+# Complete same-phase support alone is not enough in a saturated textureless center:
+# locally proven geometry or strong coherent-neighbor geometry must also be observable.
+require('float shortPhaseComplete = step(0.90, quadValidation.x);' in raw_fusion_shader
+        and 'float shortCorrespondence = step(0.55, correspondenceConfidence);' in raw_fusion_shader
+        and 'step(0.50, localFlowEvidence)' in raw_fusion_shader
+        and 'step(0.70, flowConfidence)' in raw_fusion_shader
+        and 'float shortSemanticValidated =' in raw_fusion_shader
+        and 'shortPhaseComplete * shortCorrespondence * observableGeometry' in raw_fusion_shader,
+        "SHORT color regression 140/143: complete SHORT CFA must also prove observable geometry before gaining chroma authority")
+# Java caps final global-fallback confidence below the shader's 0.70 semantic gate.
+require('smooth[index + 2] = Math.min(0.85f, 0.75f * globalConfidence);' in raw_fusion,
+        "semantic-provenance regression 143: global fallback must remain unable to self-certify SHORT color")
 
 # 141 - Broad-pink boundary protection may propagate risk only into an incomplete
 # current quad. A fully proven current SHORT quad is sovereign and cannot be bleached
@@ -1530,28 +1570,31 @@ require('float currentTrust = quadMinPhysicalTrust(q);' in raw_demosaic_shader
 require(math.isclose(1.0 - smoothstep_local(0.80, 0.98, 1.0), 0.0, abs_tol=1e-12),
         "neighbor-risk regression 141 math: fully trusted current quad must block borrowed risk")
 
-# 142 - This correction is saved-RAW only. The successful V1.5.4 control/live path
-# must remain byte-identical so the reconstruction fix cannot regress scene-cut AE,
-# anti-flicker hysteresis, MANUAL SAFE SHORT, -16..+1 EV Brightness, or live GTM.
-protected_v154 = {
+# 142 / 145 - Preserve every successful V1.5.4 V1.1 runtime owner outside the exact
+# three-file runtime allowlist. AUTO exposure, live GPU pairing/GTM, RAW host geometry,
+# capture/DNG/JPEG routing, and UI remain byte-identical to the successful authority.
+protected_v154v11 = {
+    'app/src/main/AndroidManifest.xml':'c183cb4caf4c9c8aa40a41d3891c197d9e84db196c6ecccd822b1c424ebc73e6',
     'app/src/main/assets/shaders/hdr_display.frag':'45483186243cffb220c00a23e4de78396a2d482168452cec22238da79eb1dcb8',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java':'3377d4f3ebac7a46cfb5887ca4592174ea6586e7d84a46af390bed6302a6f9fe',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java':'a87d34672d7e4efb16d5cd84c84fb82cc4a4abd567f74d012f1f665eb679ac37',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java':'cbd76d5a21cddd1ac3e48ad57896ef50d7770f6415d10749df2cb9f82650f1e4',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java':'87d58462eb3822b2135f423be9ba12c6d61f87d3d9fb091ddde3b0a2ed3a9178'}
-for rel, want in protected_v154.items():
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java':'b565eea5d43d68d84a2984202df492297eb8fb4f68566d4b5a409dde8818e33e',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java':'a5206949d9c09fd45ee0f3b7ec3b0787c10f037b8447db249ead6df19aed91ed',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java':'87d58462eb3822b2135f423be9ba12c6d61f87d3d9fb091ddde3b0a2ed3a9178',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java':'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java':'37bab4f6641f75e3e53822765cd2e1c9ca78e63edd3802f8be20d7253e49bc2e'}
+for rel, want in protected_v154v11.items():
     require(hashlib.sha256((ROOT / rel).read_bytes()).hexdigest() == want,
-            f"V1.5.4 protected-control regression 142: byte drift in {rel}")
+            f"V1.5.4 V1.1 protected-runtime regression 145: byte drift in {rel}")
 
-# 130 remains applicable as a general lineage lesson: never assume ancestry without
-# proving the exact current successful authority. V1.5.4 V1.1 must be a direct child
-# of successful V1.5.4 and reconstruct its base from the exact Actions artifact.
+# 130 / 145 - Never assume ancestry. V1.5.4 V1.2 must be a direct child of the
+# exact successful V1.5.4 V1.1 Actions authority and reconstruct from its artifact.
 workflow = (ROOT / '.github/workflows/build.yml').read_text()
 require('fetch-depth: 2' in workflow
-        and "authority='b352a4f12f011496f8c0eeb3a51553b35cc33c48'" in workflow
+        and "authority='cc45ba874776f0ce99e9503497a970d6e4b57cbe'" in workflow
         and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow
-        and 'run-id: 33706757668' in workflow
-        and 'name: Iris-HDR-Viewfinder-Test-V1.5.4' in workflow,
-        "authority-lineage regression 130: V1.5.4 V1.1 must prove direct parent and exact successful V1.5.4 Actions authority")
+        and 'run-id: 33711764471' in workflow
+        and 'name: Iris-HDR-Viewfinder-Test-V1.5.4-V1.1' in workflow,
+        "authority-lineage regression 130/145: V1.5.4 V1.2 must prove direct parent and exact successful V1.5.4 V1.1 Actions authority")
 
-print("V1.5.4 V1.1 REGRESSION PASS: exact V1.5.4 Actions authority; rejected local flow never survives as SHORT geometry; row confidence owns local radiometry; complete SHORT CFA owns its color; complete current quads block borrowed bleaching; clipped-LONG SHORT authority, no broad pink/peach/white-paint regression, and all successful V1.5.4 live/control behavior remain protected")
+print("V1.5.4 V1.2 REGRESSION PASS: exact V1.5.4 V1.1 Actions authority; semantic NORMAL/CENSORED/SHORT provenance survives through demosaic; censored CFA has zero chroma authority; validated SHORT color requires observable geometry; parity-safe boundary and no-white-paint behavior remain; MANUAL SHORT/LONG are literal shutter controls with SHORT=min ISO and LONG ISO separate; AUTO/live/capture owners outside the exact allowlist remain protected")

@@ -1,37 +1,35 @@
-Iris HDR Viewfinder Test V1.5.4 V1.1
+Iris HDR Viewfinder Test V1.5.4 V1.2
 Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
-Status: PREPARED / UPLOAD-READY - NOT V1.5.4 V1.1 BUILD-PROVEN
+Status: PREPARED / UPLOAD-READY - NOT V1.5.4 V1.2 BUILD-PROVEN
 
 Runtime authority:
-- Exact successful V1.5.4 GitHub Actions compiled candidate/artifact
-- Commit: b352a4f12f011496f8c0eeb3a51553b35cc33c48
-- Tree: 8b09e5ab8e647a82cea1330473a4c259c9738f54
-- Actions run: 33706757668
-- Job: 100497419969
-- Artifact ID: 9875501146
-- Artifact name: Iris-HDR-Viewfinder-Test-V1.5.4
-- Artifact digest: sha256:f72440fd34b51f91378058d79f29ab14fb95a3b55a9c721e51bf7ec846fd991b
-- APK SHA-256: 53f9a84767b92c088e88d882bb2e7ba1a6fef8489a9f759db3498eab25b326e6
-- Source-candidate TAR SHA-256: 99139eb5df3000656608a60cff112d07744ab63d20a17f64df0eb3f0c3ec110d
-- Runtime manifest SHA-256: eafb637ae41d304e75afc4376957ec16570381f1022b27cd760ad9fcf675c485
-- Repository manifest SHA-256: 1ec9c43c432267c2cbfe6a0740978f401170b146db6ad0dc019755ce5a19217a
-- Regressions SHA-256: c0cafba33deb4d56865408adbcb6c31c6a53e7b13dba55db6ce9648b52fb4e3b
-- V1.5.3->V1.5.4 forward patch SHA-256: 5c2a312b0f85dba6c3c223552222a835ebd64ef99f8a0f1ce9b030315459685c
-- V1.5.4->V1.5.3 rollback patch SHA-256: f50624db4dbe8a6cf750c3f943b2a43e0689fc7ee885cc359c27f04e68225218
+- Exact successful V1.5.4 V1.1 GitHub Actions compiled candidate/artifact
+- Commit: cc45ba874776f0ce99e9503497a970d6e4b57cbe
+- Tree: 2911c0edff409ac65e337bd7871af958cb9f675b
+- Actions run: 33711764471
+- Job: 100512589458
+- Artifact ID: 9877178323
+- Artifact name: Iris-HDR-Viewfinder-Test-V1.5.4-V1.1
+- Artifact digest: sha256:9aab5e3acede1d5bfe00614c66bb30bd4fad84baeedc3290145aafe98e79d640
+- APK SHA-256: c9bc4e7887824904750bebf6db3108ac8073613125277b4d950db357454ec0d1
+- Source-candidate TAR SHA-256: 9aaad68090fa2bf0c8cc422e6281171e34c83bde40cbc030722fbe3fe3abf806
+- Runtime manifest SHA-256: 505eaeb9384a62cf24e000a4ff06f3ab36f535fcda2bbd61807376c17e99899f
+- Repository manifest SHA-256: 9edeccd8f60452f29d5e1d51a8cd080dacd100ef473b60ba18059f74f03dd089
+- Regressions SHA-256: 905c894e14ab20e5ccc143797ae270c7b99433855043426129c518c65d985c55
 
 Verification-mechanics authority:
-- Exact successful V1.5.4 16-stage authority-seeded compiler/build/invariance sequence.
-- Same Java 17, Android 37, Gradle 9.6.0, stable signing, pinned glslang, real GLSL compile, real Java compile, patch proof, :app:assembleDebug and post-build invariance mechanics.
-- Infrastructure changes only update V1.5.4 V1.1 authority/version/allowlists/protected hashes/regressions/output naming; compiler/build mechanics are not redesigned.
+- Exact successful V1.5.4 V1.1 16-stage authority-seeded compiler/build/invariance sequence.
+- Same checkout depth, parent-artifact reconstruction, Java 17, Android 37, Gradle 9.6.0, stable signing, pinned glslang 15.1.0-2~ubuntu0.24.04.2, complete GLSL reserved-identifier scan, exact runtime GLSL compile commands, real project Java compile, deterministic full-index patch proof at core.abbrev 7/12/40 with GNU patch fuzz=0, PRE-BUILD SAFETY PROOF, :app:assembleDebug, one-APK proof, signing proof, post-build invariance and clean-extract replay.
+- Workflow mechanics are not redesigned. Infrastructure changes only update parent authority/version/allowlists/protected hashes/new permanent regressions/output identity, plus validator assertions for the new runtime contract.
 
 Backup status:
 - No new backup requested or created.
-- Existing backup-v1.5.3-v1.2-pre-es31-gpu-transition remains reserved for the later ES 3.1/GPU transition.
+- Exact parent authority, pre-edit hashes, and deterministic V1.1<->V1.2 patches provide localized rollback proof.
 
-V1.5.4 V1.1 intended runtime changed-file allowlist: exactly 3 files
+V1.5.4 V1.2 intended runtime changed-file allowlist: exactly 3 files
 - app/src/main/assets/shaders/raw_hdr_demosaic.frag
 - app/src/main/assets/shaders/raw_hdr_fusion.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 
 Infrastructure/package changed-file list: exactly 8 files
 - .github/workflows/build.yml
@@ -43,26 +41,27 @@ Infrastructure/package changed-file list: exactly 8 files
 - app/build.gradle.kts
 - scripts/verify_orientation.py
 
-V1.5.4 V1.1 runtime intent:
-- keep physical whole-quad SHORT authority when LONG clips;
-- resolve geometry before fusion: local proof -> coherent-neighbor -> global fallback;
-- never consume an already-rejected local vector during hard SHORT takeover;
-- make row-local radiometric confidence control whether that row scale is consumed, with unproven correction collapsing to 1.0;
-- prove complete SHORT color from SHORT CFA support itself after safe geometry/radiometry;
-- prevent neighboring clipping-risk expansion from bleaching a fully proven current SHORT quad;
-- preserve broad-pink protection, no peach/orange synthetic fill, no luminance-raising neutralization, and continuous demosaic trust;
-- preserve V1.5.4 CameraController/MainActivity/CaptureSetSaver/HdrGlView/hdr_display behavior byte-identically.
+V1.5.4 V1.2 runtime intent:
+- preserve V1.5.4 V1.1 whole-quad SHORT ownership, safe geometry hierarchy, row-radiometry confidence, parity-preserving mirrored CFA halo, AUTO HDR, live calibration/GTM and capture routing;
+- replace fractional downstream color trust with terminal semantic color provenance: 0=NORMAL_MEASURED, 1=CENSORED_UNKNOWN_CHROMA, 2=SHORT_VALIDATED;
+- allow CENSORED observations to retain a finite brightness/lower-bound carrier while contributing zero directional/opponent chroma;
+- require complete unsaturated SHORT CFA support plus correspondence and observable geometry before SHORT gains color authority; final global flow fallback cannot self-certify SHORT chroma;
+- preserve complete proven SHORT color and neutralize only physically unprovable opponent chroma without hue borrowing, RGB blur or luminance-raising white paint;
+- make MANUAL SAFE SHORT/LONG sliders literal integration-time controls: SHORT uses sensor-min ISO, LONG uses selected ISO, SHORT crossing LONG clamps to LONG instead of swapping meanings;
+- prevent live adaptive bracket logic and the Brightness control from silently regenerating the MANUAL sensor pair; AUTO HDR adaptive exposure remains unchanged.
 
 Build/version:
-- versionCode 34
-- versionName 1.0-v1.5.4-v1.1
+- versionCode 35
+- versionName 1.0-v1.5.4-v1.2
 
 Prepared candidate runtime manifest:
 - app/src file count: 16
-- expected SHA-256 after runtime transform: 505eaeb9384a62cf24e000a4ff06f3ab36f535fcda2bbd61807376c17e99899f
+- expected SHA-256 after runtime transform: 9e196269a96463c04f014f2c00c34f23029c62a2f6083f19fcd139570727c042
 
 Compiler status in this environment:
-- REAL GLSL COMPILE: NOT RUN
-- REAL JAVA COMPILE: NOT RUN
-- FULL ANDROID ASSEMBLE: NOT RUN
-- GitHub Actions remains authoritative.
+- COMPLETE GLSL RESERVED-IDENTIFIER SCAN: PASS
+- PROJECT SEMANTIC/OWNERSHIP/REGRESSION VALIDATOR: PASS
+- REAL PINNED GLSLANG COMPILE: NOT RUN (compiler unavailable locally)
+- REAL PROJECT JAVA COMPILE: NOT RUN
+- FULL ANDROID :app:assembleDebug: NOT RUN
+- GitHub Actions remains authoritative; candidate is PREPARED / UPLOAD-READY only.

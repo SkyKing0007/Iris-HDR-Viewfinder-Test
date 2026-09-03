@@ -353,8 +353,11 @@ final class CameraController {
                     "BRIGHTNESS_EV",
                     String.format(
                             Locale.US,
-                            "%+.1fEV owner=LONG_APPEARANCE_SHORT_ADAPTIVE mode=%s",
+                            "%+.1fEV owner=%s mode=%s",
                             displayBrightnessEv,
+                            autoHdrExposure
+                                    ? "LONG_APPEARANCE_SHORT_ADAPTIVE"
+                                    : "METADATA_ONLY_LITERAL_MANUAL",
                             autoHdrExposure ? "AUTO" : "MANUAL_SAFE"));
             if (characteristics == null) return;
             if (autoHdrExposure) {
@@ -362,9 +365,12 @@ final class CameraController {
                 deriveAdaptiveAutoPairLocked();
                 publishAutoHdrSettingsLocked("BRIGHTNESS_UPDATE", true);
             } else {
-                recomputeManualAdaptivePairLocked();
-                RuntimeLogger.event("MANUAL_BRIGHTNESS_UPDATE", manualSafetySummaryLocked());
+                // Literal MANUAL shutter/ISO controls cannot also be silently rewritten
+                // by a fourth exposure-intent control. Keep the value for metadata/UI,
+                // report it explicitly, and leave the active sensor pair untouched.
+                RuntimeLogger.event("MANUAL_BRIGHTNESS_METADATA_ONLY", manualSafetySummaryLocked());
                 listener.onStatus(manualSafetySummaryLocked());
+                return;
             }
             if (previewMode != PreviewMode.NORMAL && captureSession != null
                     && !stillSessionActive && !autoMetering) {
@@ -413,13 +419,13 @@ final class CameraController {
     void setManualSettings(long shortNs, long longNs, int iso) {
         cameraHandler.post(() -> {
             if (characteristics == null) return;
-            shortExposureNs = clampExposure(shortNs);
+            // V1.5.4 V1.2 MANUAL literal-shutter contract. The LONG slider owns
+            // LONG integration time and the SHORT slider owns SHORT integration time.
+            // Never swap the two controls or solve a different exposure product behind
+            // the user's back. If SHORT crosses LONG, clamp SHORT to LONG so the role
+            // names remain physically ordered while preserving the selected LONG time.
             longExposureNs = clampExposure(longNs);
-            if (longExposureNs < shortExposureNs) {
-                long tmp = shortExposureNs;
-                shortExposureNs = longExposureNs;
-                longExposureNs = tmp;
-            }
+            shortExposureNs = Math.min(clampExposure(shortNs), longExposureNs);
             manualIso = clampIso(iso);
             resetManualAdaptiveBracketLocked();
             recomputeManualAdaptivePairLocked();
@@ -1749,19 +1755,12 @@ final class CameraController {
                 }
             }
         } else {
-            double nextBracket = adaptBracketEvLocked(
-                    manualAdaptiveBracketEv, stats, true);
-            nextBracket = Math.max(manualBracketFloorEv, nextBracket);
-            if (Math.abs(nextBracket - manualAdaptiveBracketEv) >= 0.05
-                    && (lastAdaptivePairUpdateNs == 0L
-                            || now - lastAdaptivePairUpdateNs >= ADAPTIVE_PAIR_UPDATE_MIN_NS)) {
-                manualAdaptiveBracketEv = nextBracket;
-                if (recomputeManualAdaptivePairLocked()) {
-                    lastAdaptivePairUpdateNs = now;
-                    RuntimeLogger.event("MANUAL_LIVE_ADAPT", manualSafetySummaryLocked());
-                    applyPreviewRepeatingLocked();
-                }
-            }
+            // V1.5.4 V1.2: MANUAL SAFE no longer rewrites either shutter from scene
+            // statistics. The user's SHORT/LONG integration times are literal sensor
+            // requests (subject only to Camera2 exposure/frame-duration legality), SHORT
+            // ISO stays at sensor minimum, and LONG ISO is the independent ISO control.
+            bracketIncreaseEvidence = 0;
+            bracketDecreaseEvidence = 0;
         }
     }
 
@@ -2186,40 +2185,29 @@ final class CameraController {
         int oldLongIso = manualEffectiveLongIso;
         boolean oldSafety = manualFlickerSafetyApplied;
 
+        // V1.5.4 V1.2 literal MANUAL sensor ownership. Do not call the AUTO exposure-
+        // product solvers here: SHORT/LONG sliders are shutter-speed controls, SHORT
+        // ISO is the physical sensor minimum, and the separate ISO slider owns LONG.
         int minIso = sensorMinIsoLocked();
-        double requestedBaseLongProduct = Math.max(1.0, (double) longExposureNs * manualIso);
-        double targetLongProduct = Math.max(1.0,
-                requestedBaseLongProduct * Math.pow(2.0, clampBrightnessEv(displayBrightnessEv)));
-        ExposureSetting longSetting = solveLongSettingForProductLocked(
-                targetLongProduct, longExposureNs, requestedBaseLongProduct);
-        manualEffectiveLongExposureNs = longSetting.exposureNs;
-        manualEffectiveLongIso = longSetting.iso;
-
-        double achievedLongProduct = Math.max(1.0,
-                (double) manualEffectiveLongExposureNs * manualEffectiveLongIso);
-        double targetShortProduct = Math.max(1.0,
-                achievedLongProduct / Math.pow(2.0, manualAdaptiveBracketEv));
-        ExposureSetting shortSetting = solveShortSettingForProductLocked(
-                targetShortProduct, manualEffectiveLongExposureNs, achievedLongProduct,
-                MANUAL_BRACKET_MAX_EV, false);
-
-        // In MANUAL SAFE the Short slider owns the immediate live integration.
-        // The adaptive safety engine may later go darker/shorter only when measured
-        // highlight evidence requires extra headroom, never longer than requested.
-        long shortExposure = Math.min(shortSetting.exposureNs, clampExposure(shortExposureNs));
-        int shortIso = solveIsoForProduct(targetShortProduct, shortExposure);
-        if (shortIso < minIso) shortIso = minIso;
-        manualEffectiveShortExposureNs = shortExposure;
-        manualEffectiveShortIso = shortIso;
+        manualEffectiveLongExposureNs = clampExposure(longExposureNs);
+        manualEffectiveLongIso = clampIso(manualIso);
+        manualEffectiveShortExposureNs = Math.min(
+                clampExposure(shortExposureNs), manualEffectiveLongExposureNs);
+        manualEffectiveShortIso = minIso;
 
         double longProduct = Math.max(
                 1.0, (double) manualEffectiveLongExposureNs * manualEffectiveLongIso);
         double shortProduct = Math.max(
                 1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
         manualEffectiveBracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);
-        manualAchievedBrightnessEv = Math.log(longProduct / requestedBaseLongProduct) / Math.log(2.0);
-        manualFlickerSafetyApplied = sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE
-                || targetPreviewFps >= 60;
+        manualBracketFloorEv = clampDouble(
+                manualEffectiveBracketEv, 0.0, MANUAL_BRACKET_MAX_EV);
+        manualAdaptiveBracketEv = manualBracketFloorEv;
+        // Brightness remains recorded for AUTO/capture metadata, but MANUAL literal
+        // shutter/ISO controls are not silently rewritten to satisfy that EV request.
+        manualAchievedBrightnessEv = 0.0;
+        manualFlickerSafetyApplied = targetPreviewFps >= 60
+                && manualEffectiveLongExposureNs > SIXTY_FPS_DURATION_NS;
 
         return oldShortExposure != manualEffectiveShortExposureNs
                 || oldLongExposure != manualEffectiveLongExposureNs
@@ -2243,9 +2231,8 @@ final class CameraController {
                 + String.format(Locale.US, " %.1fEV", manualEffectiveBracketEv)
                 + String.format(
                         Locale.US,
-                        " brightness=%+.1fEV achieved=%+.2fEV",
-                        displayBrightnessEv,
-                        manualAchievedBrightnessEv)
+                        " brightness=%+.1fEV sensorOverride=none",
+                        displayBrightnessEv)
                 + " flicker=" + flickerLabel(sceneFlicker);
     }
 

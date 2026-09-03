@@ -1,10 +1,11 @@
 #version 300 es
 precision highp float;
 precision highp int;
-// V1.5.4 V1.1: R=fused scene-linear CFA, G=physical color trust,
-// B=physical LONG clipping risk, A=SHORT ownership.
-// Keeping provenance beside the CFA value lets demosaic make one coherent
-// color-trust decision per Bayer quad instead of guessing from brightness.
+// V1.5.4 V1.2: R=fused scene-linear CFA, G=semantic color provenance,
+// B=physical LONG clipping risk, A=SHORT ownership. Provenance uses the proven
+// Iris semantic contract exactly: 0=NORMAL_MEASURED, 1=CENSORED_UNKNOWN_CHROMA,
+// 2=SHORT_VALIDATED. Confidence may decide a state here, but downstream stages
+// may not reinterpret a censored numeric value as measured color.
 layout(location=0) out vec4 outFusionState;
 uniform highp usampler2D shortRawTex;
 uniform highp usampler2D longRawTex;
@@ -309,21 +310,48 @@ void main() {
         hardShortTakeover = 1.0;
     }
 
-    float longPhysicalTrust =
-        1.0 - smoothstep(0.985, 0.997, longSensor);
-    // Exposure, geometry, radiometry and color have separate authorities. Geometry
-    // was resolved before this shader and weak local radiometry has already collapsed
-    // to the proven global scale. SHORT color is therefore proven by SHORT itself:
-    // all four Bayer phases must have usable unsaturated same-phase support. Clipped
-    // LONG is not allowed to "validate" or bleach color it can no longer measure.
-    float shortValidated = smoothstep(0.55, 0.90, quadValidation.x);
-    float physicalColorTrust = mix(
-        longPhysicalTrust, shortValidated, ownership);
-    float longPhysicalClipRisk = 1.0 - longPhysicalTrust;
+    // V1.5.4 V1.2 semantic color authority. The exact parent Bayer quad owns one
+    // terminal state. LONG remains NORMAL_MEASURED only while every phase is below
+    // the physical clipping-risk zone. Once the quad enters that zone, color is either
+    // demonstrably SHORT_VALIDATED or CENSORED_UNKNOWN_CHROMA; there is no fractional
+    // downstream chroma authority.
+    const float PROVENANCE_NORMAL_MEASURED = 0.0;
+    const float PROVENANCE_CENSORED_UNKNOWN_CHROMA = 1.0;
+    const float PROVENANCE_SHORT_VALIDATED = 2.0;
+    float longQuadCensored = step(0.985, longPeak);
+
+    // A SHORT quad may gain chroma authority only when all four same-phase samples
+    // are strongly usable, correspondence agrees where LONG still measures, and the
+    // geometry itself is observable. Locally proven flow qualifies directly. A strong
+    // coherent-neighbor fallback may qualify through flowConfidence >= 0.70. The final
+    // global fallback is deliberately capped below that in Java, so a saturated or
+    // textureless center cannot self-certify color from smooth global flow alone.
+    float shortPhaseComplete = step(0.90, quadValidation.x);
+    float shortCorrespondence = step(0.55, correspondenceConfidence);
+    float observableGeometry = max(
+        step(0.50, localFlowEvidence),
+        step(0.70, flowConfidence));
+    float shortSemanticValidated =
+        shortPhaseComplete * shortCorrespondence * observableGeometry;
+
+    // When LONG has entered the censoring zone and SHORT is semantically validated,
+    // the numeric CFA carrier must match the provenance: use the coherent SHORT quad
+    // outright instead of labelling a LONG/SHORT mixture as SHORT_VALIDATED.
+    if (longQuadCensored >= 1.0 && shortSemanticValidated >= 1.0) {
+        ownership = 1.0;
+    }
+
+    float colorProvenance = PROVENANCE_NORMAL_MEASURED;
+    if (longQuadCensored >= 1.0) {
+        colorProvenance = shortSemanticValidated >= 1.0
+            ? PROVENANCE_SHORT_VALIDATED
+            : PROVENANCE_CENSORED_UNKNOWN_CHROMA;
+    }
+    float longPhysicalClipRisk = longQuadCensored;
 
     outFusionState = vec4(
         max(0.0, mix(longScene, shortState.x, ownership)),
-        clamp(physicalColorTrust, 0.0, 1.0),
-        clamp(longPhysicalClipRisk, 0.0, 1.0),
+        colorProvenance,
+        longPhysicalClipRisk,
         ownership);
 }
