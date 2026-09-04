@@ -17,7 +17,6 @@ uniform float displayGamma;
 uniform float displayDehaze;
 uniform float displayMicroContrast;
 uniform float stillRegistrationConfidence;
-uniform vec3 stillShortLinearGain;
 uniform float stillShortScalarGain;
 uniform int haveLocalFlow;
 uniform vec2 stillImageSize;
@@ -79,15 +78,9 @@ float max3(vec3 value) {
     return max(value.r, max(value.g, value.b));
 }
 
-float adaptiveClipStart(float bracketStops) {
-    // Wider brackets carry a noisier/darker SHORT frame, so admit SHORT only
-    // closer to LONG saturation. This depends on exposure relationship, not device.
-    return clamp(0.90 + 0.01 * (bracketStops - 1.0), 0.90, 0.95);
-}
-
 vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
-    // LONG owns shadows/midtones unchanged. Recovered scene values above the
-    // display range are compressed by bracket width while preserving RGB ratios.
+    // V2.15 preserves SHORT spatial/chromatic truth. Scene values above the
+    // display range are compressed pointwise while preserving SHORT RGB ratios.
     const float knee = 0.70;
     float scenePeak = max3(sceneLinear);
     if (scenePeak <= knee || scenePeak <= 0.000001) return sceneLinear;
@@ -128,59 +121,9 @@ vec3 applyDisplayGamma(vec3 rgb, float gammaValue) {
     return rgb * min(requestedScale, gamutScale);
 }
 
-float secondLargest3(vec3 rgb) {
-    float maximum = max3(rgb);
-    float minimum = min(rgb.r, min(rgb.g, rgb.b));
-    return rgb.r + rgb.g + rgb.b - maximum - minimum;
-}
-
-float gamutScaleForComponent(float currentScale, float targetY, float chroma) {
-    if (chroma > 0.000001) return min(currentScale, (1.0 - targetY) / chroma);
-    if (chroma < -0.000001) return min(currentScale, targetY / (-chroma));
-    return currentScale;
-}
-
-vec3 highlightColorOwnership(
-        vec3 targetDisplayLinear,
-        vec3 longScene,
-        vec3 shortScene,
-        vec3 longRgb,
-        vec3 shortRgb,
-        float highlightWeight) {
-    float targetY = linearLuma(targetDisplayLinear);
-    float longY = linearLuma(longScene);
-    if (targetY <= 0.000001 || longY <= 0.000001) return targetDisplayLinear;
-
-    vec3 owned = longScene * (targetY / longY);
-
-    // A single high red/orange channel does not surrender color ownership to SHORT.
-    // SHORT chromaticity participates only after at least two LONG channels are
-    // genuinely near clipping and SHORT itself has useful signal.
-    float multiChannelClip = smoothstep(0.985, 0.998, secondLargest3(longRgb));
-    float shortSignal = smoothstep(0.025, 0.10, max3(shortRgb));
-    float shortColorNeed = clamp(highlightWeight * multiChannelClip * shortSignal, 0.0, 1.0);
-    float shortY = linearLuma(shortScene);
-    if (shortColorNeed > 0.0005 && shortY > 0.000001) {
-        vec3 shortOwned = shortScene * (targetY / shortY);
-        owned = mix(owned, shortOwned, shortColorNeed);
-    }
-
-    float ownedY = linearLuma(owned);
-    vec3 chroma = owned - vec3(ownedY);
-    float gamutScale = 1.0;
-    gamutScale = gamutScaleForComponent(gamutScale, targetY, chroma.r);
-    gamutScale = gamutScaleForComponent(gamutScale, targetY, chroma.g);
-    gamutScale = gamutScaleForComponent(gamutScale, targetY, chroma.b);
-    return clamp(vec3(targetY) + chroma * clamp(gamutScale, 0.0, 1.0), 0.0, 1.0);
-}
-
-// IRIS_V214_STRICT_SOURCE_PROVENANCE_BEGIN
-float shortChromaFraction(vec3 rgb) {
-    float peak = max3(rgb);
-    float floorValue = min(rgb.r, min(rgb.g, rgb.b));
-    return (peak - floorValue) / max(peak, 0.02);
-}
-
+// IRIS_V215_IMMUTABLE_SHORT_PROVENANCE_BEGIN
+// SHORT is immutable output geometry and the sole spatial/chromatic/detail source.
+// The residual field addresses only aligned LONG, never SHORT.
 vec4 stillLocalFlowAt(vec2 sampleUv) {
     if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) {
         return vec4(0.5, 0.5, 0.0, 1.0);
@@ -193,7 +136,7 @@ float stillLocalRegistrationConfidenceAt(vec2 sampleUv) {
     return clamp(stillRegistrationConfidence * flowValue.b, 0.0, 1.0);
 }
 
-vec2 stillShortUvAt(vec2 sampleUv) {
+vec2 stillLongUvAt(vec2 sampleUv) {
     if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) {
         return clamp(sampleUv, vec2(0.0), vec2(1.0));
     }
@@ -204,235 +147,73 @@ vec2 stillShortUvAt(vec2 sampleUv) {
 }
 
 vec3 stillShortRgbAt(vec2 sampleUv) {
-    return texture(shortTex, stillShortUvAt(sampleUv)).rgb;
+    // Exact unwarped/unflowed SHORT sample. No LONG-dependent coordinate transform.
+    return texture(shortTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;
 }
 
-float stillScalarRadiometricRatio(vec3 shortRgb, vec3 longRgb) {
-    vec3 mappedShort = srgbToLinear(shortRgb) * stillShortScalarGain;
-    vec3 longLinear = srgbToLinear(longRgb);
-    return linearLuma(mappedShort) / max(linearLuma(longLinear), 0.00001);
-}
-
-float stillShortValidity(vec3 shortRgb) {
-    float shortY = encodedLuma(shortRgb);
-    float shortPeak = max3(shortRgb);
-    return smoothstep(0.07, 0.13, shortY)
-        * (1.0 - smoothstep(0.94, 0.975, shortPeak));
-}
-
-vec2 encodedGradientAt(sampler2D sourceSampler, vec2 sampleUv, vec2 texel) {
-    float tl = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2(-1.0, -1.0), vec2(0.0), vec2(1.0))).rgb);
-    float tc = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2( 0.0, -1.0), vec2(0.0), vec2(1.0))).rgb);
-    float tr = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2( 1.0, -1.0), vec2(0.0), vec2(1.0))).rgb);
-    float ml = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2(-1.0,  0.0), vec2(0.0), vec2(1.0))).rgb);
-    float mr = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2( 1.0,  0.0), vec2(0.0), vec2(1.0))).rgb);
-    float bl = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2(-1.0,  1.0), vec2(0.0), vec2(1.0))).rgb);
-    float bc = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2( 0.0,  1.0), vec2(0.0), vec2(1.0))).rgb);
-    float br = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2( 1.0,  1.0), vec2(0.0), vec2(1.0))).rgb);
-    float gx = (tr + 2.0 * mr + br - tl - 2.0 * ml - bl) * 0.125;
-    float gy = (bl + 2.0 * bc + br - tl - 2.0 * tc - tr) * 0.125;
-    return vec2(gx, gy);
-}
-
-vec2 encodedStillShortGradientAt(vec2 sampleUv, vec2 texel) {
-    float tl = encodedLuma(stillShortRgbAt(clamp(sampleUv + texel * vec2(-1.0, -1.0), vec2(0.0), vec2(1.0))));
-    float tc = encodedLuma(stillShortRgbAt(clamp(sampleUv + texel * vec2( 0.0, -1.0), vec2(0.0), vec2(1.0))));
-    float tr = encodedLuma(stillShortRgbAt(clamp(sampleUv + texel * vec2( 1.0, -1.0), vec2(0.0), vec2(1.0))));
-    float ml = encodedLuma(stillShortRgbAt(clamp(sampleUv + texel * vec2(-1.0,  0.0), vec2(0.0), vec2(1.0))));
-    float mr = encodedLuma(stillShortRgbAt(clamp(sampleUv + texel * vec2( 1.0,  0.0), vec2(0.0), vec2(1.0))));
-    float bl = encodedLuma(stillShortRgbAt(clamp(sampleUv + texel * vec2(-1.0,  1.0), vec2(0.0), vec2(1.0))));
-    float bc = encodedLuma(stillShortRgbAt(clamp(sampleUv + texel * vec2( 0.0,  1.0), vec2(0.0), vec2(1.0))));
-    float br = encodedLuma(stillShortRgbAt(clamp(sampleUv + texel * vec2( 1.0,  1.0), vec2(0.0), vec2(1.0))));
-    float gx = (tr + 2.0 * mr + br - tl - 2.0 * ml - bl) * 0.125;
-    float gy = (bl + 2.0 * bc + br - tl - 2.0 * tc - tr) * 0.125;
-    return vec2(gx, gy);
-}
-
-float logRadiometricRatioAt(vec2 sampleUv) {
-    vec3 shortRgb = stillShortRgbAt(sampleUv);
-    vec3 longRgb = texture(longTex, sampleUv).rgb;
-    return log2(max(stillScalarRadiometricRatio(shortRgb, longRgb), 0.0001));
-}
-
-float radiometricSmoothnessAt(vec2 sampleUv) {
-    vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
-    float centerLogRatio = logRadiometricRatioAt(sampleUv);
-    float ratioDeviation = 0.0;
-    ratioDeviation += abs(centerLogRatio - logRadiometricRatioAt(clamp(sampleUv + vec2( sourceTexel.x, 0.0), vec2(0.0), vec2(1.0))));
-    ratioDeviation += abs(centerLogRatio - logRadiometricRatioAt(clamp(sampleUv + vec2(-sourceTexel.x, 0.0), vec2(0.0), vec2(1.0))));
-    ratioDeviation += abs(centerLogRatio - logRadiometricRatioAt(clamp(sampleUv + vec2(0.0,  sourceTexel.y), vec2(0.0), vec2(1.0))));
-    ratioDeviation += abs(centerLogRatio - logRadiometricRatioAt(clamp(sampleUv + vec2(0.0, -sourceTexel.y), vec2(0.0), vec2(1.0))));
-    ratioDeviation *= 0.25;
-    return 1.0 - smoothstep(0.07, 0.24, ratioDeviation);
+vec3 stillLongRgbAt(vec2 sampleUv) {
+    return texture(longTex, stillLongUvAt(sampleUv)).rgb;
 }
 
 float mappedShortLinearLumaAt(vec2 sampleUv) {
     return linearLuma(srgbToLinear(stillShortRgbAt(sampleUv)) * stillShortScalarGain);
 }
 
-float longLinearLumaAt(vec2 sampleUv) {
-    return linearLuma(srgbToLinear(texture(longTex, sampleUv).rgb));
+float alignedLongLinearLumaAt(vec2 sampleUv) {
+    return linearLuma(srgbToLinear(stillLongRgbAt(sampleUv)));
 }
 
-vec2 localLinearRangeAt(vec2 sampleUv) {
-    vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
-    vec2 radius = sourceTexel * 2.0;
-    float shortMin = mappedShortLinearLumaAt(sampleUv);
-    float shortMax = shortMin;
-    float longMin = longLinearLumaAt(sampleUv);
-    float longMax = longMin;
-    vec2 offsets[8] = vec2[8](
+float envelopeSampleConfidenceAt(vec2 sampleUv) {
+    vec3 shortRgb = stillShortRgbAt(sampleUv);
+    vec3 longRgb = stillLongRgbAt(sampleUv);
+    float shortSignal = smoothstep(0.015, 0.060, encodedLuma(shortRgb));
+    float longSignal = smoothstep(0.035, 0.120, encodedLuma(longRgb));
+    float shortHeadroom = 1.0 - smoothstep(0.92, 0.975, max3(shortRgb));
+    float longHeadroom = 1.0 - smoothstep(0.86, 0.955, max3(longRgb));
+    float geometry = smoothstep(0.32, 0.68, stillLocalRegistrationConfidenceAt(sampleUv));
+    return shortSignal * longSignal * shortHeadroom * longHeadroom * geometry;
+}
+
+vec2 lowFrequencyEnvelopeEvidenceAt(vec2 sampleUv) {
+    // The evidence is deliberately broad. Nine exact source samples span roughly
+    // 32 source pixels; the 1/32 atlas and mode-4 neighborhood smoothing expand
+    // this to a low-frequency field that cannot carry fine LONG structure.
+    vec2 texel = 1.0 / vec2(textureSize(shortTex, 0));
+    vec2 radius = texel * 16.0;
+    vec2 offsets[9] = vec2[9](
+        vec2(0.0),
         vec2( radius.x, 0.0), vec2(-radius.x, 0.0),
         vec2(0.0,  radius.y), vec2(0.0, -radius.y),
         vec2( radius.x,  radius.y), vec2(-radius.x,  radius.y),
         vec2( radius.x, -radius.y), vec2(-radius.x, -radius.y));
-    for (int i = 0; i < 8; ++i) {
+    float shortSum = 0.0;
+    float longSum = 0.0;
+    float weightSum = 0.0;
+    for (int i = 0; i < 9; ++i) {
         vec2 q = clamp(sampleUv + offsets[i], vec2(0.0), vec2(1.0));
-        float shortY = mappedShortLinearLumaAt(q);
-        float longY = longLinearLumaAt(q);
-        shortMin = min(shortMin, shortY);
-        shortMax = max(shortMax, shortY);
-        longMin = min(longMin, longY);
-        longMax = max(longMax, longY);
+        float w = envelopeSampleConfidenceAt(q);
+        shortSum += mappedShortLinearLumaAt(q) * w;
+        longSum += alignedLongLinearLumaAt(q) * w;
+        weightSum += w;
     }
-    return vec2(shortMax - shortMin, longMax - longMin);
+    if (weightSum < 1.5 || shortSum <= 0.000001 || longSum <= 0.000001) {
+        return vec2(0.5, 0.0);
+    }
+    float logCorrection = clamp(log2(longSum / shortSum), -0.50, 0.50);
+    float encodedCorrection = 0.5 + logCorrection;
+    float confidence = clamp(weightSum / 9.0, 0.0, 1.0);
+    return vec2(encodedCorrection, confidence);
 }
-
-float stillStaticConfidenceAt(vec2 sampleUv) {
-    vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
-    vec2 shortGrad = encodedStillShortGradientAt(sampleUv, sourceTexel);
-    vec2 longGrad = encodedGradientAt(longTex, sampleUv, sourceTexel);
-    float shortMag = length(shortGrad);
-    float longMag = length(longGrad);
-    float bothMag = min(shortMag, longMag);
-    float maxMag = max(shortMag, longMag);
-    float directionCos = dot(shortGrad, longGrad) / max(shortMag * longMag, 0.000001);
-    float ratioSmooth = radiometricSmoothnessAt(sampleUv);
-    float flatSupport = (1.0 - smoothstep(0.005, 0.009, maxMag)) * ratioSmooth;
-    float gradientSupport = smoothstep(0.45, 0.90, directionCos)
-        * smoothstep(0.004, 0.018, bothMag)
-        * smoothstep(0.15, 0.70, ratioSmooth);
-    // LONG may have lost the very edge that SHORT is supposed to recover. This
-    // path requires a bright LONG regime plus stronger SHORT structure, and is
-    // still gated by the independently estimated local registration field below.
-    float explainedLostEdge = smoothstep(0.68, 0.90, encodedLuma(texture(longTex, sampleUv).rgb))
-        * smoothstep(0.006, 0.024, shortMag - 1.08 * longMag);
-    float localGeometry = smoothstep(
-        0.28, 0.68, stillLocalRegistrationConfidenceAt(sampleUv));
-    return max(flatSupport, max(gradientSupport, explainedLostEdge)) * localGeometry;
-}
-
-float fullResolutionSourceAgreementAt(vec2 sampleUv) {
-    vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
-    vec2 shortGrad = encodedStillShortGradientAt(sampleUv, sourceTexel);
-    vec2 longGrad = encodedGradientAt(longTex, sampleUv, sourceTexel);
-    float shortMag = length(shortGrad);
-    float longMag = length(longGrad);
-    float maxMag = max(shortMag, longMag);
-    float directionCos = dot(shortGrad, longGrad) / max(shortMag * longMag, 0.000001);
-    float flatAgreement = (1.0 - smoothstep(0.004, 0.012, maxMag))
-        * radiometricSmoothnessAt(sampleUv);
-    float edgeAgreement = smoothstep(0.60, 0.92, directionCos)
-        * smoothstep(0.003, 0.014, min(shortMag, longMag))
-        * smoothstep(0.40, 0.80, radiometricSmoothnessAt(sampleUv));
-    return max(flatAgreement, edgeAgreement)
-        * smoothstep(0.30, 0.70, stillLocalRegistrationConfidenceAt(sampleUv));
-}
-
-float visualLossProofAt(vec2 sampleUv) {
-    vec3 shortRgb = stillShortRgbAt(sampleUv);
-    vec3 longRgb = texture(longTex, sampleUv).rgb;
-    float localGeometry = smoothstep(
-        0.28, 0.68, stillLocalRegistrationConfidenceAt(sampleUv));
-    float shortValid = smoothstep(0.45, 0.78, stillShortValidity(shortRgb));
-    // Visual evidence from the V2.13 3072x4096 office capture shows that LONG
-    // can lose real ground/foliage/road texture well before encoded near-white.
-    // Start effective-loss eligibility in the bright body, then require SHORT
-    // range dominance plus independently proven local registration below.
-    float longBright = smoothstep(0.45, 0.68, encodedLuma(longRgb));
-    float longSecond = secondLargest3(longRgb);
-    float hardLoss = smoothstep(0.975, 0.997, longSecond)
-        * shortValid * localGeometry;
-
-    vec2 ranges = localLinearRangeAt(sampleUv);
-    float shortRange = ranges.x;
-    float longRange = ranges.y;
-    float rangeDominance = smoothstep(0.004, 0.020, shortRange)
-        * smoothstep(0.002, 0.020, shortRange - 1.08 * longRange);
-    float ratioLogError = abs(logRadiometricRatioAt(sampleUv));
-    float radiometricAgreement = 1.0 - smoothstep(0.20, 0.60, ratioLogError);
-    float effectiveLoss = longBright
-        * rangeDominance
-        * smoothstep(0.30, 0.78, radiometricAgreement)
-        * shortValid
-        * localGeometry;
-    return max(hardLoss, effectiveLoss);
-}
-
-float broadSeedAt(vec2 sampleUv) {
-    // visualLossProofAt already requires: bright/effectively damaged LONG,
-    // valid SHORT detail, range dominance, radiometric agreement, and local
-    // registration. Do not square those gates here: the V2.13 device crop proved
-    // that doing so rejects exactly the washed exterior detail SHORT must own.
-    return visualLossProofAt(sampleUv);
-}
-
-float broadCenterProofAt(vec2 sampleUv) {
-    // LONG is allowed to have lost the edge being recovered, so LONG/SHORT
-    // per-pixel gradient correspondence is not an additional ownership veto.
-    // Spatial coherence is enforced by the mode-4 broad-region consensus.
-    return visualLossProofAt(sampleUv);
-}
-
-float shortSaturationContextAt(vec2 sampleUv) {
-    vec2 sourceTexel = 1.0 / vec2(textureSize(shortTex, 0));
-    vec2 radius = sourceTexel * 3.0;
-    float risk = 0.0;
-    risk += step(0.975, max3(stillShortRgbAt(clamp(sampleUv + vec2( radius.x, 0.0), vec2(0.0), vec2(1.0)))));
-    risk += step(0.975, max3(stillShortRgbAt(clamp(sampleUv + vec2(-radius.x, 0.0), vec2(0.0), vec2(1.0)))));
-    risk += step(0.975, max3(stillShortRgbAt(clamp(sampleUv + vec2(0.0,  radius.y), vec2(0.0), vec2(1.0)))));
-    risk += step(0.975, max3(stillShortRgbAt(clamp(sampleUv + vec2(0.0, -radius.y), vec2(0.0), vec2(1.0)))));
-    risk += step(0.975, max3(stillShortRgbAt(clamp(sampleUv + vec2( radius.x,  radius.y), vec2(0.0), vec2(1.0)))));
-    risk += step(0.975, max3(stillShortRgbAt(clamp(sampleUv + vec2(-radius.x,  radius.y), vec2(0.0), vec2(1.0)))));
-    risk += step(0.975, max3(stillShortRgbAt(clamp(sampleUv + vec2( radius.x, -radius.y), vec2(0.0), vec2(1.0)))));
-    risk += step(0.975, max3(stillShortRgbAt(clamp(sampleUv + vec2(-radius.x, -radius.y), vec2(0.0), vec2(1.0)))));
-    return risk * 0.125;
-}
-
-float compactBaseSeedAt(vec2 sampleUv) {
-    vec3 shortRgb = stillShortRgbAt(sampleUv);
-    vec3 longRgb = texture(longTex, sampleUv).rgb;
-    float exactClip = smoothstep(0.990, 0.999, secondLargest3(longRgb))
-        * smoothstep(0.990, 0.999, max3(longRgb));
-    return exactClip
-        * smoothstep(0.45, 0.78, stillShortValidity(shortRgb))
-        * smoothstep(0.30, 0.72, stillLocalRegistrationConfidenceAt(sampleUv));
-}
-
-float compactNeighborhoodSupportAt(vec2 sampleUv) {
-    vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
-    vec2 radius = sourceTexel * 2.0;
-    float supportValue = compactBaseSeedAt(sampleUv);
-    supportValue += compactBaseSeedAt(clamp(sampleUv + vec2( radius.x, 0.0), vec2(0.0), vec2(1.0)));
-    supportValue += compactBaseSeedAt(clamp(sampleUv + vec2(-radius.x, 0.0), vec2(0.0), vec2(1.0)));
-    supportValue += compactBaseSeedAt(clamp(sampleUv + vec2(0.0,  radius.y), vec2(0.0), vec2(1.0)));
-    supportValue += compactBaseSeedAt(clamp(sampleUv + vec2(0.0, -radius.y), vec2(0.0), vec2(1.0)));
-    supportValue += compactBaseSeedAt(clamp(sampleUv + vec2( radius.x,  radius.y), vec2(0.0), vec2(1.0)));
-    supportValue += compactBaseSeedAt(clamp(sampleUv + vec2(-radius.x,  radius.y), vec2(0.0), vec2(1.0)));
-    supportValue += compactBaseSeedAt(clamp(sampleUv + vec2( radius.x, -radius.y), vec2(0.0), vec2(1.0)));
-    supportValue += compactBaseSeedAt(clamp(sampleUv + vec2(-radius.x, -radius.y), vec2(0.0), vec2(1.0)));
-    return supportValue / 9.0;
-}
-// IRIS_V214_STRICT_SOURCE_PROVENANCE_END
+// IRIS_V215_IMMUTABLE_SHORT_PROVENANCE_END
 
 // IRIS_V212_ADAPTIVE_CLARITY_BEGIN
 float presentationGuideLumaAt(vec2 sampleUv) {
     // Saved mode 6 guides clarity from the already source-proven FUSED image.
-    // Live mode 2 retains its established LONG guide.  This prevents a LONG-only
-    // local pattern/color decision from being painted back over SHORT-owned stills.
+    // Live mode 2 guides from immutable SHORT as well; LONG topology is never a
+    // spatial presentation guide in V2.15.
     vec3 encodedGuide = mode == 6
         ? texture(normalTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb
-        : texture(longTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;
+        : texture(shortTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;
     return linearLuma(srgbToLinear(encodedGuide));
 }
 
@@ -543,7 +324,7 @@ void main() {
     }
 
     if (mode == 6) {
-        // IRIS_V214_TOPOLOGY_SAFE_PRESENTATION_BEGIN
+        // IRIS_V215_TOPOLOGY_SAFE_PRESENTATION_BEGIN
         // The V2.13 device failure contained disconnected gray/blue contour
         // fragments. Saved presentation is therefore pointwise and monotonic: it
         // cannot sample a neighbor, move an edge, or create a new spatial contour.
@@ -561,170 +342,89 @@ void main() {
         float gamutScale = 1.0 / max(max3(fusedLinear), 0.000001);
         vec3 presented = fusedLinear * min(requestedScale, gamutScale);
         outColor = vec4(clamp(linearToSrgb(presented), 0.0, 1.0), 1.0);
-        // IRIS_V214_TOPOLOGY_SAFE_PRESENTATION_END
+        // IRIS_V215_TOPOLOGY_SAFE_PRESENTATION_END
         return;
     }
 
-    // V2.10 saved fusion remains GPU-only and deliberately multi-pass. mode==2 below
-    // is the byte-preserved V2.8 live path. mode==3 builds hard/effective-loss evidence,
-    // mode==4 enforces low-frequency/isotropic broad support, and mode==5 composes
-    // the final provenance image.  No mode cross-blends temporally uncertain data.
+    // V2.15 saved fusion remains GPU-only and four-pass. mode==3 derives a broad
+    // LONG/SHORT scalar luminance correction, mode==4 smooths it, mode==5 applies
+    // it achromatically to immutable SHORT RGB, and mode==6 is pointwise display.
     if (mode == 3) {
-        vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
-        vec2 radius = sourceTexel * 3.0;
-        float broadAverage = broadSeedAt(uv);
-        broadAverage += broadSeedAt(clamp(uv + vec2( radius.x, 0.0), vec2(0.0), vec2(1.0)));
-        broadAverage += broadSeedAt(clamp(uv + vec2(-radius.x, 0.0), vec2(0.0), vec2(1.0)));
-        broadAverage += broadSeedAt(clamp(uv + vec2(0.0,  radius.y), vec2(0.0), vec2(1.0)));
-        broadAverage += broadSeedAt(clamp(uv + vec2(0.0, -radius.y), vec2(0.0), vec2(1.0)));
-        broadAverage += broadSeedAt(clamp(uv + vec2( radius.x,  radius.y), vec2(0.0), vec2(1.0)));
-        broadAverage += broadSeedAt(clamp(uv + vec2(-radius.x,  radius.y), vec2(0.0), vec2(1.0)));
-        broadAverage += broadSeedAt(clamp(uv + vec2( radius.x, -radius.y), vec2(0.0), vec2(1.0)));
-        broadAverage += broadSeedAt(clamp(uv + vec2(-radius.x, -radius.y), vec2(0.0), vec2(1.0)));
-        broadAverage /= 9.0;
-        outColor = vec4(
-            broadAverage,
-            broadCenterProofAt(uv),
-            stillStaticConfidenceAt(uv),
-            shortSaturationContextAt(uv));
+        // V2.15: produce only a low-frequency achromatic correction estimate.
+        // R encodes log2 correction in [-0.5,+0.5] as [0,1]; G is confidence.
+        vec2 evidenceValue = lowFrequencyEnvelopeEvidenceAt(uv);
+        outColor = vec4(evidenceValue.x, evidenceValue.y, 0.0, 1.0);
         return;
     }
 
     if (mode == 4) {
-        // The 1/8-resolution atlas is now a broad region prior only. Nine-neighbor
-        // consensus removes isolated evidence specks; this pass never owns a fine
-        // source edge and therefore cannot create the gray disconnected borders
-        // observed in the V2.13 FUSED crop.
-        vec2 analysisTexel = 1.0 / vec2(textureSize(normalTex, 0));
-        vec4 centerEvidence = texture(normalTex, uv);
-        vec2 offsets[8] = vec2[8](
-            vec2( analysisTexel.x, 0.0), vec2(-analysisTexel.x, 0.0),
-            vec2(0.0,  analysisTexel.y), vec2(0.0, -analysisTexel.y),
-            vec2( analysisTexel.x,  analysisTexel.y),
-            vec2(-analysisTexel.x,  analysisTexel.y),
-            vec2( analysisTexel.x, -analysisTexel.y),
-            vec2(-analysisTexel.x, -analysisTexel.y));
-        float seedSum = centerEvidence.r;
-        float proofSum = centerEvidence.g;
-        float confidenceSum = centerEvidence.b;
-        float strongVotes = step(0.38, centerEvidence.r);
-        for (int i = 0; i < 8; ++i) {
-            vec4 evidenceValue = texture(
-                normalTex, clamp(uv + offsets[i], vec2(0.0), vec2(1.0)));
-            seedSum += evidenceValue.r;
-            proofSum += evidenceValue.g;
-            confidenceSum += evidenceValue.b;
-            strongVotes += step(0.38, evidenceValue.r);
+        // Smooth the already-low-resolution envelope. No source RGB, edge, hue or
+        // texture is stored in this atlas; only one scalar correction + confidence.
+        vec2 atlasTexel = 1.0 / vec2(textureSize(normalTex, 0));
+        vec2 offsets[9] = vec2[9](
+            vec2(0.0),
+            vec2( atlasTexel.x, 0.0), vec2(-atlasTexel.x, 0.0),
+            vec2(0.0,  atlasTexel.y), vec2(0.0, -atlasTexel.y),
+            vec2( atlasTexel.x,  atlasTexel.y), vec2(-atlasTexel.x,  atlasTexel.y),
+            vec2( atlasTexel.x, -atlasTexel.y), vec2(-atlasTexel.x, -atlasTexel.y));
+        float weightedDeviation = 0.0;
+        float confidenceSum = 0.0;
+        for (int i = 0; i < 9; ++i) {
+            vec4 e = texture(normalTex, clamp(uv + offsets[i], vec2(0.0), vec2(1.0)));
+            weightedDeviation += (e.r - 0.5) * e.g;
+            confidenceSum += e.g;
         }
-        float seedAverage = seedSum / 9.0;
-        float proofAverage = proofSum / 9.0;
-        float confidenceAverage = confidenceSum / 9.0;
-        float neighborhoodConsensus = smoothstep(3.0, 6.0, strongVotes);
-        float broadRegion = smoothstep(0.26, 0.55, seedAverage)
-            * smoothstep(0.22, 0.52, proofAverage)
-            * neighborhoodConsensus;
-        outColor = vec4(
-            broadRegion,
-            max(centerEvidence.g, proofAverage),
-            confidenceAverage,
-            centerEvidence.a);
+        float meanDeviation = confidenceSum > 0.0001
+            ? weightedDeviation / confidenceSum
+            : 0.0;
+        float meanConfidence = clamp(confidenceSum / 9.0, 0.0, 1.0);
+        outColor = vec4(clamp(0.5 + meanDeviation, 0.0, 1.0), meanConfidence, 0.0, 1.0);
         return;
     }
 
     if (mode == 5) {
-        // IRIS_V214_DISCRETE_DETAIL_OWNERSHIP_BEGIN
-        // Fine detail is source provenance, not an interpolation hint. Where the
-        // sources disagree spatially, ownership is exactly SHORT or exactly LONG.
-        // Fractional blending is permitted only where full-resolution gradients and
-        // radiometry already agree, so it cannot manufacture a third displaced edge.
+        // IRIS_V215_SHORT_SPATIAL_TRUTH_BEGIN
+        // There is no SHORT/LONG RGB mix in saved fusion. FUSED begins as exact
+        // full-resolution SHORT RGB in SHORT coordinates. LONG contributes only a
+        // spatially smooth *single scalar* luminance envelope derived by modes 3/4.
+        // Therefore LONG cannot introduce peach/orange chroma, gray edge fragments,
+        // displaced borders, foliage texture, road texture, or any other structure.
         float ratio = clamp(exposureRatio, 1.0, 65536.0);
         float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
         vec3 shortRgb = stillShortRgbAt(uv);
-        vec3 longRgb = texture(longTex, uv).rgb;
-        vec3 longScene = srgbToLinear(longRgb);
         vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;
-        vec4 supportValue = texture(normalTex, uv);
+        vec4 envelope = texture(normalTex, uv);
+        float envelopeLog2 = clamp(envelope.r - 0.5, -0.50, 0.50);
+        float envelopeConfidence = smoothstep(0.18, 0.55, envelope.g);
+        float envelopeScale = mix(1.0, exp2(envelopeLog2), envelopeConfidence);
 
-        float registrationGate = smoothstep(
-            0.30, 0.70, stillLocalRegistrationConfidenceAt(uv));
-        float shortColorConfidence = smoothstep(
-            0.48, 0.80, stillShortValidity(shortRgb));
-        float shortNeighborhoodSafety = 1.0
-            - smoothstep(0.30, 0.75, shortSaturationContextAt(uv));
-        float longHardClip = smoothstep(0.975, 0.997, secondLargest3(longRgb));
-        // supportValue.r is only a coherent broad recovery-region prior. It
-        // never carries fine texture and therefore cannot cut disconnected mask
-        // fragments through grass, foliage, signs, or road edges. Full-resolution
-        // registration/SHORT validity below decide whether SHORT may own detail.
-        float broadRecovery = smoothstep(0.32, 0.60, supportValue.r);
-        float compactRecovery = smoothstep(0.10, 0.18, compactNeighborhoodSupportAt(uv));
-        float sourceNeed = max(longHardClip, max(broadRecovery, compactRecovery));
-        float ownershipConfidence = sourceNeed
-            * shortColorConfidence
-            * shortNeighborhoodSafety
-            * registrationGate;
+        // Achromatic multiplication preserves SHORT RGB ratios and high-frequency
+        // topology. If LONG alignment/radiometry is uncertain, confidence collapses
+        // to zero and the result fails closed to exposure-mapped SHORT.
+        vec3 mergedScene = shortScene * envelopeScale;
 
-        float shortCore = step(0.58, ownershipConfidence);
-        float sourceAgreement = fullResolutionSourceAgreementAt(uv);
-        float boundaryCandidate = smoothstep(0.34, 0.58, ownershipConfidence);
-        float safeBoundaryWeight = (1.0 - shortCore)
-            * boundaryCandidate
-            * smoothstep(0.72, 0.92, sourceAgreement);
-        float shortWeight = max(shortCore, safeBoundaryWeight);
-
-        // A collapsed physical bracket is not HDR. Fail closed to the intended
-        // highlight source instead of rendering LONG plus pseudo-HDR processing.
-        float usableBracket = step(2.0, ratio);
-        vec3 mergedScene = usableBracket > 0.5
-            ? mix(longScene, shortScene, shortWeight)
-            : shortScene;
-
-        // Strict provenance: there is deliberately no radiance-floor invention in
-        // saved fusion. If SHORT cannot own valid RGB/detail, LONG remains the source
-        // even if that means an unrecovered white highlight; false peach/orange fill
-        // is never preferable to honest clipping.
         float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
         vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
         vec3 displayLinear = adaptiveHdrToneMap(bodyToned, ratio, bracketStops);
         displayLinear = applyDisplayGamma(displayLinear, displayGamma);
         outColor = vec4(clamp(linearToSrgb(displayLinear), 0.0, 1.0), 1.0);
-        // IRIS_V214_DISCRETE_DETAIL_OWNERSHIP_END
+        // IRIS_V215_SHORT_SPATIAL_TRUTH_END
         return;
     }
 
+    // V2.15 strict live contract: live HDR also preserves SHORT spatial/chromatic
+    // truth. The saved still has the extra low-frequency LONG luminance-envelope
+    // passes above; live mode fails closed to exposure-normalized SHORT.
     float ratio = clamp(exposureRatio, 1.0, 65536.0);
     float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
     vec3 shortRgb = texture(shortTex, uv).rgb;
-    vec3 longRgb = texture(longTex, uv).rgb;
     vec3 shortScene = srgbToLinear(shortRgb) * ratio;
-    vec3 longScene = srgbToLinear(longRgb);
+    vec3 mergedScene = shortScene;
 
-    float longEncodedPeak = max3(longRgb);
-    float longScenePeak = max(max3(longScene), 0.000001);
-    float shortScenePeak = max3(shortScene);
-    float shortConfidence = smoothstep(0.35, 0.65, shortScenePeak / longScenePeak);
-    float highlightWeight = smoothstep(
-        adaptiveClipStart(bracketStops),
-        0.995,
-        longEncodedPeak) * shortConfidence;
-
-    // V2.9: this remainder is live mode==2 only. Its V2.8 physical-ratio HDR
-    // equations are preserved; saved still fusion returned above through modes 3/4/5.
-    vec3 mergedScene = mix(longScene, shortScene, highlightWeight);
-
-    // Brightness remains presentation-only. The photographic body curve is global,
-    // RGB-ratio preserving, and fades to zero before the 0.70 HDR shoulder, so
-    // recovered highlights retain their existing headroom while the SDR body reads
-    // brighter/cleaner without a local-HDR "pop" look.
     float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
     vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
     vec3 displayLinear = adaptiveHdrToneMap(bodyToned, ratio, bracketStops);
     displayLinear = applyDisplayGamma(displayLinear, displayGamma);
-
-    if (highlightWeight > 0.0005) {
-        displayLinear = highlightColorOwnership(
-                displayLinear, longScene, shortScene, longRgb, shortRgb, highlightWeight);
-    }
     displayLinear = applyAdaptiveClarity(displayLinear, uv);
     vec3 displayRgb = linearToSrgb(displayLinear);
     outColor = vec4(clamp(displayRgb, 0.0, 1.0), 1.0);

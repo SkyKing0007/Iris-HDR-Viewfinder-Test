@@ -762,9 +762,6 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillRegistrationConfidence"),
                     0.0f);
-            GLES30.glUniform3f(
-                    GLES30.glGetUniformLocation(displayProgram, "stillShortLinearGain"),
-                    1.0f, 1.0f, 1.0f);
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillShortScalarGain"),
                     1.0f);
@@ -803,16 +800,17 @@ final class HdrGlView extends GLSurfaceView {
                 throw new IllegalStateException("Short/long JPEG dimensions do not match for GPU fusion");
             }
 
-            JpegFusion.Registration registration = JpegFusion.estimateRegistration(shortBitmap, longBitmap);
-            Bitmap alignedShort = JpegFusion.alignShortToLong(shortBitmap, registration);
-            JpegFusion.recycleBitmap(shortBitmap);
-            shortBitmap = alignedShort;
-            // V2.14 visual-evidence correction: preserve the proven global
-            // translation as the coarse anchor, then estimate a bounded,
-            // bidirectional/cycle-consistent local residual field. The field is
-            // tiny and is used only to sample the real SHORT source more accurately.
+            // V2.15 immutable-SHORT contract: SHORT defines output geometry and is
+            // never translated, warped, or locally resampled. Only LONG is moved
+            // into SHORT coordinates, first by the proven global registration and
+            // then by a bounded/cycle-consistent residual field used for the broad
+            // achromatic luminance envelope only.
+            JpegFusion.Registration registration = JpegFusion.estimateRegistration(longBitmap, shortBitmap);
+            Bitmap alignedLong = JpegFusion.alignLongToShort(longBitmap, registration);
+            JpegFusion.recycleBitmap(longBitmap);
+            longBitmap = alignedLong;
             JpegFusion.LocalRegistrationField localRegistration =
-                    JpegFusion.estimateLocalRegistration(shortBitmap, longBitmap);
+                    JpegFusion.estimateLocalRegistration(longBitmap, shortBitmap);
             JpegFusion.AppearanceGain appearanceGain =
                     JpegFusion.estimateAppearanceGain(shortBitmap, longBitmap, exposureRatio);
             float scalarGain = median3(appearanceGain.r, appearanceGain.g, appearanceGain.b);
@@ -848,7 +846,7 @@ final class HdrGlView extends GLSurfaceView {
             RuntimeLogger.event(
                     "GPU_STILL_FUSION",
                     String.format(java.util.Locale.US,
-                            "V2.12 GPU-only multipass start %dx%d ratio=%.3f scalar=%.3f brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
+                            "V2.15 immutable-SHORT GPU multipass start %dx%d ratio=%.3f scalar=%.3f brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
                             width, height, exposureRatio, scalarGain, brightnessEv, gamma,
                             dehaze, microContrast));
 
@@ -871,6 +869,9 @@ final class HdrGlView extends GLSurfaceView {
 
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shortTexture);
                 GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, shortBitmap, 0);
+                // Exact full-resolution SHORT samples are immutable source truth.
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST);
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, longTexture);
                 GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, longBitmap, 0);
                 uploadRgba8Texture(
@@ -878,21 +879,31 @@ final class HdrGlView extends GLSurfaceView {
                         localRegistration.gridWidth,
                         localRegistration.gridHeight,
                         localRegistration.rgba);
-                int analysisWidth = Math.max(1, (width + 7) / 8);
-                int analysisHeight = Math.max(1, (height + 7) / 8);
+                // V2.15: LONG may influence only a deliberately low-frequency
+                // scalar envelope. At 3072x4096 this is 96x128 (1/32 per axis),
+                // so LONG can never carry grass/foliage/text/edge detail into FUSED.
+                int analysisWidth = Math.max(1, (width + 31) / 32);
+                int analysisHeight = Math.max(1, (height + 31) / 32);
                 allocateRgbTexture(evidenceTexture, analysisWidth, analysisHeight);
                 allocateRgbTexture(supportTexture, analysisWidth, analysisHeight);
                 allocateRgbTexture(presentationTexture, width, height);
+                // Mode 6 is full-resolution pointwise presentation. Keep the
+                // mode-5 fused raster nearest-sampled so no post-fusion texture
+                // interpolation can soften or create a boundary absent from SHORT.
+                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, presentationTexture);
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST);
                 allocateRgbTexture(outputTexture, width, height);
                 JpegFusion.recycleBitmap(shortBitmap);
                 shortBitmap = null;
                 JpegFusion.recycleBitmap(longBitmap);
                 longBitmap = null;
 
-                // V2.14 keeps the proven four-pass saved-still topology. Mode 3
-                // measures source loss, mode 4 forms only a broad coherent region
-                // prior, mode 5 chooses full-resolution source provenance, and mode
-                // 6 is pointwise so it cannot draw new post-fusion borders.
+                // V2.15 preserves the proven four-pass saved-still topology but
+                // changes ownership semantics completely. Mode 3 derives only a
+                // broad achromatic LONG/SHORT luminance correction, mode 4 smooths
+                // that correction, mode 5 applies it to untouched full-resolution
+                // SHORT RGB, and mode 6 remains pointwise presentation only.
                 renderStillPass(
                         evidenceTexture, analysisWidth, analysisHeight,
                         3, longTexture, shortTexture, longTexture,
@@ -1031,9 +1042,6 @@ final class HdrGlView extends GLSurfaceView {
                     GLES30.glGetUniformLocation(displayProgram, "stillRegistrationConfidence"),
                     registrationConfidence);
             // V2.9 production composition never applies independent RGB appearance gains.
-            GLES30.glUniform3f(
-                    GLES30.glGetUniformLocation(displayProgram, "stillShortLinearGain"),
-                    1.0f, 1.0f, 1.0f);
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillShortScalarGain"),
                     scalarGain);

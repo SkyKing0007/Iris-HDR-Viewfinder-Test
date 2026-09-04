@@ -119,14 +119,14 @@ final class JpegFusion {
         }
     }
 
-    static Registration estimateRegistration(Bitmap shortBitmap, Bitmap longBitmap) {
-        if (shortBitmap == null || longBitmap == null
-                || shortBitmap.getWidth() != longBitmap.getWidth()
-                || shortBitmap.getHeight() != longBitmap.getHeight()) {
+    static Registration estimateRegistration(Bitmap movingBitmap, Bitmap referenceBitmap) {
+        if (movingBitmap == null || referenceBitmap == null
+                || movingBitmap.getWidth() != referenceBitmap.getWidth()
+                || movingBitmap.getHeight() != referenceBitmap.getHeight()) {
             return new Registration(0.0f, 0.0f, -1.0f, 0.0f, 0.0f, Float.POSITIVE_INFINITY);
         }
-        OneWayRegistration forward = estimateOneWayRegistration(shortBitmap, longBitmap);
-        OneWayRegistration backward = estimateOneWayRegistration(longBitmap, shortBitmap);
+        OneWayRegistration forward = estimateOneWayRegistration(movingBitmap, referenceBitmap);
+        OneWayRegistration backward = estimateOneWayRegistration(referenceBitmap, movingBitmap);
         float cycleError = (float) Math.hypot(
                 forward.sampleDx + backward.sampleDx,
                 forward.sampleDy + backward.sampleDy);
@@ -210,55 +210,56 @@ final class JpegFusion {
         }
     }
 
-    static Bitmap alignShortToLong(Bitmap shortBitmap, Registration registration) {
+    static Bitmap alignLongToShort(Bitmap longBitmap, Registration registration) {
         Bitmap aligned = Bitmap.createBitmap(
-                shortBitmap.getWidth(), shortBitmap.getHeight(), Bitmap.Config.ARGB_8888);
+                longBitmap.getWidth(), longBitmap.getHeight(), Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(aligned);
         Paint paint = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
         Matrix matrix = new Matrix();
-        // sampleDx/sampleDy specify the moving SHORT coordinate corresponding to a
-        // LONG output coordinate. Draw by the opposite translation to register SHORT
-        // into the unchanged LONG output geometry.
+        // V2.15 invariant: SHORT is the immutable reference geometry. sampleDx/
+        // sampleDy specify the moving LONG coordinate corresponding to a SHORT
+        // output coordinate, so only LONG is resampled into SHORT coordinates.
         matrix.postTranslate(-registration.sampleDx, -registration.sampleDy);
-        canvas.drawBitmap(shortBitmap, matrix, paint);
+        canvas.drawBitmap(longBitmap, matrix, paint);
         return aligned;
     }
 
     static LocalRegistrationField estimateLocalRegistration(
-            Bitmap alignedShort, Bitmap longBitmap) {
+            Bitmap alignedMoving, Bitmap referenceBitmap) {
         final float maxResidualPixels = 4.0f;
-        if (alignedShort == null || longBitmap == null
-                || alignedShort.getWidth() != longBitmap.getWidth()
-                || alignedShort.getHeight() != longBitmap.getHeight()) {
+        if (alignedMoving == null || referenceBitmap == null
+                || alignedMoving.getWidth() != referenceBitmap.getWidth()
+                || alignedMoving.getHeight() != referenceBitmap.getHeight()) {
             return neutralLocalRegistration(maxResidualPixels);
         }
 
-        final int width = longBitmap.getWidth();
-        final int height = longBitmap.getHeight();
-        // 4096px stills analyze at 1024px max dimension. A 32px analysis cell is
-        // therefore ~128 source pixels: coarse enough to reject texture noise, but
-        // fine enough to model the sub-pixel residuals visible in the V2.13 crops.
+        final int width = referenceBitmap.getWidth();
+        final int height = referenceBitmap.getHeight();
+        // 4096px stills analyze at 1024px max dimension. V2.15 estimates only
+        // the residual displacement of moving LONG into immutable SHORT geometry.
+        // The field is used only while deriving a low-frequency luminance envelope;
+        // it is never applied to SHORT RGB/detail.
         final int maxDimension = 1024;
         float scale = Math.min(1.0f, maxDimension / (float) Math.max(width, height));
         int smallWidth = Math.max(96, Math.round(width * scale));
         int smallHeight = Math.max(72, Math.round(height * scale));
-        Bitmap shortSmall = Bitmap.createScaledBitmap(
-                alignedShort, smallWidth, smallHeight, true);
-        Bitmap longSmall = Bitmap.createScaledBitmap(
-                longBitmap, smallWidth, smallHeight, true);
+        Bitmap movingSmall = Bitmap.createScaledBitmap(
+                alignedMoving, smallWidth, smallHeight, true);
+        Bitmap referenceSmall = Bitmap.createScaledBitmap(
+                referenceBitmap, smallWidth, smallHeight, true);
         try {
-            int[] shortPixels = new int[smallWidth * smallHeight];
-            int[] longPixels = new int[smallWidth * smallHeight];
-            shortSmall.getPixels(shortPixels, 0, smallWidth, 0, 0, smallWidth, smallHeight);
-            longSmall.getPixels(longPixels, 0, smallWidth, 0, 0, smallWidth, smallHeight);
-            float[] shortLogY = logLuma(shortPixels);
-            float[] longLogY = logLuma(longPixels);
-            float[] shortGx = new float[shortPixels.length];
-            float[] shortGy = new float[shortPixels.length];
-            float[] longGx = new float[longPixels.length];
-            float[] longGy = new float[longPixels.length];
-            computeGradients(shortLogY, smallWidth, smallHeight, shortGx, shortGy);
-            computeGradients(longLogY, smallWidth, smallHeight, longGx, longGy);
+            int[] movingPixels = new int[smallWidth * smallHeight];
+            int[] referencePixels = new int[smallWidth * smallHeight];
+            movingSmall.getPixels(movingPixels, 0, smallWidth, 0, 0, smallWidth, smallHeight);
+            referenceSmall.getPixels(referencePixels, 0, smallWidth, 0, 0, smallWidth, smallHeight);
+            float[] movingLogY = logLuma(movingPixels);
+            float[] referenceLogY = logLuma(referencePixels);
+            float[] movingGx = new float[movingPixels.length];
+            float[] movingGy = new float[movingPixels.length];
+            float[] referenceGx = new float[referencePixels.length];
+            float[] referenceGy = new float[referencePixels.length];
+            computeGradients(movingLogY, smallWidth, smallHeight, movingGx, movingGy);
+            computeGradients(referenceLogY, smallWidth, smallHeight, referenceGx, referenceGy);
 
             final int cell = 32;
             final int searchRadius = 2;
@@ -281,7 +282,7 @@ final class JpegFusion {
                     int i = gy * gridWidth + gx;
 
                     LocalMatch forward = localGradientMatch(
-                            longGx, longGy, shortGx, shortGy,
+                            referenceGx, referenceGy, movingGx, movingGy,
                             smallWidth, smallHeight, cx, cy,
                             searchRadius, windowRadius);
                     int backCx = Math.max(border, Math.min(
@@ -289,7 +290,7 @@ final class JpegFusion {
                     int backCy = Math.max(border, Math.min(
                             smallHeight - border - 1, Math.round(cy + forward.dy)));
                     LocalMatch backward = localGradientMatch(
-                            shortGx, shortGy, longGx, longGy,
+                            movingGx, movingGy, referenceGx, referenceGy,
                             smallWidth, smallHeight, backCx, backCy,
                             searchRadius, windowRadius);
                     float cycleError = (float) Math.hypot(
@@ -479,8 +480,8 @@ final class JpegFusion {
                     maxResidualPixels,
                     Math.min(maxResidualPixels, observedMax));
         } finally {
-            if (shortSmall != alignedShort) recycle(shortSmall);
-            if (longSmall != longBitmap) recycle(longSmall);
+            if (movingSmall != alignedMoving) recycle(movingSmall);
+            if (referenceSmall != referenceBitmap) recycle(referenceSmall);
         }
     }
 
@@ -747,10 +748,10 @@ final class JpegFusion {
             throw new IllegalStateException("Short/long JPEG dimensions do not match");
         }
 
-        Registration registration = estimateRegistration(shortBitmap, longBitmap);
-        Bitmap alignedShort = alignShortToLong(shortBitmap, registration);
-        recycle(shortBitmap);
-        shortBitmap = alignedShort;
+        Registration registration = estimateRegistration(longBitmap, shortBitmap);
+        Bitmap alignedLong = alignLongToShort(longBitmap, registration);
+        recycle(longBitmap);
+        longBitmap = alignedLong;
         AppearanceGain appearanceGain = estimateAppearanceGain(shortBitmap, longBitmap, exposureRatio);
         RuntimeLogger.event(
                 "CPU_STILL_REGISTRATION",
@@ -764,12 +765,17 @@ final class JpegFusion {
         int height = shortBitmap.getHeight();
         Bitmap output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         final int rowsPerStrip = 32;
-        final int ownershipRadius = 6;
-        int maxReadRows = rowsPerStrip + 2 * ownershipRadius;
-        int[] shortPixels = new int[width * maxReadRows];
-        int[] longPixels = new int[width * maxReadRows];
-        float[] supportEvidence = new float[width * maxReadRows];
+        int[] shortPixels = new int[width * rowsPerStrip];
         int[] outPixels = new int[width * rowsPerStrip];
+
+        // The CPU path is fail-closed strict provenance: after registration is used
+        // only to estimate one achromatic global exposure scale, LONG is discarded.
+        // No LONG pixel, edge, hue, texture, mask or ownership decision can enter
+        // the output raster.
+        float scalarAppearanceGain = secondLargest3(
+                appearanceGain.r, appearanceGain.g, appearanceGain.b);
+        recycle(longBitmap);
+        longBitmap = null;
 
         float clampedBrightnessEv = clamp(displayBrightnessEv, -16.0f, 1.0f);
         float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);
@@ -785,69 +791,25 @@ final class JpegFusion {
 
         for (int y = 0; y < height; y += rowsPerStrip) {
             int rows = Math.min(rowsPerStrip, height - y);
-            int readY = Math.max(0, y - ownershipRadius);
-            int readBottom = Math.min(height, y + rows + ownershipRadius);
-            int readRows = readBottom - readY;
-            int readCount = width * readRows;
-            shortBitmap.getPixels(shortPixels, 0, width, 0, readY, width, readRows);
-            longBitmap.getPixels(longPixels, 0, width, 0, readY, width, readRows);
-
-            // V2.7 support is scalar radiometric-coherence evidence only. RGB is
-            // never spatially averaged or filled: the final pixel mixes only the
-            // registered center SHORT and center LONG samples.
-            for (int i = 0; i < readCount; i++) {
-                supportEvidence[i] = shortSupportEvidence(
-                        shortPixels[i], longPixels[i], appearanceGain);
-            }
+            shortBitmap.getPixels(shortPixels, 0, width, 0, y, width, rows);
 
             for (int row = 0; row < rows; row++) {
-                int globalY = y + row;
-                int centerRow = globalY - readY;
                 for (int x = 0; x < width; x++) {
-                    int centerIndex = centerRow * width + x;
+                    int centerIndex = row * width + x;
                     int outIndex = row * width + x;
                     int s = shortPixels[centerIndex];
-                    int l = longPixels[centerIndex];
 
                     int sr8 = (s >>> 16) & 0xFF;
                     int sg8 = (s >>> 8) & 0xFF;
                     int sb8 = s & 0xFF;
-                    int lr8 = (l >>> 16) & 0xFF;
-                    int lg8 = (l >>> 8) & 0xFF;
-                    int lb8 = l & 0xFF;
 
-                    float context2 = cardinalSupportAverage(
-                            supportEvidence, width, height, readY, readRows,
-                            x, globalY, 2);
-                    float context6 = cardinalSupportAverage(
-                            supportEvidence, width, height, readY, readRows,
-                            x, globalY, 6);
-                    float shortOwnership = computeShortOwnership(
-                            s, l, appearanceGain, context2, context6,
-                            registration.confidence);
-                    float shortCoreOwnership = computeShortCoreOwnership(
-                            s, l, appearanceGain, context2, context6,
-                            registration.confidence);
-                    shortOwnership = Math.max(shortOwnership, shortCoreOwnership);
-
-                    float scalarAppearanceGain = secondLargest3(
-                            appearanceGain.r, appearanceGain.g, appearanceGain.b);
-                    float srPerChannel = SRGB_TO_LINEAR[sr8] * appearanceGain.r;
-                    float sgPerChannel = SRGB_TO_LINEAR[sg8] * appearanceGain.g;
-                    float sbPerChannel = SRGB_TO_LINEAR[sb8] * appearanceGain.b;
-                    float srScalar = SRGB_TO_LINEAR[sr8] * scalarAppearanceGain;
-                    float sgScalar = SRGB_TO_LINEAR[sg8] * scalarAppearanceGain;
-                    float sbScalar = SRGB_TO_LINEAR[sb8] * scalarAppearanceGain;
-                    float sr = srPerChannel + (srScalar - srPerChannel) * shortCoreOwnership;
-                    float sg = sgPerChannel + (sgScalar - sgPerChannel) * shortCoreOwnership;
-                    float sb = sbPerChannel + (sbScalar - sbPerChannel) * shortCoreOwnership;
-                    float lr = SRGB_TO_LINEAR[lr8];
-                    float lg = SRGB_TO_LINEAR[lg8];
-                    float lb = SRGB_TO_LINEAR[lb8];
-
-                    float mr = lr + (sr - lr) * shortOwnership;
-                    float mg = lg + (sg - lg) * shortOwnership;
-                    float mb = lb + (sb - lb) * shortOwnership;
+                    // V2.15 strict fallback: even the dormant CPU path must not
+                    // synthesize an RGB sample between LONG and SHORT. SHORT is the
+                    // spatial/chromatic truth; LONG contributes only the robust
+                    // scalar exposure estimate calculated above.
+                    float mr = SRGB_TO_LINEAR[sr8] * scalarAppearanceGain;
+                    float mg = SRGB_TO_LINEAR[sg8] * scalarAppearanceGain;
+                    float mb = SRGB_TO_LINEAR[sb8] * scalarAppearanceGain;
 
                     // Presentation Brightness stays post-fusion. Then a restrained
                     // global photographic body curve anchors black, lifts body/mids,
@@ -955,57 +917,6 @@ final class JpegFusion {
         return upright;
     }
 
-    private static void applyHighlightColorOwnership(
-            float targetR, float targetG, float targetB,
-            float longSceneR, float longSceneG, float longSceneB,
-            float shortSceneR, float shortSceneG, float shortSceneB,
-            float longEncodedR, float longEncodedG, float longEncodedB,
-            float shortEncodedR, float shortEncodedG, float shortEncodedB,
-            float highlightWeight,
-            float[] out) {
-        float targetY = linearLuma(targetR, targetG, targetB);
-        float longY = linearLuma(longSceneR, longSceneG, longSceneB);
-        if (targetY <= 0.000001f || longY <= 0.000001f) {
-            out[0] = targetR; out[1] = targetG; out[2] = targetB;
-            return;
-        }
-
-        float longScale = targetY / longY;
-        float ownedR = longSceneR * longScale;
-        float ownedG = longSceneG * longScale;
-        float ownedB = longSceneB * longScale;
-
-        float secondLong = secondLargest3(longEncodedR, longEncodedG, longEncodedB);
-        float multiChannelClip = smoothstep(0.985f, 0.998f, secondLong);
-        float shortPeak = Math.max(shortEncodedR, Math.max(shortEncodedG, shortEncodedB));
-        float shortSignal = smoothstep(0.025f, 0.10f, shortPeak);
-        float shortColorNeed = clamp(highlightWeight * multiChannelClip * shortSignal, 0.0f, 1.0f);
-
-        float shortY = linearLuma(shortSceneR, shortSceneG, shortSceneB);
-        if (shortColorNeed > 0.0005f && shortY > 0.000001f) {
-            float shortScale = targetY / shortY;
-            float shortR = shortSceneR * shortScale;
-            float shortG = shortSceneG * shortScale;
-            float shortB = shortSceneB * shortScale;
-            ownedR += (shortR - ownedR) * shortColorNeed;
-            ownedG += (shortG - ownedG) * shortColorNeed;
-            ownedB += (shortB - ownedB) * shortColorNeed;
-        }
-
-        float ownedY = linearLuma(ownedR, ownedG, ownedB);
-        float chromaR = ownedR - ownedY;
-        float chromaG = ownedG - ownedY;
-        float chromaB = ownedB - ownedY;
-        float gamutScale = 1.0f;
-        gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaR);
-        gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaG);
-        gamutScale = gamutScaleForChannel(gamutScale, targetY, chromaB);
-        gamutScale = clamp(gamutScale, 0.0f, 1.0f);
-        out[0] = clamp(targetY + chromaR * gamutScale, 0.0f, 1.0f);
-        out[1] = clamp(targetY + chromaG * gamutScale, 0.0f, 1.0f);
-        out[2] = clamp(targetY + chromaB * gamutScale, 0.0f, 1.0f);
-    }
-
     private static float linearLuma(float r, float g, float b) {
         return 0.2126f * r + 0.7152f * g + 0.0722f * b;
     }
@@ -1014,174 +925,6 @@ final class JpegFusion {
         float maximum = Math.max(r, Math.max(g, b));
         float minimum = Math.min(r, Math.min(g, b));
         return r + g + b - maximum - minimum;
-    }
-
-    private static float gamutScaleForChannel(float current, float targetY, float chroma) {
-        if (chroma > 0.000001f) return Math.min(current, (1.0f - targetY) / chroma);
-        if (chroma < -0.000001f) return Math.min(current, targetY / (-chroma));
-        return current;
-    }
-
-    private static float shortSupportEvidence(
-            int shortPixel, int longPixel, AppearanceGain gain) {
-        int sr8 = (shortPixel >>> 16) & 0xFF;
-        int sg8 = (shortPixel >>> 8) & 0xFF;
-        int sb8 = shortPixel & 0xFF;
-        int lr8 = (longPixel >>> 16) & 0xFF;
-        int lg8 = (longPixel >>> 8) & 0xFF;
-        int lb8 = longPixel & 0xFF;
-        float sr = sr8 / 255.0f;
-        float sg = sg8 / 255.0f;
-        float sb = sb8 / 255.0f;
-        float lr = lr8 / 255.0f;
-        float lg = lg8 / 255.0f;
-        float lb = lb8 / 255.0f;
-        float shortEncodedY = linearLuma(sr, sg, sb);
-        float longEncodedY = linearLuma(lr, lg, lb);
-        float shortPeak = Math.max(sr, Math.max(sg, sb));
-        float secondLong = secondLargest3(lr, lg, lb);
-        float longLinearY = linearLuma(
-                SRGB_TO_LINEAR[lr8], SRGB_TO_LINEAR[lg8], SRGB_TO_LINEAR[lb8]);
-        float mappedShortY = linearLuma(
-                SRGB_TO_LINEAR[sr8] * gain.r,
-                SRGB_TO_LINEAR[sg8] * gain.g,
-                SRGB_TO_LINEAR[sb8] * gain.b);
-        float radiometricRatio = mappedShortY / Math.max(longLinearY, 0.00001f);
-        float shortSignal = smoothstep(0.06f, 0.14f, shortEncodedY);
-        float shortHeadroom = 1.0f - smoothstep(0.965f, 0.995f, shortPeak);
-        return shortSignal * shortHeadroom
-                * smoothstep(0.45f, 0.68f, longEncodedY)
-                * smoothstep(0.72f, 0.90f, secondLong)
-                * smoothstep(1.10f, 1.34f, radiometricRatio);
-    }
-
-    private static float computeShortOwnership(
-            int shortPixel,
-            int longPixel,
-            AppearanceGain gain,
-            float context2,
-            float context6,
-            float registrationConfidence) {
-        int sr8 = (shortPixel >>> 16) & 0xFF;
-        int sg8 = (shortPixel >>> 8) & 0xFF;
-        int sb8 = shortPixel & 0xFF;
-        int lr8 = (longPixel >>> 16) & 0xFF;
-        int lg8 = (longPixel >>> 8) & 0xFF;
-        int lb8 = longPixel & 0xFF;
-        float sr = sr8 / 255.0f;
-        float sg = sg8 / 255.0f;
-        float sb = sb8 / 255.0f;
-        float lr = lr8 / 255.0f;
-        float lg = lg8 / 255.0f;
-        float lb = lb8 / 255.0f;
-        float shortEncodedY = linearLuma(sr, sg, sb);
-        float longEncodedY = linearLuma(lr, lg, lb);
-        float shortPeak = Math.max(sr, Math.max(sg, sb));
-        float secondLong = secondLargest3(lr, lg, lb);
-        float longLinearY = linearLuma(
-                SRGB_TO_LINEAR[lr8], SRGB_TO_LINEAR[lg8], SRGB_TO_LINEAR[lb8]);
-        float mappedShortY = linearLuma(
-                SRGB_TO_LINEAR[sr8] * gain.r,
-                SRGB_TO_LINEAR[sg8] * gain.g,
-                SRGB_TO_LINEAR[sb8] * gain.b);
-        float radiometricRatio = mappedShortY / Math.max(longLinearY, 0.00001f);
-
-        float shortSignal = smoothstep(0.06f, 0.14f, shortEncodedY);
-        float shortHeadroom = 1.0f - smoothstep(0.965f, 0.995f, shortPeak);
-        float twoChannel = smoothstep(0.78f, 0.94f, secondLong);
-        float radiometric = smoothstep(0.50f, 0.74f, longEncodedY)
-                * twoChannel
-                * smoothstep(1.30f, 1.75f, radiometricRatio);
-        float hard = smoothstep(0.975f, 0.997f, secondLong)
-                * smoothstep(1.14f, 1.42f, radiometricRatio);
-        float primary = Math.max(radiometric, hard);
-        float coherence = (float) Math.sqrt(
-                smoothstep(0.12f, 0.45f, context2)
-                * smoothstep(0.10f, 0.40f, context6));
-        float strong = hard * smoothstep(1.65f, 2.20f, radiometricRatio);
-        float registrationGate = smoothstep(0.58f, 0.78f, registrationConfidence);
-        return shortSignal * shortHeadroom * primary
-                * Math.max(coherence, strong) * registrationGate;
-    }
-
-    private static float computeShortCoreOwnership(
-            int shortPixel,
-            int longPixel,
-            AppearanceGain gain,
-            float context2,
-            float context6,
-            float registrationConfidence) {
-        int sr8 = (shortPixel >>> 16) & 0xFF;
-        int sg8 = (shortPixel >>> 8) & 0xFF;
-        int sb8 = shortPixel & 0xFF;
-        int lr8 = (longPixel >>> 16) & 0xFF;
-        int lg8 = (longPixel >>> 8) & 0xFF;
-        int lb8 = longPixel & 0xFF;
-        float sr = sr8 / 255.0f;
-        float sg = sg8 / 255.0f;
-        float sb = sb8 / 255.0f;
-        float lr = lr8 / 255.0f;
-        float lg = lg8 / 255.0f;
-        float lb = lb8 / 255.0f;
-        float shortEncodedY = linearLuma(sr, sg, sb);
-        float longEncodedY = linearLuma(lr, lg, lb);
-        float shortPeak = Math.max(sr, Math.max(sg, sb));
-        float secondLong = secondLargest3(lr, lg, lb);
-        float longLinearY = linearLuma(
-                SRGB_TO_LINEAR[lr8], SRGB_TO_LINEAR[lg8], SRGB_TO_LINEAR[lb8]);
-        float mappedShortY = linearLuma(
-                SRGB_TO_LINEAR[sr8] * gain.r,
-                SRGB_TO_LINEAR[sg8] * gain.g,
-                SRGB_TO_LINEAR[sb8] * gain.b);
-        float radiometricRatio = mappedShortY / Math.max(longLinearY, 0.00001f);
-
-        float registrationGate = smoothstep(0.58f, 0.78f, registrationConfidence);
-        float neighborhood = (float) Math.sqrt(
-                smoothstep(0.08f, 0.30f, context2)
-                * smoothstep(0.08f, 0.28f, context6));
-        float veryStrongRadiometry = smoothstep(1.65f, 2.00f, radiometricRatio);
-        float clippedCoreProof = smoothstep(0.985f, 0.996f, secondLong)
-                * smoothstep(0.68f, 0.76f, longEncodedY)
-                * smoothstep(0.08f, 0.14f, shortEncodedY)
-                * (1.0f - smoothstep(0.94f, 0.975f, shortPeak))
-                * smoothstep(1.14f, 1.28f, radiometricRatio)
-                * Math.max(neighborhood, veryStrongRadiometry)
-                * registrationGate;
-        float featheredCore = smoothstep(0.45f, 0.82f, clippedCoreProof);
-
-        boolean strictCore = registrationConfidence >= 0.78f
-                && longEncodedY >= 0.70f
-                && secondLong >= 0.992f
-                && shortEncodedY >= 0.10f
-                && shortPeak <= 0.94f
-                && radiometricRatio >= 1.18f
-                && ((context2 >= 0.10f && context6 >= 0.10f)
-                || radiometricRatio >= 1.65f);
-        return strictCore ? 1.0f : featheredCore;
-    }
-
-    private static float cardinalSupportAverage(
-            float[] evidence,
-            int width,
-            int height,
-            int readY,
-            int readRows,
-            int x,
-            int globalY,
-            int radius) {
-        int xMinus = Math.max(0, x - radius);
-        int xPlus = Math.min(width - 1, x + radius);
-        int yMinus = Math.max(0, globalY - radius) - readY;
-        int yPlus = Math.min(height - 1, globalY + radius) - readY;
-        int yCenter = globalY - readY;
-        yMinus = Math.max(0, Math.min(readRows - 1, yMinus));
-        yPlus = Math.max(0, Math.min(readRows - 1, yPlus));
-        yCenter = Math.max(0, Math.min(readRows - 1, yCenter));
-        return 0.25f * (
-                evidence[yCenter * width + xMinus]
-                + evidence[yCenter * width + xPlus]
-                + evidence[yMinus * width + x]
-                + evidence[yPlus * width + x]);
     }
 
     private static float mapLut(float value, float[] lut) {
@@ -1246,7 +989,10 @@ final class JpegFusion {
 
     static byte[] encodeJpeg(Bitmap bitmap) {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        boolean ok = bitmap.compress(Bitmap.CompressFormat.JPEG, 95, bytes);
+        // V2.15 preserves SHORT high-frequency truth through the fused raster; use
+        // maximum Android JPEG quality so the final required JPEG re-encode does
+        // not unnecessarily discard that retained detail.
+        boolean ok = bitmap.compress(Bitmap.CompressFormat.JPEG, 100, bytes);
         if (!ok) {
             throw new IllegalStateException("JPEG encoder rejected fused bitmap");
         }

@@ -1,4 +1,4 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.14 STRICT SOURCE-PROVEN HDR FUSION PACKAGE INFO
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.15 IMMUTABLE-SHORT FUSION PACKAGE INFO
 
 STATUS
 PREPARED / UPLOAD-READY only after packaged proof completes; NOT BUILD-PROVEN until GitHub Actions succeeds.
@@ -7,63 +7,61 @@ No backup branch requested or created.
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 31
-Target versionName: 1.0-v1.4.11-v2.14
+Target versionCode: 32
+Target versionName: 1.0-v1.4.11-v2.15
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: 5e3f6bbc05b0ec1aeb70cce5acc1d719f760858d
-Tree: da8cced5b4a2c0a18b618409ab1d28d69c9c00db
-GitHub Actions run: 33904657511 — SUCCESS
-Artifact ID: 9949016091
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.13
-Artifact ZIP digest: sha256:3bd84f2b9fdeb6d208f5c6a3f861bdc76654210dda4482a24700284409daa490
-V2.13 APK SHA-256: c6472e43e69c4cf2d04210ff8c3dbf9582d8a7bbef2112f5bd7abae150e87ed7
-V2.13 source-candidate TAR SHA-256: d0f9a7dee1f70d1082df9257b7f106aaf3cf82a6e941b8ae6c9e86864040c397
-V2.13 runtime manifest SHA-256: 4aa2a39ba6d9a07b66d10b9dd1515baae3b9edab48a84f5f44703850c07332b4
-V2.13 repository manifest SHA-256: 8fb2cf8531e153ec2b1c2dd09a3330ee003f1f653426adc078c6b51dcae01ec9
-V2.13 regressions SHA-256: 401f52581b75be3c7a57ab2b534bdba9622b894ef3e73d4dc1fc93564d6c3ac7
+Commit: 9a6b4dfc3885f32d5dffbbee3954392a35a2ab08
+Tree: 47774d35599123b9f6a0829fa33f9b68f0a2193d
+GitHub Actions run: 33915396541 — SUCCESS
+Artifact ID: 9952986089
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.14
+Artifact ZIP digest: sha256:29e4b6624e20ccb55d206f1fec58e5db270f2cce57e6bc5501f184bc8b4f21fa
+V2.14 APK SHA-256: 1631d69d5471601434d3a276284d51a5d2a61567d0ce54efada5413bf9d8bba7
+V2.14 source-candidate TAR SHA-256: 920ec72f00a9fcd66397beb2bc04aa1d12fbd219133bb296ad4d295cbf4b9d74
+V2.14 runtime manifest SHA-256: b309f2e65071d9f595e1c2add1cbfa90d1d267e82a92b3f542c93a2677e1b2ff
+V2.14 repository manifest SHA-256: a449370143582b4f688d12a91e966cccd25c6563213274ca99f4d0fa39d5867d
+V2.14 regressions SHA-256: c43b43a7a8607ea7216db21eb4b087b6f22095d266180368e9f95763555e0087
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.13 V1.2 15-step workflow/build implementation, inherited from the proven V2.12 sequence. Step order, action versions, pinned glslang commands, real Java compiler, full :app:assembleDebug, deterministic patch proof, candidate freeze, exactly-one-APK proof and artifact export remain unchanged.
+Exact successful V2.14 15-step workflow/build implementation. Step order, action versions, pinned glslang commands, real Java compiler, full :app:assembleDebug, deterministic patch proof, candidate freeze, exactly-one-APK proof and artifact export remain unchanged.
 
-PRIMARY V2.14 DESIGN EVIDENCE
-The supplied SHORT/LONG/FUSED office capture and 600-800% crops are the primary fix authority. FUSED showed disconnected gray/blue edge fragments, broken road/ground/shrub/sign contours and unsupported texture absent from the sources; earlier captures also showed broad peach/orange unsupported fill. Major geometry was already aligned, but the crops showed fine local residual misregistration plus fragmented ownership, so V2.14 preserves the successful global alignment and adds only a bounded local residual field.
+PRIMARY V2.15 DESIGN EVIDENCE
+The supplied original-resolution manual/AUTO SHORT/LONG/FUSED captures and 600-800% crops are the fix authority. V2.14 still produced unsupported peach/orange ground speckles after earlier gray/blue broken-border failures. The root contract failure was that saved mode 5 still permitted fractional LONG/SHORT RGB composition and SHORT itself was warped into LONG coordinates.
 
-HARD HDR CONTRACT
+STRICT V2.15 FUSION CONTRACT
+- SHORT is immutable spatial/chromatic/high-frequency truth.
+- SHORT is never globally translated or locally flow-warped for fusion.
+- LONG is globally and locally aligned into SHORT coordinates.
+- No saved or live `mix(longScene, shortScene, ...)` RGB composition is permitted.
+- LONG contributes only a 1/32-resolution, neighborhood-smoothed single luminance scalar.
+- The LONG scalar is achromatic: the same multiplier is applied to complete SHORT RGB.
+- If LONG alignment/radiometry is uncertain, LONG influence becomes exactly zero and FUSED fails closed to exposure-mapped SHORT.
+- No LONG hue, texture, edge, border, foliage/ground microstructure, peach/orange speckle or gray contour may enter FUSED.
+- Saved post-fusion presentation remains pointwise; it cannot sample neighbors or create new topology.
+- Honest clipping/noise from SHORT is preferable to unsupported reconstruction.
+
+HARD EXPOSURE CONTRACT — BYTE-PROTECTED FROM SUCCESSFUL V2.14
 - SHORT effective exposure may never exceed LONG in AUTO or MANUAL.
 - MANUAL Long ISO remains LONG-only and may never re-solve SHORT / left SPLIT.
-- Requested/frozen pair ordering is enforced by raising LONG only; SHORT is never brightened to repair ordering.
-- Actual Camera2 exposure/ISO metadata is final authority. Missing/invalid metadata or LONG/SHORT < 1.0 rejects FUSED instead of silently becoming 1x.
-- AUTO keeps its scene-driven 4x..64x bracket target and existing flicker semantics.
+- Actual Camera2 result metadata is final authority; invalid/inverted pairs are rejected before fusion.
 
-STRICT FUSION CONTRACT
-- Successful global registration/alignment bytes remain unchanged as the coarse anchor.
-- A bounded <=4-pixel source-domain local residual field is estimated bidirectionally with cycle consistency and spatial coherence; unsupported cells fail closed to global-only alignment.
-- Full-resolution high-frequency texture/chroma comes from exactly one registered source whenever SHORT/LONG disagree: LONG or locally registered SHORT.
-- Coarse 1/8 support may identify a broad recovery region but may not own or fractionally blend fine edges.
-- Fractional transition is allowed only where full-resolution registered gradients/radiometry already agree, so it cannot create a third displaced edge.
-- LONG can surrender detail before literal JPEG white when real SHORT local detail is materially stronger and source radiometry supports effective information loss.
-- V2.13 fractional boundary ownership and synthetic radiance-floor extrapolation are removed; no peach/orange/gray synthetic fill.
-- Saved mode 6 is pointwise only; no post-fusion spatial clarity may create/reinforce false contours.
-- Collapsed physical bracket below 2x still fails closed to SHORT.
-
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 5
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 3
 - app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 
-PROTECTED RUNTIME — EXACTLY 7
+PROTECTED RUNTIME — EXACTLY 9
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/fullscreen.vert
 - app/src/main/assets/shaders/oes_to_rgb.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
-DNG/orientation ownership and live preview routing remain protected. JpegFusion's successful global-registration and appearance-calibration slices are separately hash-protected by regression.
 
 INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - .github/workflows/build.yml
@@ -71,19 +69,19 @@ INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-YES, PAYLOAD ONLY. Authority advances to successful V2.13 V1.2; version/hash/allowlist/regression/artifact payloads advance to V2.14. The 15-step compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, patch replay, freeze and one-APK proof are unchanged.
+YES, PAYLOAD/REGRESSION CONTRACT ONLY. Authority/version/hash/allowlist/artifact payloads advance to V2.15. The successful V2.14 15-step compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, patch replay, freeze and one-APK proof remain unchanged.
 
-V2.14 RUNTIME DIGEST
-b309f2e65071d9f595e1c2add1cbfa90d1d267e82a92b3f542c93a2677e1b2ff
+V2.15 RUNTIME DIGEST
+3ff1b186ef80e954314a034b263f4bccae26a8c4772f6625c2c9de26f1c5c6cb
 Runtime universe remains exactly 12 files.
 
 COMPILER STATUS BEFORE ACTIONS
 GLSL reserved-identifier scan: PASS.
 Embedded workflow Python syntax: PASS.
-V2.14 semantic/ownership/regression verifier: PASS.
-REAL pinned glslang compile: NOT RUN locally (compiler unavailable here).
+V2.15 semantic/ownership/regression verifier: PASS.
+REAL pinned glslang compile: NOT RUN locally.
 REAL project Java compiler: NOT RUN locally.
 FULL :app:assembleDebug: NOT RUN locally.
 
 FINAL ACTIONS AUTHORITY
-Until V2.14 succeeds, final authority remains V2.13 V1.2 commit 5e3f6bbc05b0ec1aeb70cce5acc1d719f760858d / run 33904657511 / artifact 9949016091.
+Until V2.15 succeeds, final authority remains V2.14 commit 9a6b4dfc3885f32d5dffbbee3954392a35a2ab08 / run 33915396541 / artifact 9952986089.
