@@ -56,6 +56,53 @@ final class JpegFusion {
         }
     }
 
+    // V2.14 strict still-registration residual field. The proven V2.13 global
+    // translation remains the coarse anchor. This field carries only a small,
+    // spatially-smooth residual displacement and an independently validated
+    // confidence; it is never allowed to become unconstrained optical flow.
+    static final class LocalRegistrationField {
+        final int gridWidth;
+        final int gridHeight;
+        final byte[] rgba;
+        final float meanConfidence;
+        final float supportedFraction;
+        final float maxResidualPixels;
+        final float observedResidualPixels;
+
+        LocalRegistrationField(
+                int gridWidth,
+                int gridHeight,
+                byte[] rgba,
+                float meanConfidence,
+                float supportedFraction,
+                float maxResidualPixels,
+                float observedResidualPixels) {
+            this.gridWidth = gridWidth;
+            this.gridHeight = gridHeight;
+            this.rgba = rgba;
+            this.meanConfidence = meanConfidence;
+            this.supportedFraction = supportedFraction;
+            this.maxResidualPixels = maxResidualPixels;
+            this.observedResidualPixels = observedResidualPixels;
+        }
+    }
+
+    private static final class LocalMatch {
+        final float dx;
+        final float dy;
+        final float score;
+        final float margin;
+        final float confidence;
+
+        LocalMatch(float dx, float dy, float score, float margin, float confidence) {
+            this.dx = dx;
+            this.dy = dy;
+            this.score = score;
+            this.margin = margin;
+            this.confidence = confidence;
+        }
+    }
+
     private static final class OneWayRegistration {
         final float sampleDx;
         final float sampleDy;
@@ -175,6 +222,368 @@ final class JpegFusion {
         matrix.postTranslate(-registration.sampleDx, -registration.sampleDy);
         canvas.drawBitmap(shortBitmap, matrix, paint);
         return aligned;
+    }
+
+    static LocalRegistrationField estimateLocalRegistration(
+            Bitmap alignedShort, Bitmap longBitmap) {
+        final float maxResidualPixels = 4.0f;
+        if (alignedShort == null || longBitmap == null
+                || alignedShort.getWidth() != longBitmap.getWidth()
+                || alignedShort.getHeight() != longBitmap.getHeight()) {
+            return neutralLocalRegistration(maxResidualPixels);
+        }
+
+        final int width = longBitmap.getWidth();
+        final int height = longBitmap.getHeight();
+        // 4096px stills analyze at 1024px max dimension. A 32px analysis cell is
+        // therefore ~128 source pixels: coarse enough to reject texture noise, but
+        // fine enough to model the sub-pixel residuals visible in the V2.13 crops.
+        final int maxDimension = 1024;
+        float scale = Math.min(1.0f, maxDimension / (float) Math.max(width, height));
+        int smallWidth = Math.max(96, Math.round(width * scale));
+        int smallHeight = Math.max(72, Math.round(height * scale));
+        Bitmap shortSmall = Bitmap.createScaledBitmap(
+                alignedShort, smallWidth, smallHeight, true);
+        Bitmap longSmall = Bitmap.createScaledBitmap(
+                longBitmap, smallWidth, smallHeight, true);
+        try {
+            int[] shortPixels = new int[smallWidth * smallHeight];
+            int[] longPixels = new int[smallWidth * smallHeight];
+            shortSmall.getPixels(shortPixels, 0, smallWidth, 0, 0, smallWidth, smallHeight);
+            longSmall.getPixels(longPixels, 0, smallWidth, 0, 0, smallWidth, smallHeight);
+            float[] shortLogY = logLuma(shortPixels);
+            float[] longLogY = logLuma(longPixels);
+            float[] shortGx = new float[shortPixels.length];
+            float[] shortGy = new float[shortPixels.length];
+            float[] longGx = new float[longPixels.length];
+            float[] longGy = new float[longPixels.length];
+            computeGradients(shortLogY, smallWidth, smallHeight, shortGx, shortGy);
+            computeGradients(longLogY, smallWidth, smallHeight, longGx, longGy);
+
+            final int cell = 32;
+            final int searchRadius = 2;
+            final int windowRadius = 12;
+            final int border = windowRadius + searchRadius + 3;
+            int gridWidth = Math.max(2, (smallWidth + cell - 1) / cell);
+            int gridHeight = Math.max(2, (smallHeight + cell - 1) / cell);
+            int count = gridWidth * gridHeight;
+            float[] rawDx = new float[count];
+            float[] rawDy = new float[count];
+            float[] rawConfidence = new float[count];
+            float invScale = 1.0f / scale;
+
+            for (int gy = 0; gy < gridHeight; gy++) {
+                int cy = Math.round((gy + 0.5f) * smallHeight / gridHeight);
+                cy = Math.max(border, Math.min(smallHeight - border - 1, cy));
+                for (int gx = 0; gx < gridWidth; gx++) {
+                    int cx = Math.round((gx + 0.5f) * smallWidth / gridWidth);
+                    cx = Math.max(border, Math.min(smallWidth - border - 1, cx));
+                    int i = gy * gridWidth + gx;
+
+                    LocalMatch forward = localGradientMatch(
+                            longGx, longGy, shortGx, shortGy,
+                            smallWidth, smallHeight, cx, cy,
+                            searchRadius, windowRadius);
+                    int backCx = Math.max(border, Math.min(
+                            smallWidth - border - 1, Math.round(cx + forward.dx)));
+                    int backCy = Math.max(border, Math.min(
+                            smallHeight - border - 1, Math.round(cy + forward.dy)));
+                    LocalMatch backward = localGradientMatch(
+                            shortGx, shortGy, longGx, longGy,
+                            smallWidth, smallHeight, backCx, backCy,
+                            searchRadius, windowRadius);
+                    float cycleError = (float) Math.hypot(
+                            forward.dx + backward.dx,
+                            forward.dy + backward.dy);
+                    float cycleConfidence = 1.0f - smoothstep(0.20f, 0.90f, cycleError);
+                    float bidirectional = (float) Math.sqrt(Math.max(
+                            0.0f, forward.confidence * backward.confidence));
+                    float confidence = bidirectional * cycleConfidence;
+                    float dx = clamp(forward.dx * invScale,
+                            -maxResidualPixels, maxResidualPixels);
+                    float dy = clamp(forward.dy * invScale,
+                            -maxResidualPixels, maxResidualPixels);
+                    if (confidence < 0.28f) {
+                        dx = 0.0f;
+                        dy = 0.0f;
+                        confidence = 0.0f;
+                    }
+                    rawDx[i] = dx;
+                    rawDy[i] = dy;
+                    rawConfidence[i] = confidence;
+                }
+            }
+
+            // First pass: smooth only neighbors that agree with a supported center.
+            // Unsupported/clipped cells may be filled from a 5x5 coherent camera-
+            // motion neighborhood, but only when that neighborhood has low residual
+            // dispersion. This lets a clipped window inherit nearby camera motion
+            // without propagating independently moving foliage or people.
+            float[] fieldDx = new float[count];
+            float[] fieldDy = new float[count];
+            float[] fieldConfidence = new float[count];
+            for (int gy = 0; gy < gridHeight; gy++) {
+                for (int gx = 0; gx < gridWidth; gx++) {
+                    int i = gy * gridWidth + gx;
+                    float centerConfidence = rawConfidence[i];
+                    if (centerConfidence > 0.0f) {
+                        float dx = rawDx[i];
+                        float dy = rawDy[i];
+                        float weightSum = centerConfidence;
+                        float dxSum = dx * centerConfidence;
+                        float dySum = dy * centerConfidence;
+                        int coherent = 1;
+                        for (int oy = -1; oy <= 1; oy++) {
+                            for (int ox = -1; ox <= 1; ox++) {
+                                if (ox == 0 && oy == 0) continue;
+                                int nx = gx + ox;
+                                int ny = gy + oy;
+                                if (nx < 0 || nx >= gridWidth || ny < 0 || ny >= gridHeight) continue;
+                                int ni = ny * gridWidth + nx;
+                                float nc = rawConfidence[ni];
+                                if (nc <= 0.0f) continue;
+                                float disagreement = (float) Math.hypot(
+                                        rawDx[ni] - dx, rawDy[ni] - dy);
+                                if (disagreement > 1.50f) continue;
+                                dxSum += rawDx[ni] * nc;
+                                dySum += rawDy[ni] * nc;
+                                weightSum += nc;
+                                coherent++;
+                            }
+                        }
+                        if (coherent >= 3 && weightSum > 0.0f) {
+                            fieldDx[i] = dxSum / weightSum;
+                            fieldDy[i] = dySum / weightSum;
+                            fieldConfidence[i] = centerConfidence
+                                    * smoothstep(2.0f, 5.0f, coherent);
+                        }
+                        continue;
+                    }
+
+                    float weightSum = 0.0f;
+                    float dxSum = 0.0f;
+                    float dySum = 0.0f;
+                    int neighbors = 0;
+                    for (int oy = -2; oy <= 2; oy++) {
+                        for (int ox = -2; ox <= 2; ox++) {
+                            if (ox == 0 && oy == 0) continue;
+                            int nx = gx + ox;
+                            int ny = gy + oy;
+                            if (nx < 0 || nx >= gridWidth || ny < 0 || ny >= gridHeight) continue;
+                            int ni = ny * gridWidth + nx;
+                            float nc = rawConfidence[ni];
+                            if (nc <= 0.0f) continue;
+                            float distanceWeight = 1.0f / (1.0f + ox * ox + oy * oy);
+                            float w = nc * distanceWeight;
+                            dxSum += rawDx[ni] * w;
+                            dySum += rawDy[ni] * w;
+                            weightSum += w;
+                            neighbors++;
+                        }
+                    }
+                    if (neighbors < 5 || weightSum <= 0.0f) continue;
+                    float meanDx = dxSum / weightSum;
+                    float meanDy = dySum / weightSum;
+                    float varianceSum = 0.0f;
+                    float confidenceSum = 0.0f;
+                    int coherent = 0;
+                    for (int oy = -2; oy <= 2; oy++) {
+                        for (int ox = -2; ox <= 2; ox++) {
+                            if (ox == 0 && oy == 0) continue;
+                            int nx = gx + ox;
+                            int ny = gy + oy;
+                            if (nx < 0 || nx >= gridWidth || ny < 0 || ny >= gridHeight) continue;
+                            int ni = ny * gridWidth + nx;
+                            float nc = rawConfidence[ni];
+                            if (nc <= 0.0f) continue;
+                            float disagreement = (float) Math.hypot(
+                                    rawDx[ni] - meanDx, rawDy[ni] - meanDy);
+                            if (disagreement > 1.25f) continue;
+                            float distanceWeight = 1.0f / (1.0f + ox * ox + oy * oy);
+                            float w = nc * distanceWeight;
+                            varianceSum += disagreement * disagreement * w;
+                            confidenceSum += nc;
+                            coherent++;
+                        }
+                    }
+                    float rms = (float) Math.sqrt(varianceSum / Math.max(weightSum, 0.0001f));
+                    if (coherent >= 5 && rms <= 0.75f) {
+                        fieldDx[i] = meanDx;
+                        fieldDy[i] = meanDy;
+                        float neighborhoodConfidence = confidenceSum / coherent;
+                        fieldConfidence[i] = Math.min(0.65f, neighborhoodConfidence)
+                                * smoothstep(4.0f, 9.0f, coherent)
+                                * (1.0f - smoothstep(0.45f, 0.75f, rms));
+                    }
+                }
+            }
+
+            // Second pass: bounded 3x3 regularization keeps the residual field
+            // continuous. A disagreeing cell never borrows from the opposite side
+            // of a motion boundary; unsupported cells remain global-only.
+            byte[] rgba = new byte[count * 4];
+            float confidenceSum = 0.0f;
+            int supported = 0;
+            float observedMax = 0.0f;
+            for (int gy = 0; gy < gridHeight; gy++) {
+                for (int gx = 0; gx < gridWidth; gx++) {
+                    int i = gy * gridWidth + gx;
+                    float centerConfidence = fieldConfidence[i];
+                    float dx = fieldDx[i];
+                    float dy = fieldDy[i];
+                    if (centerConfidence > 0.0f) {
+                        float weightSum = centerConfidence;
+                        float dxSum = dx * centerConfidence;
+                        float dySum = dy * centerConfidence;
+                        for (int oy = -1; oy <= 1; oy++) {
+                            for (int ox = -1; ox <= 1; ox++) {
+                                if (ox == 0 && oy == 0) continue;
+                                int nx = gx + ox;
+                                int ny = gy + oy;
+                                if (nx < 0 || nx >= gridWidth || ny < 0 || ny >= gridHeight) continue;
+                                int ni = ny * gridWidth + nx;
+                                float nc = fieldConfidence[ni];
+                                if (nc <= 0.0f) continue;
+                                float disagreement = (float) Math.hypot(
+                                        fieldDx[ni] - dx, fieldDy[ni] - dy);
+                                if (disagreement > 1.0f) continue;
+                                dxSum += fieldDx[ni] * nc;
+                                dySum += fieldDy[ni] * nc;
+                                weightSum += nc;
+                            }
+                        }
+                        dx = dxSum / Math.max(weightSum, 0.0001f);
+                        dy = dySum / Math.max(weightSum, 0.0001f);
+                    }
+                    dx = clamp(dx, -maxResidualPixels, maxResidualPixels);
+                    dy = clamp(dy, -maxResidualPixels, maxResidualPixels);
+                    int o = i * 4;
+                    rgba[o] = (byte) Math.round(
+                            255.0f * (0.5f + 0.5f * dx / maxResidualPixels));
+                    rgba[o + 1] = (byte) Math.round(
+                            255.0f * (0.5f + 0.5f * dy / maxResidualPixels));
+                    rgba[o + 2] = (byte) Math.round(
+                            255.0f * clamp(centerConfidence, 0.0f, 1.0f));
+                    rgba[o + 3] = (byte) 255;
+                    confidenceSum += centerConfidence;
+                    if (centerConfidence >= 0.30f) supported++;
+                    observedMax = Math.max(observedMax, (float) Math.hypot(dx, dy));
+                }
+            }
+            return new LocalRegistrationField(
+                    gridWidth,
+                    gridHeight,
+                    rgba,
+                    confidenceSum / Math.max(1, count),
+                    supported / (float) Math.max(1, count),
+                    maxResidualPixels,
+                    Math.min(maxResidualPixels, observedMax));
+        } finally {
+            if (shortSmall != alignedShort) recycle(shortSmall);
+            if (longSmall != longBitmap) recycle(longSmall);
+        }
+    }
+
+    private static LocalRegistrationField neutralLocalRegistration(float maxResidualPixels) {
+        return new LocalRegistrationField(
+                1, 1,
+                new byte[] {(byte) 128, (byte) 128, 0, (byte) 255},
+                0.0f, 0.0f, maxResidualPixels, 0.0f);
+    }
+
+    private static LocalMatch localGradientMatch(
+            float[] referenceGx,
+            float[] referenceGy,
+            float[] movingGx,
+            float[] movingGy,
+            int width,
+            int height,
+            int centerX,
+            int centerY,
+            int searchRadius,
+            int windowRadius) {
+        int side = 2 * searchRadius + 1;
+        float[] scores = new float[side * side];
+        Arrays.fill(scores, -1.0f);
+        int bestX = 0;
+        int bestY = 0;
+        float bestScore = -1.0f;
+        for (int dy = -searchRadius; dy <= searchRadius; dy++) {
+            for (int dx = -searchRadius; dx <= searchRadius; dx++) {
+                float score = localGradientScore(
+                        referenceGx, referenceGy, movingGx, movingGy,
+                        width, height, centerX, centerY, dx, dy, windowRadius);
+                scores[(dy + searchRadius) * side + (dx + searchRadius)] = score;
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestX = dx;
+                    bestY = dy;
+                }
+            }
+        }
+
+        float secondBest = -1.0f;
+        for (int dy = -searchRadius; dy <= searchRadius; dy++) {
+            for (int dx = -searchRadius; dx <= searchRadius; dx++) {
+                if (Math.abs(dx - bestX) <= 1 && Math.abs(dy - bestY) <= 1) continue;
+                secondBest = Math.max(
+                        secondBest, scores[(dy + searchRadius) * side + (dx + searchRadius)]);
+            }
+        }
+        float subX = bestX + parabolicOffset(
+                scores, side, searchRadius, bestX, bestY, true);
+        float subY = bestY + parabolicOffset(
+                scores, side, searchRadius, bestX, bestY, false);
+        float margin = Math.max(0.0f, bestScore - secondBest);
+        float quality = smoothstep(0.24f, 0.60f, bestScore);
+        float uniqueness = smoothstep(0.003f, 0.030f, margin);
+        float boundary = (Math.abs(bestX) < searchRadius && Math.abs(bestY) < searchRadius)
+                ? 1.0f : 0.0f;
+        return new LocalMatch(
+                subX, subY, bestScore, margin, quality * uniqueness * boundary);
+    }
+
+    private static float localGradientScore(
+            float[] referenceGx,
+            float[] referenceGy,
+            float[] movingGx,
+            float[] movingGy,
+            int width,
+            int height,
+            int centerX,
+            int centerY,
+            int dx,
+            int dy,
+            int windowRadius) {
+        double dot = 0.0;
+        double referenceEnergy = 0.0;
+        double movingEnergy = 0.0;
+        int useful = 0;
+        for (int oy = -windowRadius; oy <= windowRadius; oy += 2) {
+            int ry = centerY + oy;
+            int my = ry + dy;
+            if (ry <= 0 || ry >= height - 1 || my <= 0 || my >= height - 1) continue;
+            for (int ox = -windowRadius; ox <= windowRadius; ox += 2) {
+                int rx = centerX + ox;
+                int mx = rx + dx;
+                if (rx <= 0 || rx >= width - 1 || mx <= 0 || mx >= width - 1) continue;
+                int ri = ry * width + rx;
+                int mi = my * width + mx;
+                float rgx = referenceGx[ri];
+                float rgy = referenceGy[ri];
+                float mgx = movingGx[mi];
+                float mgy = movingGy[mi];
+                float re = rgx * rgx + rgy * rgy;
+                float me = mgx * mgx + mgy * mgy;
+                if (re < 0.000004f || me < 0.000004f) continue;
+                dot += rgx * mgx + rgy * mgy;
+                referenceEnergy += re;
+                movingEnergy += me;
+                useful++;
+            }
+        }
+        if (useful < 24 || referenceEnergy <= 0.0 || movingEnergy <= 0.0) return -1.0f;
+        return (float) (dot / Math.sqrt(referenceEnergy * movingEnergy));
     }
 
     static AppearanceGain estimateAppearanceGain(

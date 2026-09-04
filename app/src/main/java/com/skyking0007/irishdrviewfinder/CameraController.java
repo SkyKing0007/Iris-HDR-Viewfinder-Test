@@ -937,6 +937,17 @@ final class CameraController {
         captureLongExposureNs = activeLongExposureNs();
         captureShortIso = activeShortIso();
         captureLongIso = activeLongIso();
+        // Freeze-time authority gate. SHORT is never modified here. If any stale
+        // state/solver race would invert the pair, raise LONG only; if hardware
+        // bounds still cannot satisfy the invariant, block the capture entirely.
+        if (!enforceFrozenExposureOrderingLocked()) {
+            capturing = false;
+            listener.onStatus("Capture blocked: SHORT exposure would exceed LONG");
+            RuntimeLogger.event(
+                    "HDR_EXPOSURE_ORDER_FAIL",
+                    "FROZEN pair cannot satisfy SHORT<=LONG within sensor bounds");
+            return;
+        }
         capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;
         captureDisplayBrightnessEv = displayBrightnessEv;
         captureDisplayGamma = displayGamma;
@@ -1523,6 +1534,7 @@ final class CameraController {
                     autoShortExposureNs = safeShort.exposureNs;
                     autoShortIso = safeShort.iso;
                     autoFlickerSafetySatisfied = true;
+                    enforceAutoExposureOrderingLocked("ANCHOR_FLICKER");
                     return;
                 }
             }
@@ -1558,6 +1570,7 @@ final class CameraController {
                 autoLongIso = boundedLong.iso;
             }
         }
+        enforceAutoExposureOrderingLocked("ANCHOR_FALLBACK");
     }
 
     private void processHdrSceneStatsLocked(HdrGlView.SceneStats stats) {
@@ -1685,6 +1698,7 @@ final class CameraController {
                     autoLongExposureNs = longSetting.exposureNs;
                     autoLongIso = longSetting.iso;
                     autoFlickerSafetySatisfied = true;
+                    enforceAutoExposureOrderingLocked("SCENE_FLICKER");
                     return;
                 }
             }
@@ -1708,6 +1722,7 @@ final class CameraController {
             autoLongExposureNs = longSetting.exposureNs;
             autoLongIso = longSetting.iso;
         }
+        enforceAutoExposureOrderingLocked("SCENE_FALLBACK");
     }
 
     private void updateAdaptivePresentationLocked(
@@ -1991,6 +2006,10 @@ final class CameraController {
             manualEffectiveLongIso = solveIsoForProduct(targetLongProduct, manualEffectiveLongExposureNs);
         }
 
+        // V2.14 hard ordering invariant: independent flicker quantization may
+        // never leave SHORT brighter than LONG. Correct LONG only; SHORT and the
+        // left SPLIT source remain immutable.
+        enforceManualExposureOrderingLocked();
         double longProduct = Math.max(
                 1.0, (double) manualEffectiveLongExposureNs * manualEffectiveLongIso);
         double shortProduct = Math.max(
@@ -2002,6 +2021,68 @@ final class CameraController {
                 || oldShortIso != manualEffectiveShortIso
                 || oldLongIso != manualEffectiveLongIso
                 || oldSafety != manualFlickerSafetyApplied;
+    }
+
+    private void enforceManualExposureOrderingLocked() {
+        double shortProduct = Math.max(
+                1.0, (double) manualEffectiveShortExposureNs * manualEffectiveShortIso);
+        double longProduct = Math.max(
+                1.0, (double) manualEffectiveLongExposureNs * manualEffectiveLongIso);
+        if (longProduct >= shortProduct) return;
+
+        long oldLongExposure = manualEffectiveLongExposureNs;
+        int oldLongIso = manualEffectiveLongIso;
+        manualEffectiveLongExposureNs = Math.max(
+                manualEffectiveLongExposureNs, manualEffectiveShortExposureNs);
+        int requiredIso = (int) Math.ceil(
+                shortProduct / Math.max(1.0, manualEffectiveLongExposureNs));
+        manualEffectiveLongIso = clampIso(Math.max(manualEffectiveLongIso, requiredIso));
+        RuntimeLogger.event(
+                "HDR_EXPOSURE_ORDER_GUARD",
+                "MANUAL LONG raised only " + exposureText(oldLongExposure) + " ISO" + oldLongIso
+                        + " -> " + exposureText(manualEffectiveLongExposureNs) + " ISO"
+                        + manualEffectiveLongIso + " to keep SHORT<=LONG");
+    }
+
+    private void enforceAutoExposureOrderingLocked(String reason) {
+        double shortProduct = Math.max(1.0, (double) autoShortExposureNs * autoShortIso);
+        double longProduct = Math.max(1.0, (double) autoLongExposureNs * autoLongIso);
+        if (longProduct >= shortProduct) return;
+
+        long oldLongExposure = autoLongExposureNs;
+        int oldLongIso = autoLongIso;
+        autoLongExposureNs = Math.max(autoLongExposureNs, autoShortExposureNs);
+        int requiredIso = (int) Math.ceil(
+                shortProduct / Math.max(1.0, autoLongExposureNs));
+        autoLongIso = clampIso(Math.max(autoLongIso, requiredIso));
+        RuntimeLogger.event(
+                "HDR_EXPOSURE_ORDER_GUARD",
+                "AUTO " + reason + " LONG raised only " + exposureText(oldLongExposure) + " ISO"
+                        + oldLongIso + " -> " + exposureText(autoLongExposureNs) + " ISO"
+                        + autoLongIso + " to keep SHORT<=LONG");
+    }
+
+    private boolean enforceFrozenExposureOrderingLocked() {
+        double shortProduct = Math.max(
+                1.0, (double) captureShortExposureNs * captureShortIso);
+        double longProduct = Math.max(
+                1.0, (double) captureLongExposureNs * captureLongIso);
+        if (longProduct >= shortProduct) return true;
+
+        long oldLongExposure = captureLongExposureNs;
+        int oldLongIso = captureLongIso;
+        captureLongExposureNs = Math.max(captureLongExposureNs, captureShortExposureNs);
+        int requiredIso = (int) Math.ceil(
+                shortProduct / Math.max(1.0, captureLongExposureNs));
+        captureLongIso = clampIso(Math.max(captureLongIso, requiredIso));
+        double correctedLongProduct = Math.max(
+                1.0, (double) captureLongExposureNs * captureLongIso);
+        RuntimeLogger.event(
+                "HDR_EXPOSURE_ORDER_GUARD",
+                "FROZEN LONG raised only " + exposureText(oldLongExposure) + " ISO" + oldLongIso
+                        + " -> " + exposureText(captureLongExposureNs) + " ISO" + captureLongIso
+                        + " to keep SHORT<=LONG");
+        return correctedLongProduct >= shortProduct;
     }
 
     private int effectiveFlickerLocked() {

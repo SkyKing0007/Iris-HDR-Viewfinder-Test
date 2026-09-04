@@ -228,6 +228,17 @@ final class CaptureSetSaver {
         byte[] shortJpeg = shortData.jpegBytes;
         byte[] longJpeg = longData.jpegBytes;
         double ratio = exposureRatio(shortData.result, longData.result);
+        // V2.14 actual-result authority: never hide an inverted or unprovable pair
+        // by clamping it to 1x. FUSED is forbidden unless capture metadata proves
+        // that LONG effective exposure is at least SHORT effective exposure.
+        if (Double.isNaN(ratio) || Double.isInfinite(ratio) || ratio < 1.0) {
+            failLocked(new IllegalStateException(String.format(
+                    java.util.Locale.US,
+                    "HDR exposure ordering violated/unprovable: actual LONG/SHORT=%.4fx; FUSED rejected",
+                    ratio)));
+            return;
+        }
+        ratio = Math.min(65_536.0, ratio);
         if (stillFusionView == null) {
             failLocked(new IllegalStateException(
                     "V2.9 GPU still fusion view unavailable; CPU HDR substitution is disabled"));
@@ -332,13 +343,15 @@ final class CaptureSetSaver {
         Integer si = shortResult.get(CaptureResult.SENSOR_SENSITIVITY);
         Long le = longResult.get(CaptureResult.SENSOR_EXPOSURE_TIME);
         Integer li = longResult.get(CaptureResult.SENSOR_SENSITIVITY);
+        if (se == null || si == null || le == null || li == null
+                || se <= 0L || si <= 0 || le <= 0L || li <= 0) {
+            return Double.NaN;
+        }
         Integer sb = shortResult.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST);
         Integer lb = longResult.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST);
-        double shortProduct = Math.max(1.0,
-                (se == null ? 1.0 : se) * (si == null ? 1.0 : si) * (sb == null ? 100.0 : sb) / 100.0);
-        double longProduct = Math.max(1.0,
-                (le == null ? 1.0 : le) * (li == null ? 1.0 : li) * (lb == null ? 100.0 : lb) / 100.0);
-        return Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));
+        double shortProduct = (double) se * si * (sb == null ? 100.0 : sb) / 100.0;
+        double longProduct = (double) le * li * (lb == null ? 100.0 : lb) / 100.0;
+        return longProduct / Math.max(shortProduct, 1.0);
     }
 
     private static int dngOrientationForDegrees(int degrees) {

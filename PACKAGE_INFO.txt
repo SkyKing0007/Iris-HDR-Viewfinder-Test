@@ -1,39 +1,69 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.13 V1.2 POST-BUILD HASH CORRECTION PACKAGE INFO
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.14 STRICT SOURCE-PROVEN HDR FUSION PACKAGE INFO
 
 STATUS
 PREPARED / UPLOAD-READY only after packaged proof completes; NOT BUILD-PROVEN until GitHub Actions succeeds.
 No backup branch requested or created.
-Failed V2.13 commit: a6cd0f7b0847e3121ef30c1a35422154ef92f0c7
-Failed Actions run: 33900980849 — javac rejected missing SceneStats.shortP90Linear.
-V1.2 preserves the exact compiler-tested V2.13 V1.1 runtime bytes and corrects only the stale post-build runtime digest plus a permanent regression for that exact failure.
 
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 30
-Target versionName: 1.0-v1.4.11-v2.13
+Target versionCode: 31
+Target versionName: 1.0-v1.4.11-v2.14
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: 34ac4dd0b47be62833f25990c4284c3206741f52
-Tree: dce5cc2dd1d46a4fe360267e99b93874f10cf5b4
-GitHub Actions run: 33892034499 — SUCCESS
-Artifact ID: 9944278389
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.12
-Artifact ZIP digest: sha256:864883a165dafef5e0503dda8f98af1160001cbe8aa88f90bb4f43dae72e5651
-V2.12 APK SHA-256: e4f861ba0e01aadf93fb58254c0434525d270bd9a7b27e0a3aece114f2010a39
-V2.12 source-candidate TAR SHA-256: 8859a7914ab54fcb91e0541c2fb7f0e7d39fab94b0efe6ab4cd710005e2f801b
-V2.12 runtime manifest SHA-256: 66ca7d03ada64f95fbb367ec5cd0f65747a2de7cd33050ff199063bb0f7c65ef
-V2.12 repository manifest SHA-256: 0a0fee6787378cf318540c18e741d70dd0e50038482418a3766859166593592d
-V2.12 regressions SHA-256: d3486ea56136064b26cb7a26f0667fa5ff1173e51364efb177b205a4a7d2afd1
+Commit: 5e3f6bbc05b0ec1aeb70cce5acc1d719f760858d
+Tree: da8cced5b4a2c0a18b618409ab1d28d69c9c00db
+GitHub Actions run: 33904657511 — SUCCESS
+Artifact ID: 9949016091
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.13
+Artifact ZIP digest: sha256:3bd84f2b9fdeb6d208f5c6a3f861bdc76654210dda4482a24700284409daa490
+V2.13 APK SHA-256: c6472e43e69c4cf2d04210ff8c3dbf9582d8a7bbef2112f5bd7abae150e87ed7
+V2.13 source-candidate TAR SHA-256: d0f9a7dee1f70d1082df9257b7f106aaf3cf82a6e941b8ae6c9e86864040c397
+V2.13 runtime manifest SHA-256: 4aa2a39ba6d9a07b66d10b9dd1515baae3b9edab48a84f5f44703850c07332b4
+V2.13 repository manifest SHA-256: 8fb2cf8531e153ec2b1c2dd09a3330ee003f1f653426adc078c6b51dcae01ec9
+V2.13 regressions SHA-256: 401f52581b75be3c7a57ab2b534bdba9622b894ef3e73d4dc1fc93564d6c3ac7
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.12 15-step workflow/build implementation. Step order, action versions, pinned glslang commands, real Java compiler, full :app:assembleDebug, deterministic patch proof, candidate freeze, one-APK proof and artifact export remain unchanged.
+Exact successful V2.13 V1.2 15-step workflow/build implementation, inherited from the proven V2.12 sequence. Step order, action versions, pinned glslang commands, real Java compiler, full :app:assembleDebug, deterministic patch proof, candidate freeze, exactly-one-APK proof and artifact export remain unchanged.
 
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 3
+PRIMARY V2.14 DESIGN EVIDENCE
+The supplied SHORT/LONG/FUSED office capture and 600-800% crops are the primary fix authority. FUSED showed disconnected gray/blue edge fragments, broken road/ground/shrub/sign contours and unsupported texture absent from the sources; earlier captures also showed broad peach/orange unsupported fill. Major geometry was already aligned, but the crops showed fine local residual misregistration plus fragmented ownership, so V2.14 preserves the successful global alignment and adds only a bounded local residual field.
+
+HARD HDR CONTRACT
+- SHORT effective exposure may never exceed LONG in AUTO or MANUAL.
+- MANUAL Long ISO remains LONG-only and may never re-solve SHORT / left SPLIT.
+- Requested/frozen pair ordering is enforced by raising LONG only; SHORT is never brightened to repair ordering.
+- Actual Camera2 exposure/ISO metadata is final authority. Missing/invalid metadata or LONG/SHORT < 1.0 rejects FUSED instead of silently becoming 1x.
+- AUTO keeps its scene-driven 4x..64x bracket target and existing flicker semantics.
+
+STRICT FUSION CONTRACT
+- Successful global registration/alignment bytes remain unchanged as the coarse anchor.
+- A bounded <=4-pixel source-domain local residual field is estimated bidirectionally with cycle consistency and spatial coherence; unsupported cells fail closed to global-only alignment.
+- Full-resolution high-frequency texture/chroma comes from exactly one registered source whenever SHORT/LONG disagree: LONG or locally registered SHORT.
+- Coarse 1/8 support may identify a broad recovery region but may not own or fractionally blend fine edges.
+- Fractional transition is allowed only where full-resolution registered gradients/radiometry already agree, so it cannot create a third displaced edge.
+- LONG can surrender detail before literal JPEG white when real SHORT local detail is materially stronger and source radiometry supports effective information loss.
+- V2.13 fractional boundary ownership and synthetic radiance-floor extrapolation are removed; no peach/orange/gray synthetic fill.
+- Saved mode 6 is pointwise only; no post-fusion spatial clarity may create/reinforce false contours.
+- Collapsed physical bracket below 2x still fails closed to SHORT.
+
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 5
 - app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+
+PROTECTED RUNTIME — EXACTLY 7
+- app/src/main/AndroidManifest.xml
+- app/src/main/assets/shaders/copy_2d.frag
+- app/src/main/assets/shaders/fullscreen.vert
+- app/src/main/assets/shaders/oes_to_rgb.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
+DNG/orientation ownership and live preview routing remain protected. JpegFusion's successful global-registration and appearance-calibration slices are separately hash-protected by regression.
 
 INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - .github/workflows/build.yml
@@ -41,36 +71,19 @@ INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-YES, NARROWLY: only authority/version/hash/allowlist/regression/artifact payloads advance. Compiler/build mechanics remain successful V2.12 mechanics.
+YES, PAYLOAD ONLY. Authority advances to successful V2.13 V1.2; version/hash/allowlist/regression/artifact payloads advance to V2.14. The 15-step compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, patch replay, freeze and one-APK proof are unchanged.
 
-V2.13 RUNTIME DIGEST
-4aa2a39ba6d9a07b66d10b9dd1515baae3b9edab48a84f5f44703850c07332b4
+V2.14 RUNTIME DIGEST
+b309f2e65071d9f595e1c2add1cbfa90d1d267e82a92b3f542c93a2677e1b2ff
 Runtime universe remains exactly 12 files.
 
-ROOT FIXES
-- MANUAL Long ISO no longer constrains/re-solves SHORT.
-- AUTO unknown/PWM flicker no longer collapses SHORT=LONG; status remains UNSAFE.
-- AUTO robust bracket learning is 4x..64x and uses SHORT body/headroom evidence; P99 affects SHORT protection, not bracket collapse.
-- Hard-clipped valid registered SHORT has direct source ownership in saved FUSED.
-- <2x physical bracket fails closed to SHORT rather than pseudo-HDR LONG rendering.
-- Saved dehaze/microcontrast now guides from already-FUSED source, never LONG after fusion.
-
-PROTECTED
-Successful V2.12/V2.11 registration/alignment, DNG/orientation, JpegFusion, CaptureSetSaver, MainActivity, shader modes 3/4, V2.10 50/60-Hz safety semantics and GPU-only output authority.
-
 COMPILER STATUS BEFORE ACTIONS
-REAL GLSL COMPILE: NOT RUN locally.
-REAL JAVA COMPILE: NOT RUN locally.
-FULL ANDROID ASSEMBLE: NOT RUN locally.
+GLSL reserved-identifier scan: PASS.
+Embedded workflow Python syntax: PASS.
+V2.14 semantic/ownership/regression verifier: PASS.
+REAL pinned glslang compile: NOT RUN locally (compiler unavailable here).
+REAL project Java compiler: NOT RUN locally.
+FULL :app:assembleDebug: NOT RUN locally.
 
 FINAL ACTIONS AUTHORITY
-Until V2.13 succeeds, final authority remains V2.12 commit 34ac4dd0b47be62833f25990c4284c3206741f52 / run 33892034499 / artifact 9944278389.
-
-V1.1 ACTIONS PROOF BEFORE HASH-ONLY CORRECTION
-Run: 33903152566
-Real GLSL compiler: PASS
-Real project Java compiler: PASS
-Packaged runtime regressions: PASS
-Full :app:assembleDebug: PASS
-Only failure: post-build invariance compared actual V1.1 runtime digest 4aa2a39ba6d9a07b66d10b9dd1515baae3b9edab48a84f5f44703850c07332b4 against stale failed-V2.13 digest 46c139a6cdb07a4b057a3a7baf67d42c7ddaaabbc24b60082313ab5251c85462.
-V1.2 changes zero runtime bytes.
+Until V2.14 succeeds, final authority remains V2.13 V1.2 commit 5e3f6bbc05b0ec1aeb70cce5acc1d719f760858d / run 33904657511 / artifact 9949016091.

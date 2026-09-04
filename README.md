@@ -1,37 +1,37 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.13 V1.1
+# Iris HDR Viewfinder Test V1.4.11 V2.14
 
-V2.13 V1.1 is the **compiler-contract correction of the unchanged independent two-exposure HDR + source-proven rendering candidate** derived from exact successful V2.12 Actions authority (`34ac4dd0b47be62833f25990c4284c3206741f52`, run `33892034499`, artifact `9944278389`).
+V2.14 is a **strict source-proven HDR fusion correction** derived from exact successful V2.13 V1.2 Actions authority (`5e3f6bbc05b0ec1aeb70cce5acc1d719f760858d`, run `33904657511`, artifact `9949016091`).
 
-## Visual failure being corrected
+## Primary evidence
 
-The supplied V2.12 office capture proved SHORT and LONG were effectively identical (`~1/156s ISO50`), while FUSED was brighter and developed unsupported-looking peach/orange pastel fill at the window/ground. 800% inspection showed real mottled source texture was flattened/expanded by saved presentation. MANUAL SPLIT also showed Long ISO could indirectly re-solve SHORT through the shared flicker-safe pair solver.
+The implementation is driven primarily by the supplied SHORT/LONG/FUSED office capture and 600–800% crops. The FUSED image contained disconnected gray/blue lines, broken contour fragments and false micro-edges over the ground/road/shrubs/signs that did not exist in the source imagery; earlier captures also showed unsupported peach/orange fill. Major scene geometry was already aligned, but the crops showed that fine local residual alignment plus fragmented ownership could still create a third false edge.
 
-## V2.13 V1.2 post-build hash correction
+## Hard exposure-order contract
 
-Failed Actions run `33900980849` proved `CameraController` consumed `stats.shortP90Linear` while `HdrGlView.SceneStats` published P50/P95/P98/P99 but omitted P90. V1.1 changes no HDR policy: it publishes the intended SHORT P90 statistic from the existing 32x24 stats surface and adds the exact producer/consumer mismatch as a permanent regression.
+SHORT may never have a greater effective exposure product than LONG in AUTO or MANUAL. Long ISO remains LONG-only. Every solved/frozen request pair is rechecked and an inversion is repaired by raising LONG only; actual Camera2 result exposure/ISO metadata is checked again before fusion, and an inverted or invalid pair is rejected instead of being hidden as a 1x ratio.
 
-## V2.13 capture contract
+AUTO retains the V2.13 scene-driven 4x..64x HDR target and existing 50/60-Hz/UNSAFE behavior.
 
-- SHORT and LONG are independent captures.
-- MANUAL SHORT is solved only from SHORT shutter + minimum ISO + flicker mode; Long ISO cannot alter SHORT or the left SPLIT frame.
-- AUTO unknown/PWM flicker stays explicitly `FLICKER UNSAFE`, but never collapses SHORT onto LONG.
-- AUTO learns bracket depth from robust SHORT body/headroom statistics, targets at least 4x in HDR, and may grow to 64x when scene/sensor constraints support it.
-- P99/near-clip pressure reduces SHORT exposure; it never collapses LONG onto SHORT.
+## Registration and strict source provenance
 
-## V2.13 fusion/presentation contract
+The successful V2.13 global registration remains the coarse anchor and is byte-protected. V2.14 adds a bounded local residual field only after that transform: analysis is exposure-invariant, bidirectional, cycle-consistent and spatially regularized, with a hard 4-source-pixel bound. Unsupported cells fall back to the proven global alignment rather than inventing flow.
 
-V2.11/V2.12 registration and evidence/support geometry remain the production foundation. Hard multi-channel LONG clipping with valid registered/static SHORT now has a direct source-ownership route into FUSED. If the physical bracket collapses below 2x, the saved path fails closed to trustworthy SHORT rather than rendering processed LONG as pseudo-HDR.
+For saved mode 5, high-frequency texture and chroma have one source owner whenever SHORT/LONG disagree: locally registered SHORT or LONG. The coarse 1/8 support atlas is only a broad recovery-region prior and cannot own individual grass, foliage, road, sign or border edges. Fractional transition is permitted only where full-resolution registered gradients and radiometry already agree, so blending cannot manufacture a third displaced contour.
 
-Saved clarity is now a separate GPU presentation pass driven by the already-FUSED image. Dehaze/microcontrast remain luminance-only and RGB-ratio preserving; LONG can no longer act as the spatial guide after SHORT has won source ownership.
+LONG may surrender detail below literal JPEG white when registered SHORT retains materially stronger local structure and source radiometry supports effective information loss. V2.13's synthetic radiance-floor extrapolation is removed. Saved mode 6 is pointwise only, so no post-fusion spatial clarity stage can turn small provenance errors into disconnected gray/blue borders.
+
+The saved-output rule is strict: **no edge, streak, contour, hue or texture may be created unless it is supported by a registered source sample.**
 
 ## Runtime scope
 
-Exactly three runtime files change relative to successful V2.12:
+Exactly five runtime files change relative to successful V2.13 V1.2:
 
 - `app/src/main/assets/shaders/hdr_display.frag`
 - `app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java`
+- `app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java`
 - `app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java`
+- `app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java`
 
-`CaptureSetSaver.java`, `MainActivity.java`, `FrameMeta.java`, `JpegFusion.java`, `MediaStoreWriter.java`, DNG/orientation, registration math, shader modes 3/4, V2.10 50/60-Hz safety semantics and GPU-only saved output ownership remain protected.
+`MainActivity.java`, `FrameMeta.java`, `MediaStoreWriter.java`, AndroidManifest, DNG/orientation and the remaining shader assets are byte-protected. The successful global registration and appearance-calibration slices inside `JpegFusion.java` are separately hash-protected.
 
-V2.13 is **PREPARED / UPLOAD-READY only after clean-extract replay** and is not build-proven until GitHub Actions passes real glslang, real project javac, full `:app:assembleDebug`, one-APK proof and post-build invariance.
+V2.14 is **PREPARED / UPLOAD-READY only after clean-extract replay**. GitHub Actions remains authoritative for pinned real glslang, real project javac, full `:app:assembleDebug`, exactly-one-APK proof and post-build invariance.

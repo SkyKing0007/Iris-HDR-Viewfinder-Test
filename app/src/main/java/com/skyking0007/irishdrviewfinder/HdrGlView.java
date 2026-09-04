@@ -768,6 +768,15 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillShortScalarGain"),
                     1.0f);
+            // Local residual flow is saved-still-only. Live preview remains the
+            // proven V2.13 path and receives a neutral/disabled local field.
+            GLES30.glUniform1i(
+                    GLES30.glGetUniformLocation(displayProgram, "haveLocalFlow"), 0);
+            GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(displayProgram, "stillImageSize"),
+                    Math.max(1, frameWidth), Math.max(1, frameHeight));
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "localFlowMaxPixels"), 0.0f);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 
@@ -798,6 +807,12 @@ final class HdrGlView extends GLSurfaceView {
             Bitmap alignedShort = JpegFusion.alignShortToLong(shortBitmap, registration);
             JpegFusion.recycleBitmap(shortBitmap);
             shortBitmap = alignedShort;
+            // V2.14 visual-evidence correction: preserve the proven global
+            // translation as the coarse anchor, then estimate a bounded,
+            // bidirectional/cycle-consistent local residual field. The field is
+            // tiny and is used only to sample the real SHORT source more accurately.
+            JpegFusion.LocalRegistrationField localRegistration =
+                    JpegFusion.estimateLocalRegistration(shortBitmap, longBitmap);
             JpegFusion.AppearanceGain appearanceGain =
                     JpegFusion.estimateAppearanceGain(shortBitmap, longBitmap, exposureRatio);
             float scalarGain = median3(appearanceGain.r, appearanceGain.g, appearanceGain.b);
@@ -809,6 +824,14 @@ final class HdrGlView extends GLSurfaceView {
                             registration.sampleDx, registration.sampleDy, registration.score,
                             registration.margin, registration.cycleError, registration.confidence,
                             appearanceGain.r, appearanceGain.g, appearanceGain.b, scalarGain));
+            RuntimeLogger.event(
+                    "GPU_STILL_LOCAL_REGISTRATION",
+                    String.format(java.util.Locale.US,
+                            "grid=%dx%d meanConfidence=%.3f supported=%.3f observedResidual=%.2fpx bound=%.2fpx",
+                            localRegistration.gridWidth, localRegistration.gridHeight,
+                            localRegistration.meanConfidence, localRegistration.supportedFraction,
+                            localRegistration.observedResidualPixels,
+                            localRegistration.maxResidualPixels));
 
             int width = shortBitmap.getWidth();
             int height = shortBitmap.getHeight();
@@ -831,6 +854,7 @@ final class HdrGlView extends GLSurfaceView {
 
             int shortTexture = 0;
             int longTexture = 0;
+            int localFlowTexture = 0;
             int evidenceTexture = 0;
             int supportTexture = 0;
             int presentationTexture = 0;
@@ -839,6 +863,7 @@ final class HdrGlView extends GLSurfaceView {
             try {
                 shortTexture = createTexture2d();
                 longTexture = createTexture2d();
+                localFlowTexture = createTexture2d();
                 evidenceTexture = createTexture2d();
                 supportTexture = createTexture2d();
                 presentationTexture = createTexture2d();
@@ -848,6 +873,11 @@ final class HdrGlView extends GLSurfaceView {
                 GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, shortBitmap, 0);
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, longTexture);
                 GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, longBitmap, 0);
+                uploadRgba8Texture(
+                        localFlowTexture,
+                        localRegistration.gridWidth,
+                        localRegistration.gridHeight,
+                        localRegistration.rgba);
                 int analysisWidth = Math.max(1, (width + 7) / 8);
                 int analysisHeight = Math.max(1, (height + 7) / 8);
                 allocateRgbTexture(evidenceTexture, analysisWidth, analysisHeight);
@@ -859,30 +889,38 @@ final class HdrGlView extends GLSurfaceView {
                 JpegFusion.recycleBitmap(longBitmap);
                 longBitmap = null;
 
-                // V2.13 keeps the proven evidence/provenance passes and adds one
-                // presentation-only pass: 3=evidence, 4=isotropic/topology support,
-                // 5=source-proven fused presentation base, 6=fused-source clarity.
-                // mode 6 samples the already-fused image, never LONG geometry/color.
+                // V2.14 keeps the proven four-pass saved-still topology. Mode 3
+                // measures source loss, mode 4 forms only a broad coherent region
+                // prior, mode 5 chooses full-resolution source provenance, and mode
+                // 6 is pointwise so it cannot draw new post-fusion borders.
                 renderStillPass(
                         evidenceTexture, analysisWidth, analysisHeight,
                         3, longTexture, shortTexture, longTexture,
                         exposureRatio, brightnessEv, gamma, dehaze, microContrast,
-                        registration.confidence, scalarGain);
+                        registration.confidence, scalarGain,
+                        localFlowTexture, width, height,
+                        localRegistration.maxResidualPixels);
                 renderStillPass(
                         supportTexture, analysisWidth, analysisHeight,
                         4, evidenceTexture, shortTexture, longTexture,
                         exposureRatio, brightnessEv, gamma, dehaze, microContrast,
-                        registration.confidence, scalarGain);
+                        registration.confidence, scalarGain,
+                        localFlowTexture, width, height,
+                        localRegistration.maxResidualPixels);
                 renderStillPass(
                         presentationTexture, width, height,
                         5, supportTexture, shortTexture, longTexture,
                         exposureRatio, brightnessEv, gamma, dehaze, microContrast,
-                        registration.confidence, scalarGain);
+                        registration.confidence, scalarGain,
+                        localFlowTexture, width, height,
+                        localRegistration.maxResidualPixels);
                 renderStillPass(
                         outputTexture, width, height,
                         6, presentationTexture, shortTexture, longTexture,
                         exposureRatio, brightnessEv, gamma, dehaze, microContrast,
-                        registration.confidence, scalarGain);
+                        registration.confidence, scalarGain,
+                        localFlowTexture, width, height,
+                        localRegistration.maxResidualPixels);
 
                 ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4)
                         .order(ByteOrder.nativeOrder());
@@ -913,8 +951,8 @@ final class HdrGlView extends GLSurfaceView {
                 JpegFusion.recycleBitmap(longBitmap);
                 JpegFusion.recycleBitmap(output);
                 int[] textures = {
-                        shortTexture, longTexture, evidenceTexture, supportTexture,
-                        presentationTexture, outputTexture};
+                        shortTexture, longTexture, localFlowTexture, evidenceTexture,
+                        supportTexture, presentationTexture, outputTexture};
                 for (int texture : textures) {
                     if (texture != 0) {
                         int[] one = {texture};
@@ -942,7 +980,11 @@ final class HdrGlView extends GLSurfaceView {
                 float dehaze,
                 float microContrast,
                 float registrationConfidence,
-                float scalarGain) {
+                float scalarGain,
+                int localFlowTexture,
+                int stillWidth,
+                int stillHeight,
+                float localFlowMaxPixels) {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
             GLES30.glFramebufferTexture2D(
                     GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
@@ -959,6 +1001,7 @@ final class HdrGlView extends GLSurfaceView {
             bindSampler2d(displayProgram, "normalTex", normalSourceTexture, 0);
             bindSampler2d(displayProgram, "shortTex", shortSourceTexture, 1);
             bindSampler2d(displayProgram, "longTex", longSourceTexture, 2);
+            bindSampler2d(displayProgram, "localFlowTex", localFlowTexture, 3);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "mode"), stillMode);
             GLES30.glUniform1i(
                     GLES30.glGetUniformLocation(displayProgram, "rotationQuarterTurns"), 0);
@@ -994,6 +1037,15 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillShortScalarGain"),
                     scalarGain);
+            GLES30.glUniform1i(
+                    GLES30.glGetUniformLocation(displayProgram, "haveLocalFlow"),
+                    localFlowTexture != 0 ? 1 : 0);
+            GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(displayProgram, "stillImageSize"),
+                    Math.max(1, stillWidth), Math.max(1, stillHeight));
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "localFlowMaxPixels"),
+                    Math.max(0.0f, localFlowMaxPixels));
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 
@@ -1034,6 +1086,27 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + unit);
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
             GLES30.glUniform1i(GLES30.glGetUniformLocation(program, name), unit);
+        }
+
+        private static void uploadRgba8Texture(
+                int texture, int width, int height, byte[] rgba) {
+            if (texture == 0 || width <= 0 || height <= 0 || rgba == null
+                    || rgba.length != width * height * 4) {
+                throw new IllegalArgumentException("Invalid local registration texture payload");
+            }
+            ByteBuffer data = ByteBuffer.allocateDirect(rgba.length).order(ByteOrder.nativeOrder());
+            data.put(rgba).flip();
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
+            GLES30.glTexImage2D(
+                    GLES30.GL_TEXTURE_2D,
+                    0,
+                    GLES30.GL_RGBA8,
+                    width,
+                    height,
+                    0,
+                    GLES30.GL_RGBA,
+                    GLES30.GL_UNSIGNED_BYTE,
+                    data);
         }
 
         private static void allocateRgbTexture(int texture, int width, int height) {

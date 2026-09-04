@@ -1,4 +1,4 @@
-name: Build Iris HDR Viewfinder Test V1.4.11 V2.13
+name: Build Iris HDR Viewfinder Test V1.4.11 V2.14
 
 on:
   workflow_dispatch:
@@ -28,47 +28,47 @@ jobs:
         with:
           fetch-depth: 3
 
-      - name: Download exact successful V1.4.11 V2.12 Actions authority artifact
+      - name: Download exact successful V1.4.11 V2.13 V1.2 Actions authority artifact
         uses: actions/download-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.12
-          path: ${{ runner.temp }}/v1411v212-authority-artifact
+          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.13
+          path: ${{ runner.temp }}/v1411v213-authority-artifact
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 33892034499
+          run-id: 33904657511
 
-      - name: Reconstruct exact V1.4.11 V2.12 authority and prove V1.4.11 V2.13 candidate before compilers
+      - name: Reconstruct exact V1.4.11 V2.13 V1.2 authority and prove V1.4.11 V2.14 candidate before compilers
         shell: bash
         run: |
           set -euo pipefail
           IRIS_WORKFLOW_SYNTAX_ONLY=1 python3 scripts/verify_orientation.py
-          authority='34ac4dd0b47be62833f25990c4284c3206741f52'
-          authority_tree='dce5cc2dd1d46a4fe360267e99b93874f10cf5b4'
-          authority_dir="$RUNNER_TEMP/v1411v212-authority-artifact"
-          authority_src="$RUNNER_TEMP/v1411v212-authority-source"
+          authority='5e3f6bbc05b0ec1aeb70cce5acc1d719f760858d'
+          authority_tree='da8cced5b4a2c0a18b618409ab1d28d69c9c00db'
+          authority_dir="$RUNNER_TEMP/v1411v213-authority-artifact"
+          authority_src="$RUNNER_TEMP/v1411v213-authority-source"
 
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'experiment-v1.4.11-v2-brightness-4ev'
           test "$(git rev-parse HEAD^)" = "$authority"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
-          grep -Fq 'versionCode = 30' app/build.gradle.kts
-          grep -Fq 'versionName = "1.0-v1.4.11-v2.13"' app/build.gradle.kts
+          grep -Fq 'versionCode = 31' app/build.gradle.kts
+          grep -Fq 'versionName = "1.0-v1.4.11-v2.14"' app/build.gradle.kts
           grep -Fq 'compileSdk = 37' app/build.gradle.kts
           grep -Fq 'minSdk = 29' app/build.gradle.kts
           grep -Fq 'targetSdk = 37' app/build.gradle.kts
           grep -Fq 'version "9.2.1"' build.gradle.kts
           sha256sum -c PACKAGE_MANIFEST_SHA256.txt
 
-          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.12-debug.apk" | awk '{print $1}')" = 'e4f861ba0e01aadf93fb58254c0434525d270bd9a7b27e0a3aece114f2010a39'
-          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.12-source-candidate.tar" | awk '{print $1}')" = '8859a7914ab54fcb91e0541c2fb7f0e7d39fab94b0efe6ab4cd710005e2f801b'
-          test "$(sha256sum "$authority_dir/RUNTIME_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = '66ca7d03ada64f95fbb367ec5cd0f65747a2de7cd33050ff199063bb0f7c65ef'
-          test "$(sha256sum "$authority_dir/REPOSITORY_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = '0a0fee6787378cf318540c18e741d70dd0e50038482418a3766859166593592d'
-          test "$(sha256sum "$authority_dir/REGRESSIONS.txt" | awk '{print $1}')" = 'd3486ea56136064b26cb7a26f0667fa5ff1173e51364efb177b205a4a7d2afd1'
+          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.13-debug.apk" | awk '{print $1}')" = 'c6472e43e69c4cf2d04210ff8c3dbf9582d8a7bbef2112f5bd7abae150e87ed7'
+          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.13-source-candidate.tar" | awk '{print $1}')" = 'd0f9a7dee1f70d1082df9257b7f106aaf3cf82a6e941b8ae6c9e86864040c397'
+          test "$(sha256sum "$authority_dir/RUNTIME_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = '4aa2a39ba6d9a07b66d10b9dd1515baae3b9edab48a84f5f44703850c07332b4'
+          test "$(sha256sum "$authority_dir/REPOSITORY_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = '8fb2cf8531e153ec2b1c2dd09a3330ee003f1f653426adc078c6b51dcae01ec9'
+          test "$(sha256sum "$authority_dir/REGRESSIONS.txt" | awk '{print $1}')" = '401f52581b75be3c7a57ab2b534bdba9622b894ef3e73d4dc1fc93564d6c3ac7'
           test "$(cat "$authority_dir/SOURCE_COMMIT.txt")" = "$authority"
 
           rm -rf "$authority_src"
           mkdir -p "$authority_src"
-          tar -xf "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.12-source-candidate.tar" -C "$authority_src"
+          tar -xf "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.13-source-candidate.tar" -C "$authority_src"
 
           python3 - "$authority_src" "$authority_dir" <<'PY'
           from pathlib import Path
@@ -76,8 +76,8 @@ jobs:
 
           src = Path(sys.argv[1])
           artifact = Path(sys.argv[2])
-          expected_runtime_sha = '66ca7d03ada64f95fbb367ec5cd0f65747a2de7cd33050ff199063bb0f7c65ef'
-          expected_repo_sha = '0a0fee6787378cf318540c18e741d70dd0e50038482418a3766859166593592d'
+          expected_runtime_sha = '4aa2a39ba6d9a07b66d10b9dd1515baae3b9edab48a84f5f44703850c07332b4'
+          expected_repo_sha = '8fb2cf8531e153ec2b1c2dd09a3330ee003f1f653426adc078c6b51dcae01ec9'
 
           def row(p, rel):
               b = p.read_bytes()
@@ -86,35 +86,35 @@ jobs:
 
           runtime_files = sorted(p for p in (src / 'app/src').rglob('*') if p.is_file())
           if len(runtime_files) != 12:
-              raise SystemExit(f'V1.4.11 V2.12 AUTHORITY RUNTIME COUNT FAIL: {len(runtime_files)}')
+              raise SystemExit(f'V1.4.11 V2.13 V1.2 AUTHORITY RUNTIME COUNT FAIL: {len(runtime_files)}')
           runtime = ''.join(row(p, p.relative_to(src).as_posix()) for p in runtime_files).encode()
           if hashlib.sha256(runtime).hexdigest() != expected_runtime_sha:
-              raise SystemExit('V1.4.11 V2.12 AUTHORITY RUNTIME MANIFEST SHA FAIL')
+              raise SystemExit('V1.4.11 V2.13 V1.2 AUTHORITY RUNTIME MANIFEST SHA FAIL')
           if runtime != (artifact / 'RUNTIME_SOURCE_MANIFEST.tsv').read_bytes():
-              raise SystemExit('V1.4.11 V2.12 AUTHORITY RUNTIME MANIFEST BYTE-EQUALITY FAIL')
+              raise SystemExit('V1.4.11 V2.13 V1.2 AUTHORITY RUNTIME MANIFEST BYTE-EQUALITY FAIL')
 
           tracked = sorted(p for p in src.rglob('*') if p.is_file())
           if len(tracked) != 25:
-              raise SystemExit(f'V1.4.11 V2.12 AUTHORITY REPOSITORY COUNT FAIL: {len(tracked)}')
+              raise SystemExit(f'V1.4.11 V2.13 V1.2 AUTHORITY REPOSITORY COUNT FAIL: {len(tracked)}')
           repo = ''.join(row(p, p.relative_to(src).as_posix()) for p in tracked).encode()
           if hashlib.sha256(repo).hexdigest() != expected_repo_sha:
-              raise SystemExit('V1.4.11 V2.12 AUTHORITY REPOSITORY MANIFEST SHA FAIL')
+              raise SystemExit('V1.4.11 V2.13 V1.2 AUTHORITY REPOSITORY MANIFEST SHA FAIL')
           if repo != (artifact / 'REPOSITORY_SOURCE_MANIFEST.tsv').read_bytes():
-              raise SystemExit('V1.4.11 V2.12 AUTHORITY REPOSITORY MANIFEST BYTE-EQUALITY FAIL')
+              raise SystemExit('V1.4.11 V2.13 V1.2 AUTHORITY REPOSITORY MANIFEST BYTE-EQUALITY FAIL')
 
           with tempfile.TemporaryDirectory() as td:
               tar_path = Path(td) / 'authority.tar'
-              subprocess.run(['git', 'archive', '--format=tar', f'--output={tar_path}', '34ac4dd0b47be62833f25990c4284c3206741f52'], check=True)
+              subprocess.run(['git', 'archive', '--format=tar', f'--output={tar_path}', '5e3f6bbc05b0ec1aeb70cce5acc1d719f760858d'], check=True)
               checkout = Path(td) / 'git-archive'
               checkout.mkdir()
               subprocess.run(['tar', '-xf', str(tar_path), '-C', str(checkout)], check=True)
               git_files = sorted(p for p in checkout.rglob('*') if p.is_file())
               if [p.relative_to(checkout).as_posix() for p in git_files] != [p.relative_to(src).as_posix() for p in tracked]:
-                  raise SystemExit('V1.4.11 V2.12 AUTHORITY ARTIFACT/GIT PATH SET FAIL')
+                  raise SystemExit('V1.4.11 V2.13 V1.2 AUTHORITY ARTIFACT/GIT PATH SET FAIL')
               for gp, ap in zip(git_files, tracked):
                   if gp.read_bytes() != ap.read_bytes():
-                      raise SystemExit(f'V1.4.11 V2.12 AUTHORITY ARTIFACT/GIT BYTE FAIL: {gp.relative_to(checkout)}')
-          print('EXACT V1.4.11 V2.12 ACTIONS ARTIFACT AUTHORITY: PASS')
+                      raise SystemExit(f'V1.4.11 V2.13 V1.2 AUTHORITY ARTIFACT/GIT BYTE FAIL: {gp.relative_to(checkout)}')
+          print('EXACT V1.4.11 V2.13 V1.2 ACTIONS ARTIFACT AUTHORITY: PASS')
           PY
 
           bad_platform='platforms;android-37'
@@ -135,7 +135,7 @@ jobs:
           from pathlib import Path
           import hashlib, subprocess
 
-          authority = '34ac4dd0b47be62833f25990c4284c3206741f52'
+          authority = '5e3f6bbc05b0ec1aeb70cce5acc1d719f760858d'
           expected_changes = {
               '.github/workflows/build.yml': 'M',
               'BUILD_WORKFLOW_COPY.yml': 'M',
@@ -146,7 +146,9 @@ jobs:
               'app/build.gradle.kts': 'M',
               'app/src/main/assets/shaders/hdr_display.frag': 'M',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'M',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': 'M',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': 'M',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': 'M',
               'scripts/verify_orientation.py': 'M',
           }
           raw = subprocess.check_output(['git', 'diff', '--name-status', authority, 'HEAD'], text=True).splitlines()
@@ -155,7 +157,7 @@ jobs:
               parts = line.split('\t')
               actual[parts[-1]] = parts[0][0]
           if actual != expected_changes:
-              raise SystemExit(f'V1.4.11 V2.13 ALLOWLIST FAIL: actual={actual} expected={expected_changes}')
+              raise SystemExit(f'V1.4.11 V2.14 ALLOWLIST FAIL: actual={actual} expected={expected_changes}')
 
           expected_tracked = [
               '.github/workflows/build.yml', '.gitignore', 'BUILD_WORKFLOW_COPY.yml',
@@ -181,16 +183,16 @@ jobs:
 
           files = sorted(p for p in Path('app/src').rglob('*') if p.is_file())
           if len(files) != 12:
-              raise SystemExit(f'V1.4.11 V2.13 RUNTIME FILE COUNT FAIL: {len(files)}')
+              raise SystemExit(f'V1.4.11 V2.14 RUNTIME FILE COUNT FAIL: {len(files)}')
           rows=[]
           for p in files:
               b=p.read_bytes(); lines=b.count(b'\n') + (1 if b and not b.endswith(b'\n') else 0)
               rows.append(f"{hashlib.sha256(b).hexdigest()}\t{len(b)}\t{lines}\t{p.as_posix()}\n")
           manifest=''.join(rows).encode()
           digest=hashlib.sha256(manifest).hexdigest()
-          expected='4aa2a39ba6d9a07b66d10b9dd1515baae3b9edab48a84f5f44703850c07332b4'
+          expected='b309f2e65071d9f595e1c2add1cbfa90d1d267e82a92b3f542c93a2677e1b2ff'
           if digest != expected:
-              raise SystemExit(f'V1.4.11 V2.13 RUNTIME MANIFEST FAIL: {digest} != {expected}')
+              raise SystemExit(f'V1.4.11 V2.14 RUNTIME MANIFEST FAIL: {digest} != {expected}')
           Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
 
           protected = {
@@ -198,16 +200,14 @@ jobs:
               'app/src/main/assets/shaders/copy_2d.frag': 'b6b890e3be034a0d4980fd324fe0f469c7a2b0a126e958607bc8c4b9fbf97a55',
               'app/src/main/assets/shaders/fullscreen.vert': '7d8ee58c4500a46dd9614404a17ea4c7e104a6bf43976ecb85795799fdcd7fb4',
               'app/src/main/assets/shaders/oes_to_rgb.frag': '388d49929564efba24900794e035f88b461485f4da4f2e12caf71e3531ab6443',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': '6301d988d9f227d0007a3726af696988fccb64c59e91f4f89d19ed8cf2f372b6',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': 'e05484de966351424d3a5399eb159daccba766ed177c973b4b7529af014a60c5',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java': '72149c090abdcfba2d1687aba473f7106794e90efd272d467ffaed623da74ed9',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': '7f420d891ba89acd385f643b1aa337eecf8726fb660ebf8143744ee6ae829c0d',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java': 'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
           }
           for rel, sha in protected.items():
               got=hashlib.sha256(Path(rel).read_bytes()).hexdigest()
               if got != sha:
-                  raise SystemExit(f'V1.4.11 V2.13 PROTECTED RUNTIME FAIL: {rel} {got} != {sha}')
+                  raise SystemExit(f'V1.4.11 V2.14 PROTECTED RUNTIME FAIL: {rel} {got} != {sha}')
 
           # Permanent exact regression from failed V2.13 run 33900980849.
           camera_text = Path('app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java').read_text()
@@ -217,7 +217,7 @@ jobs:
                   and 'this.shortP90Linear = shortP90Linear;' in gl_text
                   and 'percentileSorted(shortSorted, 0.90f),' in gl_text):
               raise SystemExit('REGRESSION FAIL 092: CameraController shortP90Linear consumer has no SceneStats P90 producer')
-          print(f'V1.4.11 V2.13 MINIMUM CANDIDATE PASS: changed={len(actual)} runtime=12 digest={digest} protected={len(protected)}/{len(protected)}')
+          print(f'V1.4.11 V2.14 MINIMUM CANDIDATE PASS: changed={len(actual)} runtime=12 digest={digest} protected={len(protected)}/{len(protected)}')
           PY
 
           patch_sha=''
@@ -237,10 +237,10 @@ jobs:
           cmp -s "$RUNNER_TEMP/forward-7.patch" "$RUNNER_TEMP/forward-40.patch"
           cmp -s "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/rollback-12.patch"
           cmp -s "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/rollback-40.patch"
-          cp "$RUNNER_TEMP/forward-7.patch" "$RUNNER_TEMP/V1.4.11-V2.12_to_V1.4.11-V2.13.forward.patch"
-          cp "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/V1.4.11-V2.13_to_V1.4.11-V2.12.rollback.patch"
+          cp "$RUNNER_TEMP/forward-7.patch" "$RUNNER_TEMP/V1.4.11-V2.13_to_V1.4.11-V2.14.forward.patch"
+          cp "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/V1.4.11-V2.14_to_V1.4.11-V2.13.rollback.patch"
 
-          python3 - "$authority_src" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/V1.4.11-V2.12_to_V1.4.11-V2.13.forward.patch" "$RUNNER_TEMP/V1.4.11-V2.13_to_V1.4.11-V2.12.rollback.patch" <<'PY'
+          python3 - "$authority_src" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/V1.4.11-V2.13_to_V1.4.11-V2.14.forward.patch" "$RUNNER_TEMP/V1.4.11-V2.14_to_V1.4.11-V2.13.rollback.patch" <<'PY'
           from pathlib import Path
           import shutil, subprocess, sys, tempfile
           authority, candidate, forward, rollback = map(Path, sys.argv[1:])
@@ -315,7 +315,7 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:compileDebugJavaWithJavac
 
-      - name: Replay V1.4.11 V2.13 runtime regressions on compiler-tested candidate
+      - name: Replay V1.4.11 V2.14 runtime regressions on compiler-tested candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -326,7 +326,7 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Post-build invariance and freeze compiled V1.4.11 V2.13 candidate
+      - name: Post-build invariance and freeze compiled V1.4.11 V2.14 candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -339,10 +339,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, subprocess
-          expected_runtime='4aa2a39ba6d9a07b66d10b9dd1515baae3b9edab48a84f5f44703850c07332b4'
+          expected_runtime='b309f2e65071d9f595e1c2add1cbfa90d1d267e82a92b3f542c93a2677e1b2ff'
           # Permanent exact regression from failed V2.13 V1.1 run 33903152566:
           # post-build runtime expectation must equal the compiler-tested bootstrap digest.
-          if expected_runtime != '4aa2a39ba6d9a07b66d10b9dd1515baae3b9edab48a84f5f44703850c07332b4':
+          if expected_runtime != 'b309f2e65071d9f595e1c2add1cbfa90d1d267e82a92b3f542c93a2677e1b2ff':
               raise SystemExit('REGRESSION FAIL 093: stale post-build runtime digest returned')
           files=sorted(p for p in Path('app/src').rglob('*') if p.is_file())
           rows=[]
@@ -366,10 +366,8 @@ jobs:
               'app/src/main/assets/shaders/copy_2d.frag': 'b6b890e3be034a0d4980fd324fe0f469c7a2b0a126e958607bc8c4b9fbf97a55',
               'app/src/main/assets/shaders/fullscreen.vert': '7d8ee58c4500a46dd9614404a17ea4c7e104a6bf43976ecb85795799fdcd7fb4',
               'app/src/main/assets/shaders/oes_to_rgb.frag': '388d49929564efba24900794e035f88b461485f4da4f2e12caf71e3531ab6443',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': '6301d988d9f227d0007a3726af696988fccb64c59e91f4f89d19ed8cf2f372b6',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': 'e05484de966351424d3a5399eb159daccba766ed177c973b4b7529af014a60c5',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java': '72149c090abdcfba2d1687aba473f7106794e90efd272d467ffaed623da74ed9',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': '7f420d891ba89acd385f643b1aa337eecf8726fb660ebf8143744ee6ae829c0d',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java': 'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
           }
           for rel, expected in protected.items():
@@ -381,18 +379,18 @@ jobs:
           mapfile -t apks < <(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print | sort)
           test ${#apks[@]} -eq 1
           mkdir -p output
-          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.13-debug.apk
-          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.13-source-candidate.tar "$GITHUB_SHA"
+          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.14-debug.apk
+          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.14-source-candidate.tar "$GITHUB_SHA"
           printf '%s\n' "$GITHUB_SHA" > output/SOURCE_COMMIT.txt
           cp compiled-runtime-manifest.tsv output/RUNTIME_SOURCE_MANIFEST.tsv
           cp compiled-repository-manifest.tsv output/REPOSITORY_SOURCE_MANIFEST.tsv
-          cp "$RUNNER_TEMP/V1.4.11-V2.12_to_V1.4.11-V2.13.forward.patch" output/V1.4.11-V2.12_to_V1.4.11-V2.13.forward.patch
-          cp "$RUNNER_TEMP/V1.4.11-V2.13_to_V1.4.11-V2.12.rollback.patch" output/V1.4.11-V2.13_to_V1.4.11-V2.12.rollback.patch
+          cp "$RUNNER_TEMP/V1.4.11-V2.13_to_V1.4.11-V2.14.forward.patch" output/V1.4.11-V2.13_to_V1.4.11-V2.14.forward.patch
+          cp "$RUNNER_TEMP/V1.4.11-V2.14_to_V1.4.11-V2.13.rollback.patch" output/V1.4.11-V2.14_to_V1.4.11-V2.13.rollback.patch
           cp "$RUNNER_TEMP/FORWARD_PATCH_SHA256.txt" output/FORWARD_PATCH_SHA256.txt
           cp "$RUNNER_TEMP/ROLLBACK_PATCH_SHA256.txt" output/ROLLBACK_PATCH_SHA256.txt
           cat > output/REGRESSIONS.txt <<'REGRESSIONS'
           001 - app/build/** and app/.cxx/** never count as runtime-source changes.
-          002 - vscode.dev upload preserves the complete 25-file successful V2.12 tracked candidate universe and all 12 app/src runtime files; V2.13 modifies existing files only.
+          002 - vscode.dev upload preserves the complete 25-file successful V2.13 V1.2 tracked candidate universe and all 12 app/src runtime files; V2.14 modifies existing files only.
           003 - API-33-incompatible readAllBytes must not return.
           004 - Android fullUser orientation and responsive portrait/landscape controls remain intact.
           005 - SurfaceTexture producer transform is consumed exactly once.
@@ -407,16 +405,16 @@ jobs:
           014 - __pycache__/pyc never enters upload candidate.
           015 - FrameMeta.sensorTimestampNs remains the javac-proven timestamp field; failed meta.timestampNs reference never returns.
           016 - AUTO/MANUAL HDR ownership remains explicit and steady preview remains a two-request manual pair.
-          017 - V2.13 supersedes bracket-collapse behavior: SHORT/LONG remain independent, robust body/headroom evidence learns 4x..64x depth, and achieved hardware limits remain explicit.
+          017 - V2.14 preserves independent SHORT/LONG bracket learning at 4x..64x and adds hard physical SHORT<=LONG ordering after every AUTO/MANUAL/frozen solve.
           018 - HAL AE remains bootstrap-only; it may seed the first feasible pair but never becomes persistent scene-brightness authority once paired SHORT/LONG statistics exist.
           019 - Successful V2.10/V2.11 AUTO flicker authority is frozen: AUTO is SAFE only when Camera2 explicitly proves 50Hz or 60Hz; NONE/unknown/PWM report FLICKER UNSAFE.
           020 - Successful V2.10/V2.11 MANUAL SAFE is frozen: when 50/60 safety is active, BOTH SHORT and LONG use legal integer mains-cycle integration windows and LONG ISO preserves target energy preferentially.
-          021 - SHORT crossing LONG clamps SHORT at LONG and never silently swaps controls.
+          021 - SHORT effective exposure may never exceed LONG. If a requested pair would invert, V2.14 raises LONG only; it never brightens or re-solves SHORT.
           022 - Brightness remains -16..+1EV, RGB-ratio-preserving presentation only, and freezes at shutter.
           023 - Gamma remains 0.50..2.00, RGB-ratio-preserving presentation only, and freezes at shutter.
           024 - Saved FUSED is produced only by the shared hdr_display.frag GPU path; independent CPU HDR substitution after GL failure is forbidden.
-          025 - V2.13 stays on successful V2.12 JPEG-source architecture; RawHdrFusion.java, raw_hdr_* and still_fusion.frag remain forbidden.
-          026 - V2.13 runtime authority is exactly successful V2.12 commit 34ac4dd0b47be62833f25990c4284c3206741f52 / Actions run 33892034499 / artifact 9944278389.
+          025 - V2.14 stays on successful V2.13 V1.2 JPEG-source architecture; RawHdrFusion.java, raw_hdr_* and still_fusion.frag remain forbidden.
+          026 - V2.14 runtime authority is exactly successful V2.13 V1.2 commit 5e3f6bbc05b0ec1aeb70cce5acc1d719f760858d / Actions run 33904657511 / artifact 9949016091.
           027 - LONG remains saved geometry/appearance authority outside proven hard/effective lost-information regions; valid SHORT evidence must not globally repaint the scene.
           028 - Saved evidence may use fixed neighboring samples only for scalar/source coherence; output structure comes from registered center sources, never neighbor RGB fill/inpainting/sharpening.
           029 - Luma-from-SHORT/chroma-from-LONG hybrid remains permanently forbidden.
@@ -424,78 +422,85 @@ jobs:
           031 - Saved SHORT->LONG appearance remains one robust scalar linear-light calibration for production radiometric proof.
           032 - SHORT remains registered into LONG coordinates before gain estimation, support measurement or fusion; LONG output geometry never moves.
           033 - Registration remains forward/backward, uniqueness/boundary aware and cycle-consistent; low confidence forces source-safe fallback.
-          034 - GPU remains sole production HDR output authority; JpegFusion remains registration utility only and byte-identical to V2.11/V2.10/V2.9/V2.8.
+          034 - GPU remains sole production HDR output authority; JpegFusion remains registration utility only, with V2.14 adding only a bounded local-residual estimator after the byte-preserved global alignment.
           035 - Brightness alone never grants SHORT RGB ownership; mapped SHORT must prove LONG hard/effective information loss while SHORT has signal/headroom.
-          036 - Smooth genuinely lost highlight variation remains recoverable; texture is not mandatory, but source-corresponding tonal/gradient/color evidence is required below hard clipping.
+          036 - Smooth genuinely lost highlight variation remains recoverable; below hard clipping, aligned SHORT may prove LONG information loss from stronger real local detail plus radiometric JPEG divergence.
           037 - Healthy bright LONG with no lost-information proof remains LONG even beside recovered neighborhoods.
           038 - One-channel LONG saturation alone never surrenders complete RGB ownership; multi-channel/visual-loss proof is required.
-          039 - Clipped/invalid center SHORT may not own complete RGB; it may only contribute a source-proven radiance lower bound in a registered/static multi-channel clipped LONG region.
+          039 - Clipped/invalid center SHORT may not own complete RGB and may not create a synthetic radiance floor; if neither source is trustworthy, saved fusion preserves an actual source sample.
           040 - Window/desk remain positive recovery regressions; under-desk remains leakage protection.
           041 - No Gaussian/box/OpenCV/variable-kernel neighborhood RGB operator may replace the accepted fixed sparse support lattice.
           042 - OpenCV remains simulation-only; no OpenCV runtime dependency may enter Android candidate.
           043 - Global photographic body tone remains downstream, RGB-ratio preserving, and fades before the HDR shoulder.
-          044 - V2.13 intentionally changes CameraController/HdrGlView/hdr_display.frag only; CaptureSetSaver/MainActivity/FrameMeta/JpegFusion/MediaStoreWriter, DNG/orientation, registration geometry and shader modes 3/4 remain protected.
-          045 - Real-photo retained stress cases remain baseline device regressions; V2.13 adds exact V2.12 same-exposure office peach-fill and MANUAL Long-ISO/SHORT-independence failures.
+          044 - V2.14 intentionally changes exactly CameraController/CaptureSetSaver/JpegFusion/HdrGlView/hdr_display.frag; MainActivity/FrameMeta/MediaStoreWriter, DNG/orientation, live preview and the successful global registration transform remain protected.
+          045 - Real-photo retained stress cases remain baseline regressions; V2.14 adds exact 600-800% disconnected gray/blue contour, false-border and unsupported peach/orange fill failures from the V2.13 office capture.
           046 - Java compiler regression from failed run 33812132460: JpegFusion retains mapLut(float,float[]).
           047 - Proven hard-clipped cores with valid SHORT/radiometric/support/registration proof may select complete registered SHORT RGB; fractional post-toned LONG contamination is forbidden.
           048 - SHORT color uses one scalar linear-light exposure scale applied to complete registered SHORT RGB; no per-channel ownership gain.
           049 - Valid-LONG and low-registration cases fail closed; source validity and registration remain mandatory for complete SHORT RGB ownership.
           050 - Historical CPU hard-core logic stays byte-identical in JpegFusion but never becomes production output authority.
           051 - Production FUSED_HDR is GPU-only; CaptureSetSaver must never call JpegFusion.fuse or silently substitute a second HDR algorithm.
-          052 - V2.13 reuses exact successful V2.12 shader-file universe and pinned compiler commands; no new shader asset.
-          053 - Saved still fusion remains GPU-only: evidence, isotropic/topology support, scene-domain provenance, then fused-source presentation clarity; no CPU output authority.
-          054 - Broad complete-RGB recovery requires hard/effective LONG loss, valid non-clipped SHORT, scalar radiometric proof, registration confidence, isotropic support and source correspondence.
+          052 - V2.14 reuses the exact successful V2.13 V1.2 shader-file universe and pinned compiler commands; no new shader asset.
+          053 - Saved still fusion remains GPU-only: broad evidence/support, hard source provenance, then pointwise saved output pass; no CPU output authority and no post-fusion spatial clarity.
+          054 - Broad recovery requires LONG information-loss proof, valid SHORT, scalar radiometric evidence and registration confidence; coarse support may select a region but may never fractionally mix full-resolution edges.
           055 - Compact emitters remain separate and strict for complete-RGB ownership; valid center SHORT + scalar radiometry + local source support remain mandatory.
           056 - Successful V2.10/V2.11 contextual nearby SHORT-saturation behavior is preserved; one saturated neighbor cannot poison valid surrounding recovery.
-          057 - Source ownership is composed in scene-linear space. Coherent boundaries may feather there; temporally uncertain/misaligned regions must never mix independently tone-mapped source images into a third state.
+          057 - High-frequency saved texture/chroma has exactly one registered source owner. Only low-frequency luminance may transition; displaced source edges may never blend into a third contour.
           058 - Production SHORT radiometric proof uses one scalar gain; independent R/G/B ownership gains remain forbidden.
           059 - Recovered highlights preserve source-supported SHORT scene-radiance ordering and chromaticity before a single common HDR presentation transform.
           060 - Valid owned compact highlights retain complete source-supported SHORT RGB; no compact chroma collapse or arbitrary neutralization.
-          061 - JpegFusion.java remains byte-identical to successful V2.11/V2.10/V2.9/V2.8, including mapLut and registration implementation.
-          062 - V2.13 HdrGlView may add only the bounded full-resolution presentation texture/pass; registration, decode, evidence/support allocations and GPU-only output ownership remain protected.
-          063 - Effective/visual clipping remains first-class: bright LONG flattening may surrender complete RGB only when aligned SHORT demonstrates corresponding recoverable range/gradient/coherent chroma.
-          064 - Changed TV/LED/flicker phase cannot qualify as effective clipping from brightness/color difference alone; below hard clipping, structural/color-topology correspondence is still mandatory.
+          061 - JpegFusion preserves the successful global registration/alignment and appearance-calibration slices byte-identically; V2.14 adds only a bounded bidirectional local residual field after the global transform.
+          062 - HdrGlView changes only saved-still local-flow texture plumbing/telemetry; live preview, decode, four-pass GPU topology, bounded 1/8 evidence/support allocations and GPU-only output ownership remain protected.
+          063 - Effective/visual clipping remains first-class: LONG may surrender detail below JPEG white when aligned SHORT retains materially stronger normalized local structure and the source radiometry proves divergence.
+          064 - Changed TV/LED/flicker phase cannot qualify from brightness/color difference alone; effective-loss admission requires real SHORT local detail, LONG detail loss, non-shadow signal and radiometric divergence.
           065 - User flicker authority remains explicit AUTO/60Hz/50Hz/OFF and persists through configuration/state restoration.
           066 - Camera2 FLICKER NONE remains AUTO UNSAFE(none); unknown/PWM remains AUTO UNSAFE(unknown/PWM).
           067 - Initial AUTO anchor and later live AUTO projection continue to share the same integer-cycle solver when a 50/60-Hz period is authoritative.
           068 - When 50/60 safety is satisfiable, both LONG and SHORT remain integer multiples of 10ms (50Hz) or 8.333333ms (60Hz); LONG ISO preserves requested energy.
-          069 - V2.13 retains successful live hysteresis/update/scene-cut constants; AUTO unknown/PWM may report UNSAFE but may not collapse the physical bracket.
+          069 - V2.14 retains successful live hysteresis/update/scene-cut constants; AUTO unknown/PWM remains UNSAFE but may not collapse or invert the physical bracket.
           070 - Exact chandelier regression remains permanent: jointly saturated source-supported lamp pixels must not collapse to a presentation-darkened mid-gray plateau.
-          071 - Saved mode 5 chooses LONG/registered SHORT provenance and radiance in scene-linear space before brightness/body tone/HDR shoulder/gamma; post-toned LONG/SHORT image mixing remains forbidden.
-          072 - A SHORT sample too clipped for complete RGB may raise only the scene-radiance lower bound of a registered/static multi-channel clipped LONG pixel; it must not inject unsupported texture or hue.
-          073 - Full-resolution SHORT saturation may not toggle neighboring saved pixels between darkened LONG and recovered SHORT after tone mapping; ownership confidence remains continuous and coarse support spatially coherent.
+          071 - Saved mode 5 chooses exactly one full-resolution LONG/registered-SHORT detail/chroma source in scene-linear space before brightness/body tone/HDR shoulder/gamma; post-toned or fractional high-frequency source mixing is forbidden.
+          072 - Synthetic radiance-floor extrapolation is forbidden. Clipped/invalid source evidence may not manufacture unsupported hue, texture or peach/orange/gray fill.
+          073 - Full-resolution ownership must be hard at the detail/chroma layer; coarse support may be spatially coherent but cannot toggle fractional edge blends that create disconnected borders.
           074 - Recovered highlight brightness ordering remains monotonic: stronger source-supported SHORT radiance cannot render darker at the same clipped LONG location.
           075 - Exact V2.12 office regression: ~1/156 ISO50 SHORT and LONG is not a valid HDR pair; robust 32x24 SHORT body/headroom statistics must re-open a meaningful bracket instead of 1x.
           076 - If SHORT reaches its physical/flicker/ISO floor, LONG must be reduced to the achieved SHORT times the learned feasible bracket; bracket depth may not silently expand.
           077 - AUTO bracket target is bounded 4x..64x; genuinely dark scenes may approach 64x when feasible, while scene body/headroom evidence controls useful depth.
           078 - AUTO global Brightness/Gamma are learned from paired/fused scene statistics, not HAL AE brightness; the good manual calibration converges near 0EV and gamma about 1.25.
           079 - MANUAL user Brightness/Gamma remain authoritative. Moving either slider re-solves only adaptive dehaze/microcontrast around the selected presentation.
-          080 - Adaptive dehaze is luminance-only bounded veil suppression; adaptive microcontrast uses exactly a five-tap symmetric range-weighted luminance guide with noise-floor, strong-edge and highlight suppression.
+          080 - Live adaptive dehaze/microcontrast remains luminance-only, bounded and five-tap; saved mode 6 is intentionally pointwise/pass-through to protect source-proven structure.
           081 - Adaptive clarity preserves RGB ratios with one scalar luminance scale; no independent RGB dehaze, CLAHE, unsharp mask, sharpening or local-HDR texture synthesis is permitted.
           082 - One presentation state (Brightness, Gamma, dehaze, microcontrast) is frozen at shutter and passed identically to live HDR and saved GPU fusion; metadata records all four values.
           083 - Paired SHORT/LONG scene statistics remain 32x24 and at most 10Hz; missing/stale SHORT or LONG metadata cannot drive AUTO.
-          084 - Saved clarity is a separate fused-source pass after provenance/HDR/gamma and may not use LONG as its post-fusion spatial authority.
+          084 - Saved mode 6 is pointwise pass-through after provenance/HDR/gamma; it may not create, reinforce or spatially reshape source boundaries.
           085 - MANUAL Long ISO must not participate in SHORT flicker/shutter/ISO solving; moving Long ISO cannot change the SHORT SPLIT source.
           086 - AUTO FLICKER UNSAFE(none/unknown/PWM) is status only; it may not set SHORT=LONG or destroy HDR separation.
           087 - P99/near-clip evidence may darken SHORT for highlight safety but may not veto LONG depth by collapsing the bracket.
           088 - Hard multi-channel LONG clipping with valid registered/static SHORT has a direct complete-RGB SHORT ownership route before presentation.
           089 - A physical bracket below 2x fails closed to trustworthy SHORT for saved output; processed LONG pseudo-HDR is forbidden.
-          090 - Saved dehaze/microcontrast must use the already-FUSED image as its five-tap guide; LONG-only spatial guidance after provenance is forbidden.
-          091 - Exact office visual regression: neutral/cool source texture may be luminance-scaled, but broad peach/orange pastel fill or local ranking absent from SHORT/LONG is forbidden.
+          090 - Saved dehaze/microcontrast is disabled spatially for FUSED output in V2.14; no post-provenance clarity guide may alter source geometry.
+          091 - Exact office visual regression: FUSED may not contain disconnected gray/blue lines, false borders, broad peach/orange fill, or local texture/ranking absent from registered SHORT/LONG.
           092 - Exact failed V2.13 run 33900980849 javac regression: CameraController stats.shortP90Linear must resolve to a SceneStats field populated from percentileSorted(shortSorted, 0.90f); producer/consumer drift is forbidden.
+          093 - Exact failed V2.13 V1.1 run 33903152566 post-build regression: post-build runtime digest must equal the compiler-tested bootstrap digest; stale candidate hashes are forbidden.
+          094 - V2.14 requested/frozen SHORT exposure product must never exceed LONG in AUTO or MANUAL; order repair may raise LONG only and must never feed LONG controls back into SHORT solving.
+          095 - Actual Camera2 result metadata is final exposure-order authority; CaptureSetSaver must reject LONG/SHORT<1.0 before fusion and may not clamp an inversion to 1.0.
+          096 - Successful global registration remains byte-identical; V2.14 local refinement is bounded to 4 source pixels, bidirectional/cycle-consistent, spatially regularized and confidence-gated before SHORT sampling.
+          097 - The 1/8 evidence/support atlas is broad-region guidance only; high-frequency RGB/detail ownership must be discrete LONG or locally registered SHORT whenever sources disagree.
+          098 - radianceFloorWeight/radianceRaised synthetic extrapolation and spatial post-fusion clarity are forbidden; mode 6 is pointwise only so unsupported peach/orange/gray fill or new contours cannot be generated.
+          099 - Exact 600-800% office-crop regression: coherent SHORT ground/foliage/road/sign detail must not become disconnected gray/blue streaks, broken contours, duplicate borders or false texture in FUSED.
           REGRESSIONS
-          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.13-debug.apk \
-                    output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.13-source-candidate.tar \
+          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.14-debug.apk \
+                    output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.14-source-candidate.tar \
                     output/RUNTIME_SOURCE_MANIFEST.tsv \
                     output/REPOSITORY_SOURCE_MANIFEST.tsv \
-                    output/V1.4.11-V2.12_to_V1.4.11-V2.13.forward.patch \
-                    output/V1.4.11-V2.13_to_V1.4.11-V2.12.rollback.patch \
+                    output/V1.4.11-V2.13_to_V1.4.11-V2.14.forward.patch \
+                    output/V1.4.11-V2.14_to_V1.4.11-V2.13.rollback.patch \
                     output/REGRESSIONS.txt | tee output/SHA256SUMS.txt
 
-      - name: Upload compiled V1.4.11 V2.13 candidate artifact
+      - name: Upload compiled V1.4.11 V2.14 candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.13
+          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.14
           path: output/
           if-no-files-found: error
           retention-days: 14
