@@ -1,4 +1,4 @@
-name: Build Iris HDR Viewfinder Test V1.4.11 V2.8
+name: Build Iris HDR Viewfinder Test V1.4.11 V2.9
 
 on:
   workflow_dispatch:
@@ -28,47 +28,47 @@ jobs:
         with:
           fetch-depth: 3
 
-      - name: Download exact successful V1.4.11 V2.7 Actions authority artifact
+      - name: Download exact successful V1.4.11 V2.8 Actions authority artifact
         uses: actions/download-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.7
-          path: ${{ runner.temp }}/v1411v27-authority-artifact
+          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.8
+          path: ${{ runner.temp }}/v1411v28-authority-artifact
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 33813880497
+          run-id: 33825853402
 
-      - name: Reconstruct exact V1.4.11 V2.7 authority and prove V1.4.11 V2.8 candidate before compilers
+      - name: Reconstruct exact V1.4.11 V2.8 authority and prove V1.4.11 V2.9 candidate before compilers
         shell: bash
         run: |
           set -euo pipefail
           IRIS_WORKFLOW_SYNTAX_ONLY=1 python3 scripts/verify_orientation.py
-          authority='f6bd9202063cdabd7eea76f7c2575a6ec11c453e'
-          authority_tree='7437b96f23544297f621980f96a57a3565a81382'
-          authority_dir="$RUNNER_TEMP/v1411v27-authority-artifact"
-          authority_src="$RUNNER_TEMP/v1411v27-authority-source"
+          authority='6fe30dc1a516edd17a5dce70f20c5f28ce620b11'
+          authority_tree='c86a12cb873f40c8c1d7af3ec62b630cefd7fca5'
+          authority_dir="$RUNNER_TEMP/v1411v28-authority-artifact"
+          authority_src="$RUNNER_TEMP/v1411v28-authority-source"
 
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'experiment-v1.4.11-v2-brightness-4ev'
           test "$(git rev-parse HEAD^)" = "$authority"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
-          grep -Fq 'versionCode = 25' app/build.gradle.kts
-          grep -Fq 'versionName = "1.0-v1.4.11-v2.8"' app/build.gradle.kts
+          grep -Fq 'versionCode = 26' app/build.gradle.kts
+          grep -Fq 'versionName = "1.0-v1.4.11-v2.9"' app/build.gradle.kts
           grep -Fq 'compileSdk = 37' app/build.gradle.kts
           grep -Fq 'minSdk = 29' app/build.gradle.kts
           grep -Fq 'targetSdk = 37' app/build.gradle.kts
           grep -Fq 'version "9.2.1"' build.gradle.kts
           sha256sum -c PACKAGE_MANIFEST_SHA256.txt
 
-          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.7-debug.apk" | awk '{print $1}')" = '0fa95db26b2a2e85bc222803026befcc4bcb768e7cc4a878f043726c13cb92d8'
-          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.7-source-candidate.tar" | awk '{print $1}')" = '8cd1c4e7400a3070ef4db4d661b97731181afc35370b1822f75646020e1e74b9'
-          test "$(sha256sum "$authority_dir/RUNTIME_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = 'f4b955d149910554f6429df491e5511964bd4b99ea9f6e222c8c4bfe80237faa'
-          test "$(sha256sum "$authority_dir/REPOSITORY_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = 'a2ac6673f5d393850b994289a9f461a238d29ed3f0bed550ef6a9fc4d988f3e2'
-          test "$(sha256sum "$authority_dir/REGRESSIONS.txt" | awk '{print $1}')" = '6125200b984c37258564addaa73c8e1fdc87ed267ba2b96c2eacc008c5fff575'
+          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.8-debug.apk" | awk '{print $1}')" = '510f3d6c37440ab4ff2fd86d5207e339811ccca92b29e4a4f66bad4aeae10780'
+          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.8-source-candidate.tar" | awk '{print $1}')" = '060b4a57bdbda7839d16f1bd52e619e44e587186a87b509b72117e8252371863'
+          test "$(sha256sum "$authority_dir/RUNTIME_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = '8a09f550fd23b97d23b49af41b001b86b90125fdf034979cdb6ddf8fe27372ef'
+          test "$(sha256sum "$authority_dir/REPOSITORY_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = 'efa7e8e219e453a95c9878f86d3d5648d9353b228724c395a145e64f983ac05b'
+          test "$(sha256sum "$authority_dir/REGRESSIONS.txt" | awk '{print $1}')" = '3e00f2db3a165b57eb74ae83d1460faa2b10dc7d26dcb87ddd554448b6692d4e'
           test "$(cat "$authority_dir/SOURCE_COMMIT.txt")" = "$authority"
 
           rm -rf "$authority_src"
           mkdir -p "$authority_src"
-          tar -xf "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.7-source-candidate.tar" -C "$authority_src"
+          tar -xf "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.8-source-candidate.tar" -C "$authority_src"
 
           python3 - "$authority_src" "$authority_dir" <<'PY'
           from pathlib import Path
@@ -76,8 +76,8 @@ jobs:
 
           src = Path(sys.argv[1])
           artifact = Path(sys.argv[2])
-          expected_runtime_sha = 'f4b955d149910554f6429df491e5511964bd4b99ea9f6e222c8c4bfe80237faa'
-          expected_repo_sha = 'a2ac6673f5d393850b994289a9f461a238d29ed3f0bed550ef6a9fc4d988f3e2'
+          expected_runtime_sha = '8a09f550fd23b97d23b49af41b001b86b90125fdf034979cdb6ddf8fe27372ef'
+          expected_repo_sha = 'efa7e8e219e453a95c9878f86d3d5648d9353b228724c395a145e64f983ac05b'
 
           def row(p, rel):
               b = p.read_bytes()
@@ -86,35 +86,35 @@ jobs:
 
           runtime_files = sorted(p for p in (src / 'app/src').rglob('*') if p.is_file())
           if len(runtime_files) != 12:
-              raise SystemExit(f'V1.4.11 V2.7 AUTHORITY RUNTIME COUNT FAIL: {len(runtime_files)}')
+              raise SystemExit(f'V1.4.11 V2.8 AUTHORITY RUNTIME COUNT FAIL: {len(runtime_files)}')
           runtime = ''.join(row(p, p.relative_to(src).as_posix()) for p in runtime_files).encode()
           if hashlib.sha256(runtime).hexdigest() != expected_runtime_sha:
-              raise SystemExit('V1.4.11 V2.7 AUTHORITY RUNTIME MANIFEST SHA FAIL')
+              raise SystemExit('V1.4.11 V2.8 AUTHORITY RUNTIME MANIFEST SHA FAIL')
           if runtime != (artifact / 'RUNTIME_SOURCE_MANIFEST.tsv').read_bytes():
-              raise SystemExit('V1.4.11 V2.7 AUTHORITY RUNTIME MANIFEST BYTE-EQUALITY FAIL')
+              raise SystemExit('V1.4.11 V2.8 AUTHORITY RUNTIME MANIFEST BYTE-EQUALITY FAIL')
 
           tracked = sorted(p for p in src.rglob('*') if p.is_file())
           if len(tracked) != 25:
-              raise SystemExit(f'V1.4.11 V2.7 AUTHORITY REPOSITORY COUNT FAIL: {len(tracked)}')
+              raise SystemExit(f'V1.4.11 V2.8 AUTHORITY REPOSITORY COUNT FAIL: {len(tracked)}')
           repo = ''.join(row(p, p.relative_to(src).as_posix()) for p in tracked).encode()
           if hashlib.sha256(repo).hexdigest() != expected_repo_sha:
-              raise SystemExit('V1.4.11 V2.7 AUTHORITY REPOSITORY MANIFEST SHA FAIL')
+              raise SystemExit('V1.4.11 V2.8 AUTHORITY REPOSITORY MANIFEST SHA FAIL')
           if repo != (artifact / 'REPOSITORY_SOURCE_MANIFEST.tsv').read_bytes():
-              raise SystemExit('V1.4.11 V2.7 AUTHORITY REPOSITORY MANIFEST BYTE-EQUALITY FAIL')
+              raise SystemExit('V1.4.11 V2.8 AUTHORITY REPOSITORY MANIFEST BYTE-EQUALITY FAIL')
 
           with tempfile.TemporaryDirectory() as td:
               tar_path = Path(td) / 'authority.tar'
-              subprocess.run(['git', 'archive', '--format=tar', f'--output={tar_path}', 'f6bd9202063cdabd7eea76f7c2575a6ec11c453e'], check=True)
+              subprocess.run(['git', 'archive', '--format=tar', f'--output={tar_path}', '6fe30dc1a516edd17a5dce70f20c5f28ce620b11'], check=True)
               checkout = Path(td) / 'git-archive'
               checkout.mkdir()
               subprocess.run(['tar', '-xf', str(tar_path), '-C', str(checkout)], check=True)
               git_files = sorted(p for p in checkout.rglob('*') if p.is_file())
               if [p.relative_to(checkout).as_posix() for p in git_files] != [p.relative_to(src).as_posix() for p in tracked]:
-                  raise SystemExit('V1.4.11 V2.7 AUTHORITY ARTIFACT/GIT PATH SET FAIL')
+                  raise SystemExit('V1.4.11 V2.8 AUTHORITY ARTIFACT/GIT PATH SET FAIL')
               for gp, ap in zip(git_files, tracked):
                   if gp.read_bytes() != ap.read_bytes():
-                      raise SystemExit(f'V1.4.11 V2.7 AUTHORITY ARTIFACT/GIT BYTE FAIL: {gp.relative_to(checkout)}')
-          print('EXACT V1.4.11 V2.7 ACTIONS ARTIFACT AUTHORITY: PASS')
+                      raise SystemExit(f'V1.4.11 V2.8 AUTHORITY ARTIFACT/GIT BYTE FAIL: {gp.relative_to(checkout)}')
+          print('EXACT V1.4.11 V2.8 ACTIONS ARTIFACT AUTHORITY: PASS')
           PY
 
           bad_platform='platforms;android-37'
@@ -135,7 +135,7 @@ jobs:
           from pathlib import Path
           import hashlib, subprocess
 
-          authority = 'f6bd9202063cdabd7eea76f7c2575a6ec11c453e'
+          authority = '6fe30dc1a516edd17a5dce70f20c5f28ce620b11'
           expected_changes = {
               '.github/workflows/build.yml': 'M',
               'BUILD_WORKFLOW_COPY.yml': 'M',
@@ -144,7 +144,9 @@ jobs:
               'README.md': 'M',
               'VSCODE_DEV_UPLOAD.txt': 'M',
               'app/build.gradle.kts': 'M',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': 'M',
+              'app/src/main/assets/shaders/hdr_display.frag': 'M',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': 'M',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': 'M',
               'scripts/verify_orientation.py': 'M',
           }
           raw = subprocess.check_output(['git', 'diff', '--name-status', authority, 'HEAD'], text=True).splitlines()
@@ -153,7 +155,7 @@ jobs:
               parts = line.split('\t')
               actual[parts[-1]] = parts[0][0]
           if actual != expected_changes:
-              raise SystemExit(f'V1.4.11 V2.8 ALLOWLIST FAIL: actual={actual} expected={expected_changes}')
+              raise SystemExit(f'V1.4.11 V2.9 ALLOWLIST FAIL: actual={actual} expected={expected_changes}')
 
           expected_tracked = [
               '.github/workflows/build.yml', '.gitignore', 'BUILD_WORKFLOW_COPY.yml',
@@ -179,36 +181,34 @@ jobs:
 
           files = sorted(p for p in Path('app/src').rglob('*') if p.is_file())
           if len(files) != 12:
-              raise SystemExit(f'V1.4.11 V2.8 RUNTIME FILE COUNT FAIL: {len(files)}')
+              raise SystemExit(f'V1.4.11 V2.9 RUNTIME FILE COUNT FAIL: {len(files)}')
           rows=[]
           for p in files:
               b=p.read_bytes(); lines=b.count(b'\n') + (1 if b and not b.endswith(b'\n') else 0)
               rows.append(f"{hashlib.sha256(b).hexdigest()}\t{len(b)}\t{lines}\t{p.as_posix()}\n")
           manifest=''.join(rows).encode()
           digest=hashlib.sha256(manifest).hexdigest()
-          expected='8a09f550fd23b97d23b49af41b001b86b90125fdf034979cdb6ddf8fe27372ef'
+          expected='d47cb8994e75cc345d88253071eff10aadcb055756d60d0b40fb76bc6d3ad251'
           if digest != expected:
-              raise SystemExit(f'V1.4.11 V2.8 RUNTIME MANIFEST FAIL: {digest} != {expected}')
+              raise SystemExit(f'V1.4.11 V2.9 RUNTIME MANIFEST FAIL: {digest} != {expected}')
           Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
 
           protected = {
               'app/src/main/AndroidManifest.xml': '1895ba57dce9a0cffa0113bd3b5708b232e3c42e7b1d304630d7f974153900bd',
               'app/src/main/assets/shaders/copy_2d.frag': 'b6b890e3be034a0d4980fd324fe0f469c7a2b0a126e958607bc8c4b9fbf97a55',
               'app/src/main/assets/shaders/fullscreen.vert': '7d8ee58c4500a46dd9614404a17ea4c7e104a6bf43976ecb85795799fdcd7fb4',
-              'app/src/main/assets/shaders/hdr_display.frag': '287cf4e93a7c80ad4c46f37479efda7b5312336871109fe2a15c3a610ad19b7f',
               'app/src/main/assets/shaders/oes_to_rgb.frag': '388d49929564efba24900794e035f88b461485f4da4f2e12caf71e3531ab6443',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'b40ce3d4c28a1eb240a7246306a8e22775d8c54b3ef2e9657c68e2bd39206460',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': 'ae0f0efc20ab5803f67b77681da247df2230e6518f60a52b394c3ab4a13320be',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': 'e05484de966351424d3a5399eb159daccba766ed177c973b4b7529af014a60c5',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': 'e960e2f4cc0cb36b2af60cb6fc0c287e5d820cceb355bccaedb4e05ea2d99d4d',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': '7f420d891ba89acd385f643b1aa337eecf8726fb660ebf8143744ee6ae829c0d',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java': '06c8a2b56a3fa4ab6f73de136bf711cbbc68cddd51af361955ffa454ad02ea04',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java': 'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
           }
           for rel, sha in protected.items():
               got=hashlib.sha256(Path(rel).read_bytes()).hexdigest()
               if got != sha:
-                  raise SystemExit(f'V1.4.11 V2.8 PROTECTED RUNTIME FAIL: {rel} {got} != {sha}')
-          print(f'V1.4.11 V2.8 MINIMUM CANDIDATE PASS: changed={len(actual)} runtime=12 digest={digest} protected={len(protected)}/{len(protected)}')
+                  raise SystemExit(f'V1.4.11 V2.9 PROTECTED RUNTIME FAIL: {rel} {got} != {sha}')
+          print(f'V1.4.11 V2.9 MINIMUM CANDIDATE PASS: changed={len(actual)} runtime=12 digest={digest} protected={len(protected)}/{len(protected)}')
           PY
 
           patch_sha=''
@@ -228,10 +228,10 @@ jobs:
           cmp -s "$RUNNER_TEMP/forward-7.patch" "$RUNNER_TEMP/forward-40.patch"
           cmp -s "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/rollback-12.patch"
           cmp -s "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/rollback-40.patch"
-          cp "$RUNNER_TEMP/forward-7.patch" "$RUNNER_TEMP/V1.4.11-V2.7_to_V1.4.11-V2.8.forward.patch"
-          cp "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/V1.4.11-V2.8_to_V1.4.11-V2.7.rollback.patch"
+          cp "$RUNNER_TEMP/forward-7.patch" "$RUNNER_TEMP/V1.4.11-V2.8_to_V1.4.11-V2.9.forward.patch"
+          cp "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/V1.4.11-V2.9_to_V1.4.11-V2.8.rollback.patch"
 
-          python3 - "$authority_src" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/V1.4.11-V2.7_to_V1.4.11-V2.8.forward.patch" "$RUNNER_TEMP/V1.4.11-V2.8_to_V1.4.11-V2.7.rollback.patch" <<'PY'
+          python3 - "$authority_src" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/V1.4.11-V2.8_to_V1.4.11-V2.9.forward.patch" "$RUNNER_TEMP/V1.4.11-V2.9_to_V1.4.11-V2.8.rollback.patch" <<'PY'
           from pathlib import Path
           import shutil, subprocess, sys, tempfile
           authority, candidate, forward, rollback = map(Path, sys.argv[1:])
@@ -306,7 +306,7 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:compileDebugJavaWithJavac
 
-      - name: Replay V1.4.11 V2.8 runtime regressions on compiler-tested candidate
+      - name: Replay V1.4.11 V2.9 runtime regressions on compiler-tested candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -317,7 +317,7 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Post-build invariance and freeze compiled V1.4.11 V2.8 candidate
+      - name: Post-build invariance and freeze compiled V1.4.11 V2.9 candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -330,7 +330,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, subprocess
-          expected_runtime='8a09f550fd23b97d23b49af41b001b86b90125fdf034979cdb6ddf8fe27372ef'
+          expected_runtime='d47cb8994e75cc345d88253071eff10aadcb055756d60d0b40fb76bc6d3ad251'
           files=sorted(p for p in Path('app/src').rglob('*') if p.is_file())
           rows=[]
           for p in files:
@@ -352,12 +352,10 @@ jobs:
               'app/src/main/AndroidManifest.xml': '1895ba57dce9a0cffa0113bd3b5708b232e3c42e7b1d304630d7f974153900bd',
               'app/src/main/assets/shaders/copy_2d.frag': 'b6b890e3be034a0d4980fd324fe0f469c7a2b0a126e958607bc8c4b9fbf97a55',
               'app/src/main/assets/shaders/fullscreen.vert': '7d8ee58c4500a46dd9614404a17ea4c7e104a6bf43976ecb85795799fdcd7fb4',
-              'app/src/main/assets/shaders/hdr_display.frag': '287cf4e93a7c80ad4c46f37479efda7b5312336871109fe2a15c3a610ad19b7f',
               'app/src/main/assets/shaders/oes_to_rgb.frag': '388d49929564efba24900794e035f88b461485f4da4f2e12caf71e3531ab6443',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'b40ce3d4c28a1eb240a7246306a8e22775d8c54b3ef2e9657c68e2bd39206460',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': 'ae0f0efc20ab5803f67b77681da247df2230e6518f60a52b394c3ab4a13320be',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': 'e05484de966351424d3a5399eb159daccba766ed177c973b4b7529af014a60c5',
-              'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': 'e960e2f4cc0cb36b2af60cb6fc0c287e5d820cceb355bccaedb4e05ea2d99d4d',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': '7f420d891ba89acd385f643b1aa337eecf8726fb660ebf8143744ee6ae829c0d',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java': '06c8a2b56a3fa4ab6f73de136bf711cbbc68cddd51af361955ffa454ad02ea04',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java': 'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
           }
@@ -370,18 +368,18 @@ jobs:
           mapfile -t apks < <(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print | sort)
           test ${#apks[@]} -eq 1
           mkdir -p output
-          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.8-debug.apk
-          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.8-source-candidate.tar "$GITHUB_SHA"
+          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.9-debug.apk
+          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.9-source-candidate.tar "$GITHUB_SHA"
           printf '%s\n' "$GITHUB_SHA" > output/SOURCE_COMMIT.txt
           cp compiled-runtime-manifest.tsv output/RUNTIME_SOURCE_MANIFEST.tsv
           cp compiled-repository-manifest.tsv output/REPOSITORY_SOURCE_MANIFEST.tsv
-          cp "$RUNNER_TEMP/V1.4.11-V2.7_to_V1.4.11-V2.8.forward.patch" output/V1.4.11-V2.7_to_V1.4.11-V2.8.forward.patch
-          cp "$RUNNER_TEMP/V1.4.11-V2.8_to_V1.4.11-V2.7.rollback.patch" output/V1.4.11-V2.8_to_V1.4.11-V2.7.rollback.patch
+          cp "$RUNNER_TEMP/V1.4.11-V2.8_to_V1.4.11-V2.9.forward.patch" output/V1.4.11-V2.8_to_V1.4.11-V2.9.forward.patch
+          cp "$RUNNER_TEMP/V1.4.11-V2.9_to_V1.4.11-V2.8.rollback.patch" output/V1.4.11-V2.9_to_V1.4.11-V2.8.rollback.patch
           cp "$RUNNER_TEMP/FORWARD_PATCH_SHA256.txt" output/FORWARD_PATCH_SHA256.txt
           cp "$RUNNER_TEMP/ROLLBACK_PATCH_SHA256.txt" output/ROLLBACK_PATCH_SHA256.txt
           cat > output/REGRESSIONS.txt <<'REGRESSIONS'
           001 - app/build/** and app/.cxx/** never count as runtime-source changes.
-          002 - vscode.dev upload must preserve the complete 25-file successful V2.7 tracked candidate universe and all 12 app/src runtime files; V2.8 may modify existing files only.
+          002 - vscode.dev upload must preserve the complete 25-file successful V2.8 tracked candidate universe and all 12 app/src runtime files; V2.9 may modify existing files only.
           003 - API-33-incompatible readAllBytes must not return.
           004 - Android fullUser orientation and responsive portrait/landscape controls remain intact.
           005 - SurfaceTexture producer transform is consumed exactly once.
@@ -398,14 +396,14 @@ jobs:
           016 - AUTO/MANUAL HDR ownership remains explicit and steady preview remains a two-request manual pair.
           017 - Fixed ~8x / 3EV AUTO bracket and sensor-minimum SHORT ISO remain unchanged.
           018 - Clean converged HAL AE remains bootstrap authority before live-stat stabilization.
-          019 - Existing AUTO flicker behavior remains unchanged from successful V2.7 authority.
+          019 - Existing AUTO flicker behavior remains unchanged from successful V2.8 authority.
           020 - MANUAL SAFE keeps the selected SHORT physical shutter; only LONG may snap for flicker and 60-FPS cap remains authoritative.
           021 - SHORT crossing LONG clamps SHORT at LONG and never silently swaps controls.
           022 - Brightness remains -16..+1EV, presentation-only, frozen at shutter.
           023 - Gamma remains 0.50..2.00, RGB-ratio preserving, presentation-only and frozen at shutter.
-          024 - Saved FUSED remains GLES3-primary through the existing shared hdr_display.frag; CPU JpegFusion is explicit GL-failure fallback only.
-          025 - V2.8 stays on the successful V2.7 JPEG architecture; RawHdrFusion.java, raw_hdr_* and still_fusion.frag remain forbidden.
-          026 - V2.8 authority is exactly successful V2.7 commit f6bd9202063cdabd7eea76f7c2575a6ec11c453e / Actions run 33813880497 / artifact 9915838166.
+          024 - Saved FUSED is produced only by the existing shared hdr_display.frag GPU path; independent CPU HDR substitution after GL failure is forbidden.
+          025 - V2.9 stays on the successful V2.8 JPEG-source architecture; RawHdrFusion.java, raw_hdr_* and still_fusion.frag remain forbidden.
+          026 - V2.9 authority is exactly successful V2.8 commit 6fe30dc1a516edd17a5dce70f20c5f28ce620b11 / Actions run 33825853402 / artifact 9919936639.
           027 - LONG remains saved geometry/appearance authority outside proven lost-radiance regions; valid SHORT highlight evidence must not globally repaint the scene.
           028 - Saved mode=3 may use fixed neighboring samples only for scalar ownership coherence; output RGB at an owned pixel comes only from the registered center SHORT mapped into LONG appearance, never neighbor RGB fill/inpainting/sharpening.
           029 - V2.5 luma-from-SHORT/chroma-from-LONG hybrid remains permanently forbidden; no shortChromaWeight/mergeStillLumaAndChroma path may return.
@@ -413,7 +411,7 @@ jobs:
           031 - V2.6 power-based SHORT provenance lift is removed in V2.7; saved SHORT->LONG appearance is one robust per-channel linear-light calibration from registered overlap.
           032 - SHORT must be registered into LONG coordinates before saved gain estimation, support measurement, or fusion; LONG output geometry never moves.
           033 - Registration is forward/backward, quality/uniqueness/boundary aware and cycle-consistent; low confidence forces exact LONG fallback.
-          034 - GPU and CPU fallback share the same V2.7 registration owner, calibrated SHORT->LONG gain, and exact fixed cardinal radii 2/6 radiometric-coherence thresholds.
+          034 - V2.9 intentionally retires CPU HDR output authority; JpegFusion registration/alignment remains the single pre-GPU registration owner and JpegFusion.java stays byte-identical to V2.8.
           035 - Brightness alone never grants SHORT ownership; mapped SHORT must prove LONG lost radiance while SHORT itself has signal and headroom.
           036 - Smooth genuinely clipped LONG whites/lights are valid SHORT-recovery targets when registered mapped SHORT contains usable radiance; texture is not required merely because a surface is smooth.
           037 - Healthy bright LONG with no lost-radiance proof remains exact LONG even beside clipped/recovered neighborhoods.
@@ -423,26 +421,38 @@ jobs:
           041 - No Gaussian/box/OpenCV/variable-kernel neighborhood operator may replace the accepted fixed radius-2/radius-6 sparse support lattice.
           042 - OpenCV remains simulation-only; no OpenCV runtime dependency may enter the Android candidate.
           043 - Global photographic body tone remains downstream, RGB-ratio preserving, and fades to zero by linear 0.68 before the existing 0.70 HDR shoulder.
-          044 - AUTO exposure policy, MANUAL SHORT shutter behavior, CameraController, DNG ownership, capture routing and live mode=2 are protected byte-for-byte from successful V2.7.
+          044 - AUTO exposure policy, MANUAL SHORT shutter behavior, CameraController, DNG ownership and live mode=2 remain inherited from successful V2.8; only saved-fusion routing changes intentionally.
           045 - The exact real-photo V2.7 simulation contract remains the baseline: source-equivalent registration yields positive SHORT recovery for window/desk and negligible under-desk ownership while adversarial low-confidence/noisy/clipped cases fail closed.
           046 - Java compiler regression from failed run 33812132460: JpegFusion must retain the exact V2.6 mapLut(float,float[]) helper used by saved Gamma; unresolved mapLut is forbidden.
           047 - V2.8 clipped-core ownership: when strict two-channel lost-LONG proof, valid SHORT headroom, radiometric proof, support and full registration all hold, SHORT ownership must be exactly 1.0; fractional LONG contamination is forbidden in the core.
           048 - V2.8 SHORT core color is one scalar linear-light exposure scale applied to complete registered SHORT RGB; per-channel appearance gains may remain only outside the hard core/feather.
           049 - V2.8 valid-LONG and one-channel-saturation fail-closed behavior is preserved; the new core requires secondLong>=0.992, longEncodedY>=0.70, SHORT peak<=0.94 and registrationConfidence>=0.78.
-          050 - V2.8 preserves V2.7 registration, HdrGlView, shader, capture, DNG, exposure policy and all unrelated runtime bytes exactly; only JpegFusion.java may change at runtime.
+          050 - Historical V2.8 CPU hard-core regression remains preserved byte-for-byte in JpegFusion.java, but V2.9 intentionally supersedes CPU production HDR authority.
+          051 - V2.9 production FUSED_HDR is GPU-only; CaptureSetSaver must never call JpegFusion.fuse or silently substitute a second HDR algorithm.
+          052 - V2.9 reuses the exact existing hdr_display.frag shader-file universe and V2.8 compiler commands; no new still shader asset is permitted.
+          053 - V2.9 saved still fusion is multipass: conservative evidence, isotropic/topology support, then final provenance composition; live mode=2 remains physically unchanged.
+          054 - Broad SHORT recovery requires two-channel lost-LONG proof, valid non-clipped SHORT, scalar radiometric proof, registration confidence, low-frequency isotropic support and temporal/static consistency.
+          055 - Compact emitter recovery is separate and stricter; it requires near-exact multi-channel LONG clipping, valid SHORT, strong scalar radiometry and local source support.
+          056 - Near SHORT saturation vetoes broad/feather recovery so clipped bulbs/highlights cannot seed cyan/white rings or false bright outlines.
+          057 - Proven cores select one source exactly (100% SHORT); only a narrow conservative boundary may feather. Motion/temporal uncertainty must not become a blended third image.
+          058 - Production SHORT radiometric proof uses one scalar gain (median of the proven V2.8 per-channel overlap estimates); independent R/G/B gains are neutralized in final GPU recovery.
+          059 - Recovered broad highlights take spatial detail/chromaticity from registered SHORT but low-frequency display luminance from LONG, preserving source-supported structure without high-gain solarization.
+          060 - Recovered compact highlights use conservative near-neutral chroma and a lower bounded luminance anchor; fused-only cyan/orange rings and near-white flattening are forbidden.
+          061 - JpegFusion.java remains byte-identical to successful V2.8, including the mapLut compiler regression and registration/appearance-estimation implementation.
+          062 - V2.9 HdrGlView decode, forward/backward registration, alignShortToLong and appearance-gain-estimation prelude remains byte-identical to successful V2.8.
           REGRESSIONS
-          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.8-debug.apk \
-                    output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.8-source-candidate.tar \
+          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.9-debug.apk \
+                    output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.9-source-candidate.tar \
                     output/RUNTIME_SOURCE_MANIFEST.tsv \
                     output/REPOSITORY_SOURCE_MANIFEST.tsv \
-                    output/V1.4.11-V2.7_to_V1.4.11-V2.8.forward.patch \
-                    output/V1.4.11-V2.8_to_V1.4.11-V2.7.rollback.patch \
+                    output/V1.4.11-V2.8_to_V1.4.11-V2.9.forward.patch \
+                    output/V1.4.11-V2.9_to_V1.4.11-V2.8.rollback.patch \
                     output/REGRESSIONS.txt | tee output/SHA256SUMS.txt
 
-      - name: Upload compiled V1.4.11 V2.8 candidate artifact
+      - name: Upload compiled V1.4.11 V2.9 candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.8
+          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.9
           path: output/
           if-no-files-found: error
           retention-days: 14

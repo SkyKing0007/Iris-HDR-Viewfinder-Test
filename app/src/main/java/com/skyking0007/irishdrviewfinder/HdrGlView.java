@@ -582,6 +582,9 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform3f(
                     GLES30.glGetUniformLocation(displayProgram, "stillShortLinearGain"),
                     1.0f, 1.0f, 1.0f);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "stillShortScalarGain"),
+                    1.0f);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 
@@ -612,13 +615,15 @@ final class HdrGlView extends GLSurfaceView {
             shortBitmap = alignedShort;
             JpegFusion.AppearanceGain appearanceGain =
                     JpegFusion.estimateAppearanceGain(shortBitmap, longBitmap, exposureRatio);
+            float scalarGain = median3(appearanceGain.r, appearanceGain.g, appearanceGain.b);
+            scalarGain = Math.max(1.0f, Math.min(65_536.0f, scalarGain));
             RuntimeLogger.event(
                     "GPU_STILL_REGISTRATION",
                     String.format(java.util.Locale.US,
-                            "sampleDx=%+.3f sampleDy=%+.3f score=%.4f margin=%.4f cycle=%.3f confidence=%.3f gain=%.3f/%.3f/%.3f",
+                            "sampleDx=%+.3f sampleDy=%+.3f score=%.4f margin=%.4f cycle=%.3f confidence=%.3f gain=%.3f/%.3f/%.3f scalar=%.3f",
                             registration.sampleDx, registration.sampleDy, registration.score,
                             registration.margin, registration.cycleError, registration.confidence,
-                            appearanceGain.r, appearanceGain.g, appearanceGain.b));
+                            appearanceGain.r, appearanceGain.g, appearanceGain.b, scalarGain));
 
             int width = shortBitmap.getWidth();
             int height = shortBitmap.getHeight();
@@ -635,70 +640,54 @@ final class HdrGlView extends GLSurfaceView {
             RuntimeLogger.event(
                     "GPU_STILL_FUSION",
                     String.format(java.util.Locale.US,
-                            "start %dx%d ratio=%.3f brightness=%+.1fEV gamma=%.2f",
-                            width, height, exposureRatio, brightnessEv, gamma));
+                            "V2.9 GPU-only multipass start %dx%d ratio=%.3f scalar=%.3f brightness=%+.1fEV gamma=%.2f",
+                            width, height, exposureRatio, scalarGain, brightnessEv, gamma));
 
             int shortTexture = 0;
             int longTexture = 0;
+            int evidenceTexture = 0;
+            int supportTexture = 0;
             int outputTexture = 0;
             Bitmap output = null;
             try {
                 shortTexture = createTexture2d();
                 longTexture = createTexture2d();
+                evidenceTexture = createTexture2d();
+                supportTexture = createTexture2d();
                 outputTexture = createTexture2d();
 
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shortTexture);
                 GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, shortBitmap, 0);
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, longTexture);
                 GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, longBitmap, 0);
+                int analysisWidth = Math.max(1, (width + 7) / 8);
+                int analysisHeight = Math.max(1, (height + 7) / 8);
+                allocateRgbTexture(evidenceTexture, analysisWidth, analysisHeight);
+                allocateRgbTexture(supportTexture, analysisWidth, analysisHeight);
                 allocateRgbTexture(outputTexture, width, height);
                 JpegFusion.recycleBitmap(shortBitmap);
                 shortBitmap = null;
                 JpegFusion.recycleBitmap(longBitmap);
                 longBitmap = null;
 
-                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
-                GLES30.glFramebufferTexture2D(
-                        GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
-                        GLES30.GL_TEXTURE_2D, outputTexture, 0);
-                int fbStatus = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
-                if (fbStatus != GLES30.GL_FRAMEBUFFER_COMPLETE) {
-                    throw new IllegalStateException("GPU still framebuffer incomplete: 0x"
-                            + Integer.toHexString(fbStatus));
-                }
-                GLES30.glViewport(0, 0, width, height);
-                // Reuse V2.2's existing display shader/program for the off-screen still
-                // pass. mode=3 enables still-only reliable SHORT texture recovery while
-                // mode=2 live HDR retains V2.2 ownership behavior. No new shader asset
-                // or new compiler/patch mechanism is introduced.
-                GLES30.glUseProgram(displayProgram);
-                bindQuad();
-                bindSampler2d(displayProgram, "normalTex", longTexture, 0);
-                bindSampler2d(displayProgram, "shortTex", shortTexture, 1);
-                bindSampler2d(displayProgram, "longTex", longTexture, 2);
-                GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "mode"), 3);
-                GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "rotationQuarterTurns"), 0);
-                GLES30.glUniform2f(GLES30.glGetUniformLocation(displayProgram, "fullFitScale"), 1.0f, 1.0f);
-                GLES30.glUniform2f(GLES30.glGetUniformLocation(displayProgram, "splitFitScale"), 1.0f, 1.0f);
-                GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveNormal"), 0);
-                GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveShort"), 1);
-                GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveLong"), 1);
-                GLES30.glUniform1f(
-                        GLES30.glGetUniformLocation(displayProgram, "exposureRatio"),
-                        (float) Math.max(1.0, Math.min(65_536.0, exposureRatio)));
-                GLES30.glUniform1f(
-                        GLES30.glGetUniformLocation(displayProgram, "displayBrightnessEv"),
-                        Math.max(-16.0f, Math.min(1.0f, brightnessEv)));
-                GLES30.glUniform1f(
-                        GLES30.glGetUniformLocation(displayProgram, "displayGamma"),
-                        Math.max(0.50f, Math.min(2.00f, gamma)));
-                GLES30.glUniform1f(
-                        GLES30.glGetUniformLocation(displayProgram, "stillRegistrationConfidence"),
-                        registration.confidence);
-                GLES30.glUniform3f(
-                        GLES30.glGetUniformLocation(displayProgram, "stillShortLinearGain"),
-                        appearanceGain.r, appearanceGain.g, appearanceGain.b);
-                GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+                // V2.9 uses the already compiled hdr_display.frag for all still passes:
+                // 3=evidence, 4=isotropic/topology support, 5=final provenance composition.
+                // The existing live mode=2 path and shader-file universe are unchanged.
+                renderStillPass(
+                        evidenceTexture, analysisWidth, analysisHeight,
+                        3, longTexture, shortTexture, longTexture,
+                        exposureRatio, brightnessEv, gamma,
+                        registration.confidence, scalarGain);
+                renderStillPass(
+                        supportTexture, analysisWidth, analysisHeight,
+                        4, evidenceTexture, shortTexture, longTexture,
+                        exposureRatio, brightnessEv, gamma,
+                        registration.confidence, scalarGain);
+                renderStillPass(
+                        outputTexture, width, height,
+                        5, supportTexture, shortTexture, longTexture,
+                        exposureRatio, brightnessEv, gamma,
+                        registration.confidence, scalarGain);
 
                 ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4)
                         .order(ByteOrder.nativeOrder());
@@ -721,13 +710,15 @@ final class HdrGlView extends GLSurfaceView {
                 long elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L;
                 RuntimeLogger.event(
                         "GPU_STILL_FUSION",
-                        "complete ms=" + elapsedMs + " outputBytes=" + encoded.length);
+                        "V2.9 GPU-only multipass complete ms=" + elapsedMs
+                                + " outputBytes=" + encoded.length);
                 return encoded;
             } finally {
                 JpegFusion.recycleBitmap(shortBitmap);
                 JpegFusion.recycleBitmap(longBitmap);
                 JpegFusion.recycleBitmap(output);
-                int[] textures = {shortTexture, longTexture, outputTexture};
+                int[] textures = {
+                        shortTexture, longTexture, evidenceTexture, supportTexture, outputTexture};
                 for (int texture : textures) {
                     if (texture != 0) {
                         int[] one = {texture};
@@ -739,6 +730,71 @@ final class HdrGlView extends GLSurfaceView {
                     GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight);
                 }
             }
+        }
+
+        private void renderStillPass(
+                int targetTexture,
+                int targetWidth,
+                int targetHeight,
+                int stillMode,
+                int normalSourceTexture,
+                int shortSourceTexture,
+                int longSourceTexture,
+                double exposureRatio,
+                float brightnessEv,
+                float gamma,
+                float registrationConfidence,
+                float scalarGain) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+            GLES30.glFramebufferTexture2D(
+                    GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                    GLES30.GL_TEXTURE_2D, targetTexture, 0);
+            int fbStatus = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
+            if (fbStatus != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                throw new IllegalStateException(
+                        "V2.9 GPU still framebuffer incomplete mode=" + stillMode + ": 0x"
+                                + Integer.toHexString(fbStatus));
+            }
+            GLES30.glViewport(0, 0, targetWidth, targetHeight);
+            GLES30.glUseProgram(displayProgram);
+            bindQuad();
+            bindSampler2d(displayProgram, "normalTex", normalSourceTexture, 0);
+            bindSampler2d(displayProgram, "shortTex", shortSourceTexture, 1);
+            bindSampler2d(displayProgram, "longTex", longSourceTexture, 2);
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "mode"), stillMode);
+            GLES30.glUniform1i(
+                    GLES30.glGetUniformLocation(displayProgram, "rotationQuarterTurns"), 0);
+            GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(displayProgram, "fullFitScale"), 1.0f, 1.0f);
+            GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(displayProgram, "splitFitScale"), 1.0f, 1.0f);
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveNormal"), 1);
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveShort"), 1);
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(displayProgram, "haveLong"), 1);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "exposureRatio"),
+                    (float) Math.max(1.0, Math.min(65_536.0, exposureRatio)));
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "displayBrightnessEv"),
+                    Math.max(-16.0f, Math.min(1.0f, brightnessEv)));
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "displayGamma"),
+                    Math.max(0.50f, Math.min(2.00f, gamma)));
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "stillRegistrationConfidence"),
+                    registrationConfidence);
+            // V2.9 production composition never applies independent RGB appearance gains.
+            GLES30.glUniform3f(
+                    GLES30.glGetUniformLocation(displayProgram, "stillShortLinearGain"),
+                    1.0f, 1.0f, 1.0f);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "stillShortScalarGain"),
+                    scalarGain);
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+        }
+
+        private static float median3(float a, float b, float c) {
+            return a + b + c - Math.max(a, Math.max(b, c)) - Math.min(a, Math.min(b, c));
         }
 
         private void bindQuad() {

@@ -1,12 +1,12 @@
-V1.4.11 V2.8 — VSCODE.DEV UPLOAD
+V1.4.11 V2.9 — VSCODE.DEV UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: f6bd9202063cdabd7eea76f7c2575a6ec11c453e (successful V2.7)
+Required direct parent / runtime authority: 6fe30dc1a516edd17a5dce70f20c5f28ce620b11 (successful V2.8)
 
-1. Open a fresh vscode.dev session on the branch at the successful V2.7 commit above.
+1. Open a fresh vscode.dev session on the branch at the successful V2.8 commit above.
 2. Upload/replace ALL files from this ZIP at repository root, preserving paths.
 3. Do not add extra files or folders.
-4. Source Control should show exactly 9 changed tracked files relative to V2.7:
+4. Source Control should show exactly 11 changed tracked files relative to V2.8:
    .github/workflows/build.yml
    BUILD_WORKFLOW_COPY.yml
    PACKAGE_INFO.txt
@@ -14,12 +14,14 @@ Required direct parent / runtime authority: f6bd9202063cdabd7eea76f7c2575a6ec11c
    README.md
    VSCODE_DEV_UPLOAD.txt
    app/build.gradle.kts
-   app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+   app/src/main/assets/shaders/hdr_display.frag
+   app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+   app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
    scripts/verify_orientation.py
 5. Commit once and push once.
 
 Suggested commit message:
-V1.4.11 V2.8 exact SHORT clipped-core ownership
+V1.4.11 V2.9 GPU-only source-supported universal fusion
 
 Do not commit the ZIP itself.
 Do not alter dev/main.

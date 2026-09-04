@@ -15,6 +15,7 @@ uniform float displayBrightnessEv;
 uniform float displayGamma;
 uniform float stillRegistrationConfidence;
 uniform vec3 stillShortLinearGain;
+uniform float stillShortScalarGain;
 uniform vec2 fullFitScale;
 uniform vec2 splitFitScale;
 
@@ -167,64 +168,198 @@ vec3 highlightColorOwnership(
     return clamp(vec3(targetY) + chroma * clamp(gamutScale, 0.0, 1.0), 0.0, 1.0);
 }
 
-float savedRadiometricRatio(vec3 shortRgb, vec3 longRgb) {
-    vec3 mappedShortScene = srgbToLinear(shortRgb) * stillShortLinearGain;
-    vec3 longScene = srgbToLinear(longRgb);
-    return linearLuma(mappedShortScene) / max(linearLuma(longScene), 0.00001);
+// IRIS_V29_GPU_PROVENANCE_BEGIN
+float shortChromaFraction(vec3 rgb) {
+    float peak = max3(rgb);
+    float floorValue = min(rgb.r, min(rgb.g, rgb.b));
+    return (peak - floorValue) / max(peak, 0.02);
 }
 
-float savedSupportEvidenceAt(vec2 sampleUv) {
-    vec3 sampleShort = texture(shortTex, sampleUv).rgb;
-    vec3 sampleLong = texture(longTex, sampleUv).rgb;
-    float shortSignal = smoothstep(0.06, 0.14, encodedLuma(sampleShort));
-    float shortHeadroom = 1.0 - smoothstep(0.965, 0.995, max3(sampleShort));
-    float secondLong = secondLargest3(sampleLong);
-    float radiometricRatio = savedRadiometricRatio(sampleShort, sampleLong);
-    return shortSignal * shortHeadroom
-        * smoothstep(0.45, 0.68, encodedLuma(sampleLong))
-        * smoothstep(0.72, 0.90, secondLong)
-        * smoothstep(1.10, 1.34, radiometricRatio);
+float stillScalarRadiometricRatio(vec3 shortRgb, vec3 longRgb) {
+    vec3 mappedShort = srgbToLinear(shortRgb) * stillShortScalarGain;
+    vec3 longLinear = srgbToLinear(longRgb);
+    return linearLuma(mappedShort) / max(linearLuma(longLinear), 0.00001);
 }
 
-float savedCardinalSupport(vec2 uv, vec2 texel, float radius) {
-    float evidence = 0.0;
-    evidence += savedSupportEvidenceAt(clamp(uv + vec2(-radius * texel.x, 0.0), vec2(0.0), vec2(1.0)));
-    evidence += savedSupportEvidenceAt(clamp(uv + vec2( radius * texel.x, 0.0), vec2(0.0), vec2(1.0)));
-    evidence += savedSupportEvidenceAt(clamp(uv + vec2(0.0, -radius * texel.y), vec2(0.0), vec2(1.0)));
-    evidence += savedSupportEvidenceAt(clamp(uv + vec2(0.0,  radius * texel.y), vec2(0.0), vec2(1.0)));
-    return 0.25 * evidence;
+float stillShortValidity(vec3 shortRgb) {
+    float shortY = encodedLuma(shortRgb);
+    float shortPeak = max3(shortRgb);
+    return smoothstep(0.07, 0.13, shortY)
+        * (1.0 - smoothstep(0.94, 0.975, shortPeak));
 }
 
-float coherentShortOwnership(vec2 uv, vec3 centerShortRgb, vec3 centerLongRgb) {
-    // V2.7 saved fusion: brightness alone cannot grant SHORT ownership. The
-    // registered, radiometrically mapped SHORT must prove LONG lost radiance,
-    // and fixed cardinal samples at radii 2 and 6 must support that loss unless
-    // the center is a very strong multi-channel clip. This exact sparse lattice
-    // is shared with the CPU fallback; no filtered neighborhood is substituted.
-    float shortSignal = smoothstep(0.06, 0.14, encodedLuma(centerShortRgb));
-    float shortHeadroom = 1.0 - smoothstep(0.965, 0.995, max3(centerShortRgb));
-    float longEncodedY = encodedLuma(centerLongRgb);
-    float secondLong = secondLargest3(centerLongRgb);
-    float radiometricRatio = savedRadiometricRatio(centerShortRgb, centerLongRgb);
-    float twoChannel = smoothstep(0.78, 0.94, secondLong);
-    float radiometric = smoothstep(0.50, 0.74, longEncodedY)
-        * twoChannel
-        * smoothstep(1.30, 1.75, radiometricRatio);
-    float hard = smoothstep(0.975, 0.997, secondLong)
-        * smoothstep(1.14, 1.42, radiometricRatio);
-    float primary = max(radiometric, hard);
-
-    vec2 texel = 1.0 / vec2(textureSize(longTex, 0));
-    float context2 = savedCardinalSupport(uv, texel, 2.0);
-    float context6 = savedCardinalSupport(uv, texel, 6.0);
-    float coherence = sqrt(
-        smoothstep(0.12, 0.45, context2)
-        * smoothstep(0.10, 0.40, context6));
-    float strong = hard * smoothstep(1.65, 2.20, radiometricRatio);
-    float registrationGate = smoothstep(0.58, 0.78, stillRegistrationConfidence);
-    return shortSignal * shortHeadroom * primary
-        * max(coherence, strong) * registrationGate;
+float broadSeedAt(vec2 sampleUv) {
+    vec3 shortRgb = texture(shortTex, sampleUv).rgb;
+    vec3 longRgb = texture(longTex, sampleUv).rgb;
+    float shortColorSafety = 1.0 - smoothstep(0.24, 0.40, shortChromaFraction(shortRgb));
+    float ratioProof = stillScalarRadiometricRatio(shortRgb, longRgb);
+    return smoothstep(0.985, 0.998, secondLargest3(longRgb))
+        * smoothstep(0.70, 0.86, encodedLuma(longRgb))
+        * stillShortValidity(shortRgb)
+        * smoothstep(1.12, 1.35, ratioProof)
+        * shortColorSafety;
 }
+
+float broadCenterProofAt(vec2 sampleUv) {
+    vec3 shortRgb = texture(shortTex, sampleUv).rgb;
+    vec3 longRgb = texture(longTex, sampleUv).rgb;
+    float ratioProof = stillScalarRadiometricRatio(shortRgb, longRgb);
+    float shortColorSafety = 1.0 - smoothstep(0.24, 0.40, shortChromaFraction(shortRgb));
+    return smoothstep(0.992, 0.999, secondLargest3(longRgb))
+        * smoothstep(0.72, 0.88, encodedLuma(longRgb))
+        * stillShortValidity(shortRgb)
+        * smoothstep(1.18, 1.45, ratioProof)
+        * smoothstep(1.45, 1.55, ratioProof)
+        * smoothstep(0.70, 0.80, shortColorSafety);
+}
+
+vec2 encodedGradientAt(sampler2D sourceSampler, vec2 sampleUv, vec2 texel) {
+    float tl = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2(-1.0, -1.0), vec2(0.0), vec2(1.0))).rgb);
+    float tc = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2( 0.0, -1.0), vec2(0.0), vec2(1.0))).rgb);
+    float tr = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2( 1.0, -1.0), vec2(0.0), vec2(1.0))).rgb);
+    float ml = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2(-1.0,  0.0), vec2(0.0), vec2(1.0))).rgb);
+    float mr = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2( 1.0,  0.0), vec2(0.0), vec2(1.0))).rgb);
+    float bl = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2(-1.0,  1.0), vec2(0.0), vec2(1.0))).rgb);
+    float bc = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2( 0.0,  1.0), vec2(0.0), vec2(1.0))).rgb);
+    float br = encodedLuma(texture(sourceSampler, clamp(sampleUv + texel * vec2( 1.0,  1.0), vec2(0.0), vec2(1.0))).rgb);
+    float gx = (tr + 2.0 * mr + br - tl - 2.0 * ml - bl) * 0.125;
+    float gy = (bl + 2.0 * bc + br - tl - 2.0 * tc - tr) * 0.125;
+    return vec2(gx, gy);
+}
+
+float logRadiometricRatioAt(vec2 sampleUv) {
+    vec3 shortRgb = texture(shortTex, sampleUv).rgb;
+    vec3 longRgb = texture(longTex, sampleUv).rgb;
+    return log2(max(stillScalarRadiometricRatio(shortRgb, longRgb), 0.0001));
+}
+
+float stillStaticConfidenceAt(vec2 sampleUv) {
+    vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
+    vec2 shortGrad = encodedGradientAt(shortTex, sampleUv, sourceTexel);
+    vec2 longGrad = encodedGradientAt(longTex, sampleUv, sourceTexel);
+    float shortMag = length(shortGrad);
+    float longMag = length(longGrad);
+    float bothMag = min(shortMag, longMag);
+    float maxMag = max(shortMag, longMag);
+    float directionCos = dot(shortGrad, longGrad) / max(shortMag * longMag, 0.000001);
+    float flatSupport = 1.0 - smoothstep(0.005, 0.007, maxMag);
+    float gradientSupport = smoothstep(0.45, 0.90, directionCos)
+        * smoothstep(0.004, 0.018, bothMag);
+
+    float centerLogRatio = logRadiometricRatioAt(sampleUv);
+    float ratioDeviation = 0.0;
+    ratioDeviation += abs(centerLogRatio - logRadiometricRatioAt(clamp(sampleUv + vec2( sourceTexel.x, 0.0), vec2(0.0), vec2(1.0))));
+    ratioDeviation += abs(centerLogRatio - logRadiometricRatioAt(clamp(sampleUv + vec2(-sourceTexel.x, 0.0), vec2(0.0), vec2(1.0))));
+    ratioDeviation += abs(centerLogRatio - logRadiometricRatioAt(clamp(sampleUv + vec2(0.0,  sourceTexel.y), vec2(0.0), vec2(1.0))));
+    ratioDeviation += abs(centerLogRatio - logRadiometricRatioAt(clamp(sampleUv + vec2(0.0, -sourceTexel.y), vec2(0.0), vec2(1.0))));
+    ratioDeviation *= 0.25;
+    float ratioSmooth = 1.0 - smoothstep(0.06, 0.22, ratioDeviation);
+    float clippedSmooth = smoothstep(
+        0.990, 0.999, secondLargest3(texture(longTex, sampleUv).rgb)) * ratioSmooth;
+    return max(flatSupport, max(gradientSupport, clippedSmooth));
+}
+
+float shortSaturationNearbyAt(vec2 sampleUv) {
+    vec2 sourceTexel = 1.0 / vec2(textureSize(shortTex, 0));
+    vec2 radius = sourceTexel * 3.0;
+    float risk = step(0.975, max3(texture(shortTex, sampleUv).rgb));
+    risk = max(risk, step(0.975, max3(texture(shortTex, clamp(sampleUv + vec2( radius.x, 0.0), vec2(0.0), vec2(1.0))).rgb)));
+    risk = max(risk, step(0.975, max3(texture(shortTex, clamp(sampleUv + vec2(-radius.x, 0.0), vec2(0.0), vec2(1.0))).rgb)));
+    risk = max(risk, step(0.975, max3(texture(shortTex, clamp(sampleUv + vec2(0.0,  radius.y), vec2(0.0), vec2(1.0))).rgb)));
+    risk = max(risk, step(0.975, max3(texture(shortTex, clamp(sampleUv + vec2(0.0, -radius.y), vec2(0.0), vec2(1.0))).rgb)));
+    risk = max(risk, step(0.975, max3(texture(shortTex, clamp(sampleUv + vec2( radius.x,  radius.y), vec2(0.0), vec2(1.0))).rgb)));
+    risk = max(risk, step(0.975, max3(texture(shortTex, clamp(sampleUv + vec2(-radius.x,  radius.y), vec2(0.0), vec2(1.0))).rgb)));
+    risk = max(risk, step(0.975, max3(texture(shortTex, clamp(sampleUv + vec2( radius.x, -radius.y), vec2(0.0), vec2(1.0))).rgb)));
+    risk = max(risk, step(0.975, max3(texture(shortTex, clamp(sampleUv + vec2(-radius.x, -radius.y), vec2(0.0), vec2(1.0))).rgb)));
+    return risk;
+}
+
+float compactBaseSeedAt(vec2 sampleUv) {
+    vec3 shortRgb = texture(shortTex, sampleUv).rgb;
+    vec3 longRgb = texture(longTex, sampleUv).rgb;
+    float exactClip = smoothstep(0.997, 0.9995, secondLargest3(longRgb))
+        * smoothstep(0.995, 0.9995, max3(longRgb));
+    float neutralSafety = 1.0 - smoothstep(0.15, 0.38, shortChromaFraction(shortRgb));
+    return exactClip
+        * stillShortValidity(shortRgb)
+        * smoothstep(1.45, 1.90, stillScalarRadiometricRatio(shortRgb, longRgb))
+        * neutralSafety;
+}
+
+float compactNeighborhoodSupportAt(vec2 sampleUv) {
+    vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
+    vec2 radius = sourceTexel * 2.0;
+    float support = compactBaseSeedAt(sampleUv);
+    support += compactBaseSeedAt(clamp(sampleUv + vec2( radius.x, 0.0), vec2(0.0), vec2(1.0)));
+    support += compactBaseSeedAt(clamp(sampleUv + vec2(-radius.x, 0.0), vec2(0.0), vec2(1.0)));
+    support += compactBaseSeedAt(clamp(sampleUv + vec2(0.0,  radius.y), vec2(0.0), vec2(1.0)));
+    support += compactBaseSeedAt(clamp(sampleUv + vec2(0.0, -radius.y), vec2(0.0), vec2(1.0)));
+    support += compactBaseSeedAt(clamp(sampleUv + vec2( radius.x,  radius.y), vec2(0.0), vec2(1.0)));
+    support += compactBaseSeedAt(clamp(sampleUv + vec2(-radius.x,  radius.y), vec2(0.0), vec2(1.0)));
+    support += compactBaseSeedAt(clamp(sampleUv + vec2( radius.x, -radius.y), vec2(0.0), vec2(1.0)));
+    support += compactBaseSeedAt(clamp(sampleUv + vec2(-radius.x, -radius.y), vec2(0.0), vec2(1.0)));
+    return support / 9.0;
+}
+
+float localShortLinearLumaAt(vec2 sampleUv) {
+    vec2 sourceTexel = 1.0 / vec2(textureSize(shortTex, 0));
+    vec2 radius = sourceTexel * 2.0;
+    float sumY = 4.0 * linearLuma(srgbToLinear(texture(shortTex, sampleUv).rgb));
+    sumY += 2.0 * linearLuma(srgbToLinear(texture(shortTex, clamp(sampleUv + vec2( radius.x, 0.0), vec2(0.0), vec2(1.0))).rgb));
+    sumY += 2.0 * linearLuma(srgbToLinear(texture(shortTex, clamp(sampleUv + vec2(-radius.x, 0.0), vec2(0.0), vec2(1.0))).rgb));
+    sumY += 2.0 * linearLuma(srgbToLinear(texture(shortTex, clamp(sampleUv + vec2(0.0,  radius.y), vec2(0.0), vec2(1.0))).rgb));
+    sumY += 2.0 * linearLuma(srgbToLinear(texture(shortTex, clamp(sampleUv + vec2(0.0, -radius.y), vec2(0.0), vec2(1.0))).rgb));
+    sumY += linearLuma(srgbToLinear(texture(shortTex, clamp(sampleUv + vec2( radius.x,  radius.y), vec2(0.0), vec2(1.0))).rgb));
+    sumY += linearLuma(srgbToLinear(texture(shortTex, clamp(sampleUv + vec2(-radius.x,  radius.y), vec2(0.0), vec2(1.0))).rgb));
+    sumY += linearLuma(srgbToLinear(texture(shortTex, clamp(sampleUv + vec2( radius.x, -radius.y), vec2(0.0), vec2(1.0))).rgb));
+    sumY += linearLuma(srgbToLinear(texture(shortTex, clamp(sampleUv + vec2(-radius.x, -radius.y), vec2(0.0), vec2(1.0))).rgb));
+    return sumY / 16.0;
+}
+
+vec3 gamutSafeScaleToLuma(vec3 sourceLinear, float targetY) {
+    float sourceY = linearLuma(sourceLinear);
+    if (sourceY <= 0.000001) return vec3(targetY);
+    vec3 scaled = sourceLinear * (targetY / sourceY);
+    float peak = max3(scaled);
+    if (peak > 1.0) scaled /= peak;
+    return clamp(scaled, 0.0, 1.0);
+}
+
+vec3 recoveredBroadDisplay(vec2 sampleUv, vec3 longDisplay, float detailStrength, float ceilingY) {
+    vec3 shortLinear = srgbToLinear(texture(shortTex, sampleUv).rgb);
+    float shortY = linearLuma(shortLinear);
+    float localY = localShortLinearLumaAt(sampleUv);
+    float detail = clamp(log2(max(shortY, 0.0001) / max(localY, 0.0001)), -0.45, 0.45);
+    float targetY = clamp(
+        linearLuma(longDisplay) * exp2(detailStrength * detail),
+        0.0,
+        ceilingY);
+    return gamutSafeScaleToLuma(shortLinear, targetY);
+}
+
+vec3 recoveredCompactDisplay(vec2 sampleUv, vec3 longDisplay) {
+    vec3 shortRgb = texture(shortTex, sampleUv).rgb;
+    vec3 shortLinear = srgbToLinear(shortRgb);
+    float shortY = linearLuma(shortLinear);
+    float localY = localShortLinearLumaAt(sampleUv);
+    float detail = clamp(log2(max(shortY, 0.0001) / max(localY, 0.0001)), -0.45, 0.45);
+    float targetY = min(linearLuma(longDisplay), 0.62) * exp2(0.60 * detail);
+    targetY = clamp(targetY, 0.0, 0.72);
+
+    float shortEncodedY = encodedLuma(shortRgb);
+    vec3 chroma = (shortRgb - vec3(shortEncodedY)) * 0.15;
+    float targetEncodedY = linearToSrgbChannel(targetY);
+    float gamutScale = 1.0;
+    gamutScale = gamutScaleForComponent(gamutScale, targetEncodedY, chroma.r);
+    gamutScale = gamutScaleForComponent(gamutScale, targetEncodedY, chroma.g);
+    gamutScale = gamutScaleForComponent(gamutScale, targetEncodedY, chroma.b);
+    vec3 encodedOwned = clamp(
+        vec3(targetEncodedY) + chroma * clamp(gamutScale, 0.0, 1.0),
+        0.0,
+        1.0);
+    return srgbToLinear(encodedOwned);
+}
+// IRIS_V29_GPU_PROVENANCE_END
 
 vec3 applyPhotographicBodyTone(vec3 rgb) {
     // Global SDR photographic tone reproduction: anchor true blacks, lift the
@@ -277,6 +412,123 @@ void main() {
         return;
     }
 
+    // V2.9 saved fusion is GPU-only and deliberately multi-pass.  mode==2 below
+    // is the byte-preserved V2.8 live path.  mode==3 builds conservative evidence,
+    // mode==4 enforces low-frequency/isotropic broad support, and mode==5 composes
+    // the final provenance image.  No mode cross-blends temporally uncertain data.
+    if (mode == 3) {
+        vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
+        vec2 radius = sourceTexel * 3.0;
+        float broadAverage = broadSeedAt(uv);
+        broadAverage += broadSeedAt(clamp(uv + vec2( radius.x, 0.0), vec2(0.0), vec2(1.0)));
+        broadAverage += broadSeedAt(clamp(uv + vec2(-radius.x, 0.0), vec2(0.0), vec2(1.0)));
+        broadAverage += broadSeedAt(clamp(uv + vec2(0.0,  radius.y), vec2(0.0), vec2(1.0)));
+        broadAverage += broadSeedAt(clamp(uv + vec2(0.0, -radius.y), vec2(0.0), vec2(1.0)));
+        broadAverage += broadSeedAt(clamp(uv + vec2( radius.x,  radius.y), vec2(0.0), vec2(1.0)));
+        broadAverage += broadSeedAt(clamp(uv + vec2(-radius.x,  radius.y), vec2(0.0), vec2(1.0)));
+        broadAverage += broadSeedAt(clamp(uv + vec2( radius.x, -radius.y), vec2(0.0), vec2(1.0)));
+        broadAverage += broadSeedAt(clamp(uv + vec2(-radius.x, -radius.y), vec2(0.0), vec2(1.0)));
+        broadAverage /= 9.0;
+        outColor = vec4(
+            broadAverage,
+            broadCenterProofAt(uv),
+            stillStaticConfidenceAt(uv),
+            shortSaturationNearbyAt(uv));
+        return;
+    }
+
+    if (mode == 4) {
+        vec2 analysisTexel = 1.0 / vec2(textureSize(normalTex, 0));
+        vec4 centerEvidence = texture(normalTex, uv);
+        float isotropic = centerEvidence.r;
+        isotropic = min(isotropic, texture(normalTex, clamp(uv + vec2( analysisTexel.x, 0.0), vec2(0.0), vec2(1.0))).r);
+        isotropic = min(isotropic, texture(normalTex, clamp(uv + vec2(-analysisTexel.x, 0.0), vec2(0.0), vec2(1.0))).r);
+        isotropic = min(isotropic, texture(normalTex, clamp(uv + vec2(0.0,  analysisTexel.y), vec2(0.0), vec2(1.0))).r);
+        isotropic = min(isotropic, texture(normalTex, clamp(uv + vec2(0.0, -analysisTexel.y), vec2(0.0), vec2(1.0))).r);
+        isotropic = min(isotropic, texture(normalTex, clamp(uv + vec2(2.0 * analysisTexel.x, 0.0), vec2(0.0), vec2(1.0))).r);
+        isotropic = min(isotropic, texture(normalTex, clamp(uv + vec2(-2.0 * analysisTexel.x, 0.0), vec2(0.0), vec2(1.0))).r);
+        isotropic = min(isotropic, texture(normalTex, clamp(uv + vec2(0.0, 2.0 * analysisTexel.y), vec2(0.0), vec2(1.0))).r);
+        isotropic = min(isotropic, texture(normalTex, clamp(uv + vec2(0.0, -2.0 * analysisTexel.y), vec2(0.0), vec2(1.0))).r);
+
+        float broadAverage = centerEvidence.r;
+        broadAverage += texture(normalTex, clamp(uv + vec2( analysisTexel.x, 0.0), vec2(0.0), vec2(1.0))).r;
+        broadAverage += texture(normalTex, clamp(uv + vec2(-analysisTexel.x, 0.0), vec2(0.0), vec2(1.0))).r;
+        broadAverage += texture(normalTex, clamp(uv + vec2(0.0,  analysisTexel.y), vec2(0.0), vec2(1.0))).r;
+        broadAverage += texture(normalTex, clamp(uv + vec2(0.0, -analysisTexel.y), vec2(0.0), vec2(1.0))).r;
+        broadAverage += texture(normalTex, clamp(uv + analysisTexel, vec2(0.0), vec2(1.0))).r;
+        broadAverage += texture(normalTex, clamp(uv - analysisTexel, vec2(0.0), vec2(1.0))).r;
+        broadAverage += texture(normalTex, clamp(uv + vec2( analysisTexel.x, -analysisTexel.y), vec2(0.0), vec2(1.0))).r;
+        broadAverage += texture(normalTex, clamp(uv + vec2(-analysisTexel.x,  analysisTexel.y), vec2(0.0), vec2(1.0))).r;
+        broadAverage /= 9.0;
+
+        float noShortClip = 1.0 - smoothstep(0.02, 0.20, centerEvidence.a);
+        float broadCore = smoothstep(0.63, 0.69, isotropic)
+            * smoothstep(0.78, 0.84, broadAverage)
+            * smoothstep(0.66, 0.74, centerEvidence.g)
+            * smoothstep(0.68, 0.76, centerEvidence.b)
+            * noShortClip;
+        float featherSupport = smoothstep(0.32, 0.62, isotropic)
+            * smoothstep(0.55, 0.80, broadAverage)
+            * smoothstep(0.45, 0.76, centerEvidence.g)
+            * smoothstep(0.62, 0.88, centerEvidence.b)
+            * noShortClip;
+        outColor = vec4(broadCore, featherSupport, broadAverage, centerEvidence.a);
+        return;
+    }
+
+    if (mode == 5) {
+        float ratio = clamp(exposureRatio, 1.0, 65536.0);
+        float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
+        vec3 shortRgb = texture(shortTex, uv).rgb;
+        vec3 longRgb = texture(longTex, uv).rgb;
+        vec3 longScene = srgbToLinear(longRgb);
+        float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
+        vec3 longDisplay = adaptiveHdrToneMap(
+            applyPhotographicBodyTone(longScene * brightnessGain),
+            ratio,
+            bracketStops);
+
+        float registrationGate = smoothstep(0.58, 0.78, stillRegistrationConfidence);
+        vec4 support = texture(normalTex, uv);
+        float clipNearby = shortSaturationNearbyAt(uv);
+        float broadCore = step(0.78, support.r)
+            * (1.0 - step(0.5, clipNearby))
+            * registrationGate;
+
+        vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
+        vec2 shortGrad = encodedGradientAt(shortTex, uv, sourceTexel);
+        vec2 longGrad = encodedGradientAt(longTex, uv, sourceTexel);
+        float shortMag = length(shortGrad);
+        float longMag = length(longGrad);
+        float compactStructure = max(
+            1.0 - smoothstep(0.005, 0.007, max(shortMag, longMag)),
+            smoothstep(0.009, 0.013, longMag));
+        float compactSeed = compactBaseSeedAt(uv);
+        float compactSupport = compactNeighborhoodSupportAt(uv);
+        float compactCore = step(0.65, compactSeed)
+            * smoothstep(0.11, 0.16, compactSupport)
+            * compactStructure
+            * registrationGate;
+
+        float core = max(broadCore, compactCore);
+        float partialOwnership = 0.24
+            * support.g
+            * (1.0 - step(0.5, clipNearby))
+            * registrationGate
+            * (1.0 - core);
+        float shortOwnership = core > 0.5 ? 1.0 : partialOwnership;
+
+        vec3 broadRecovered = recoveredBroadDisplay(uv, longDisplay, 0.40, 0.90);
+        vec3 compactRecovered = recoveredCompactDisplay(uv, longDisplay);
+        vec3 partialRecovered = recoveredBroadDisplay(uv, longDisplay, 0.25, 0.94);
+        vec3 coreRecovered = compactCore > 0.5 ? compactRecovered : broadRecovered;
+        vec3 recovered = core > 0.5 ? coreRecovered : partialRecovered;
+        vec3 displayLinear = mix(longDisplay, recovered, shortOwnership);
+        displayLinear = applyDisplayGamma(displayLinear, displayGamma);
+        outColor = vec4(clamp(linearToSrgb(displayLinear), 0.0, 1.0), 1.0);
+        return;
+    }
+
     float ratio = clamp(exposureRatio, 1.0, 65536.0);
     float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
     vec3 shortRgb = texture(shortTex, uv).rgb;
@@ -293,19 +545,9 @@ void main() {
         0.995,
         longEncodedPeak) * shortConfidence;
 
-    // V2.7: live mode==2 retains V2.6/V2.2 physical-ratio HDR ownership unchanged.
-    // Saved mode==3 uses registered SHORT, a robust global SHORT->LONG appearance
-    // mapping, and the accepted sparse radiometric-coherence ownership mask.
-    float stillShortOwnership = mode == 3
-        ? coherentShortOwnership(uv, shortRgb, longRgb)
-        : 0.0;
-    vec3 mergedScene;
-    if (mode == 3) {
-        vec3 shortProvenanceScene = srgbToLinear(shortRgb) * stillShortLinearGain;
-        mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);
-    } else {
-        mergedScene = mix(longScene, shortScene, highlightWeight);
-    }
+    // V2.9: this remainder is live mode==2 only. Its V2.8 physical-ratio HDR
+    // equations are preserved; saved still fusion returned above through modes 3/4/5.
+    vec3 mergedScene = mix(longScene, shortScene, highlightWeight);
 
     // Brightness remains presentation-only. The photographic body curve is global,
     // RGB-ratio preserving, and fades to zero before the 0.70 HDR shoulder, so
@@ -316,9 +558,7 @@ void main() {
     vec3 displayLinear = adaptiveHdrToneMap(bodyToned, ratio, bracketStops);
     displayLinear = applyDisplayGamma(displayLinear, displayGamma);
 
-    // The legacy LONG-first highlight color owner remains live-preview-only. Saved
-    // V2.6 provenance never repaints LONG chroma over an owned SHORT RGB pixel.
-    if (mode != 3 && highlightWeight > 0.0005) {
+    if (highlightWeight > 0.0005) {
         displayLinear = highlightColorOwnership(
                 displayLinear, longScene, shortScene, longRgb, shortRgb, highlightWeight);
     }

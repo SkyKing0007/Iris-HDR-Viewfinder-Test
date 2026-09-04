@@ -1,21 +1,33 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.8
+# Iris HDR Viewfinder Test V1.4.11 V2.9
 
-V2.8 is a narrow saved-JPEG fusion correction derived only from the exact successful V2.7 GitHub Actions compiled candidate (`f6bd9202063cdabd7eea76f7c2575a6ec11c453e`, run `33813880497`, artifact `9915838166`). V2.7 remains runtime authority until V2.8 passes Actions.
+V2.9 is the universal saved-HDR fusion correction derived only from the exact successful V2.8 GitHub Actions compiled candidate (`6fe30dc1a516edd17a5dce70f20c5f28ce620b11`, run `33825853402`, artifact `9919936639`). V2.8 remains runtime and final Actions authority until V2.9 itself passes Actions.
 
 ## What changes
 
-Only `JpegFusion.java` changes at runtime. V2.7 alignment/registration, HdrGlView, all GLSL, capture/DNG ownership, AUTO/MANUAL exposure policy, live mode=2, orientation and unrelated runtime code are protected byte-for-byte.
+Production saved fusion is now one GPU authority. `CaptureSetSaver` no longer silently substitutes the independent `JpegFusion.fuse()` CPU HDR algorithm if GPU fusion is unavailable or fails. SHORT/LONG JPEG and DNG capture/saving remain protected; a failed GPU fusion reports failure rather than producing a different HDR algorithm's result.
 
-V2.7 correctly registered SHORT into LONG coordinates but could still leave fractional clipped LONG contribution inside genuinely destroyed highlight cores. V2.8 keeps V2.7's conservative fractional ownership as a feather while adding a strict inner state: if LONG is bright with two channels essentially clipped, registered SHORT has real signal/headroom, radiometric proof is positive, support is coherent and registration is fully trusted, the core becomes exactly 100% SHORT RGB.
+The existing `hdr_display.frag` is reused for a three-pass saved path: conservative source evidence, isotropic/topology support, and final provenance composition. No new shader file is introduced. HdrGlView preserves the proven V2.8 JPEG decode, forward/backward registration, SHORT-to-LONG alignment and calibration prelude, then performs the V2.9 saved passes in the existing GLES3 context.
 
-In that hard core one common scalar linear-light exposure scale is applied to all three registered SHORT channels. This preserves SHORT's real RGB relationship. It does not globally neutralize warm clouds or invent white; genuine SHORT warmth remains genuine SHORT warmth.
+The universal fusion contract is source-supported rather than scene-specific: valid LONG remains LONG; genuinely lost LONG may use registered SHORT only when SHORT signal/headroom, scalar radiometric proof, registration, spatial support and temporal/static evidence agree. Broad smooth highlights and compact legitimate emitters use separate conservative evidence paths. Nearby SHORT saturation vetoes broad/feather recovery to suppress colored rings. Proven cores choose one source exactly; only a conservative boundary may feather.
 
-## Real-photo replay
+Production SHORT recovery uses one scalar radiometric gain so fusion does not create RGB-channel amplification fringes. Recovered highlight display is LONG-anchored while SHORT supplies supported local structure/color, preserving source-supported detail without the prior near-white flattening or fused-only bright geometry.
 
-The exact outdoor cloud and indoor window pairs supplied after V2.7 were replayed before source translation. The replay reproduced the actual V2.7 fused JPEG within roughly 1–2 code values/channel, and independently recovered the observed subpixel registration. In the conservative clipped/SHORT-valid population, >99% SHORT ownership rises from about 26.5% to 82.3% outdoors and 48.5% to 87.3% indoors, while valid-LONG pixels (`secondLong < 0.90`) receive no new core ownership.
+## Universal artifact/motion scope
+
+The retained cloud/window sets plus the chandelier and plant-shelf sets were used as stress cases, not object-specific tuning targets. The contract is intended to apply to TVs changing frames, moving people/cars/foliage, LEDs, street lights, headlights, reflections and future scenes: temporal/structural disagreement fails closed rather than creating a blended third state. The spinning fan/shadow in the chandelier set is specifically used to ensure dark moving transient structure is not painted into a clipped ceiling recovery.
+
+## Runtime scope
+
+Exactly three runtime files change relative to successful V2.8:
+
+- `app/src/main/assets/shaders/hdr_display.frag`
+- `app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java`
+- `app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java`
+
+`JpegFusion.java`, CameraController, DNG ownership, exposure policy, orientation, unrelated runtime files, and the live mode=2 physical-ratio HDR equations remain protected from V2.8.
 
 ## Verification
 
-The successful V2.7 verification/build mechanics are inherited unchanged in order and compiler commands. The workflow advances only the exact V2.7 Actions authority pins, V2.8 version/hash/allowlist/protected-file proofs, artifact names and permanent V2.8 regressions. Runtime allowlist equality is exactly one file: `app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java`.
+The successful V2.8 verification/build mechanics are inherited unchanged in order, action versions and compiler/build commands. V2.9 advances only the exact V2.8 authority pins, V2.9 version/hash/allowlist/artifact naming and permanent applicable regressions.
 
-V2.8 is **PREPARED / UPLOAD-READY** until GitHub Actions runs the real Java compiler and full `:app:assembleDebug` successfully.
+V2.9 is **PREPARED / UPLOAD-READY** until GitHub Actions runs the exact pinned real GLSL compiler, real project Java compiler and full `:app:assembleDebug` successfully.

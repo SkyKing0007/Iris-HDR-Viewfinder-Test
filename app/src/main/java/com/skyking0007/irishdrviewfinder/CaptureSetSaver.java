@@ -223,37 +223,25 @@ final class CaptureSetSaver {
         byte[] longJpeg = longData.jpegBytes;
         double ratio = exposureRatio(shortData.result, longData.result);
         if (stillFusionView == null) {
-            submitCpuFusionFallback(shortJpeg, longJpeg, ratio,
-                    new IllegalStateException("GPU fusion view unavailable"));
+            failLocked(new IllegalStateException(
+                    "V2.9 GPU still fusion view unavailable; CPU HDR substitution is disabled"));
             return;
         }
         stillFusionView.fuseStillJpegs(
                 shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma,
                 (fused, error) -> {
                     if (error != null || fused == null) {
-                        submitCpuFusionFallback(shortJpeg, longJpeg, ratio, error);
+                        Throwable failure = error == null
+                                ? new IllegalStateException("V2.9 GPU still fusion returned no JPEG")
+                                : error;
+                        RuntimeLogger.error("GPU_STILL_FUSION_REQUIRED", failure);
+                        synchronized (CaptureSetSaver.this) {
+                            failLocked(failure);
+                        }
                         return;
                     }
                     submitFusedBytes(fused);
                 });
-    }
-
-    private void submitCpuFusionFallback(
-            byte[] shortJpeg, byte[] longJpeg, double ratio, Throwable gpuError) {
-        RuntimeLogger.error(
-                "GPU_STILL_FUSION_FALLBACK",
-                gpuError == null ? new IllegalStateException("unknown GPU fusion failure") : gpuError);
-        io.execute(() -> {
-            try {
-                byte[] fused = JpegFusion.fuse(
-                        shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma);
-                submitFusedBytes(fused);
-            } catch (Throwable t) {
-                synchronized (CaptureSetSaver.this) {
-                    failLocked(t);
-                }
-            }
-        });
     }
 
     private void submitFusedBytes(byte[] fused) {
@@ -284,7 +272,7 @@ final class CaptureSetSaver {
                 JSONObject root = new JSONObject();
                 root.put("captureId", captureId);
                 root.put("cameraId", cameraId);
-                root.put("fusion", "V2.3 V2.2-derived GLES3 still fusion with reliable SHORT texture recovery; CPU fallback only on GL failure");
+                root.put("fusion", "V2.9 GPU-only multipass saved fusion: LONG reference, source-supported registered SHORT recovery, no CPU HDR substitution");
                 root.put("short", resultJson(shortResult));
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));
