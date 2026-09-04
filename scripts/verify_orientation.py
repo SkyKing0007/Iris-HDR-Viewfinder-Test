@@ -20,7 +20,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.10 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.11 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -50,7 +50,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.10 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.11 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -609,13 +609,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.10 - Exact successful V2.9 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.9' in workflow
-        and 'run-id: 33834010078' in workflow
-        and "authority='dcf49e339b3ecb89b032884b258fd2586e4b8b32'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.9 Actions authority")
-require("authority='6fe30dc1a516edd17a5dce70f20c5f28ce620b11'" not in workflow,
-        "V2.10 must not seed runtime from V2.8 after successful V2.9")
+# 038 / 042 / V2.11 - Exact successful V2.10 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.10' in workflow
+        and 'run-id: 33837947958' in workflow
+        and "authority='7dcf9b7c3ef68455c05202cfd637ced85cd7f32b'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.10 Actions authority")
+require("authority='dcf49e339b3ecb89b032884b258fd2586e4b8b32'" not in workflow,
+        "V2.11 must not seed runtime from V2.9 after successful V2.10")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -769,8 +769,9 @@ require('rangeLoss' in hdr_shader and '* effectiveGradientCorrespondenceAt(sampl
         and 'chromaLoss' in hdr_shader and '* chromaTopologySupportAt(sampleUv)' in hdr_shader,
         "below-hard-clipping recovery must require source-corresponding structure/color evidence")
 require('stillShortValidity(shortRgb)' in hdr_shader
-        and 'float centerShortValid = step(0.55, stillShortValidity(shortRgb));' in hdr_shader,
-        "saturated/invalid center SHORT must fail closed")
+        and 'float shortColorConfidence = smoothstep(0.55, 0.82, stillShortValidity(shortRgb));' in hdr_shader
+        and 'float coreOwnership = core * shortColorConfidence;' in hdr_shader,
+        "V2.11 saturated/invalid center SHORT must not own complete RGB")
 require('shortSaturationContextAt(uv)' in hdr_shader
         and '1.0 - smoothstep(0.30, 0.75, shortSaturationContextAt(uv))' in hdr_shader
         and '1.0 - smoothstep(0.30, 0.75, centerEvidence.a)' in hdr_shader,
@@ -785,17 +786,34 @@ require('float compactCore = step(0.65, compactSeed)' in hdr_shader
         and 'compactStructure' in hdr_shader,
         "compact emitters must retain strict source support")
 require('float core = max(broadCore, compactCore);' in hdr_shader
-        and 'float shortOwnership = core > 0.5 ? 1.0 : partialOwnership;' in hdr_shader,
-        "proven cores must select one source exactly; only conservative boundary may feather")
-require('recoveredSourceDisplay' in hdr_shader
-        and 'gamutSafeScaleToLuma(shortLinear, targetY)' in hdr_shader
-        and 'displayLinear = mix(longDisplay, recovered, shortOwnership);' in hdr_shader,
-        "owned highlights must preserve complete source-supported SHORT RGB/chromaticity")
-require('brightnessGain, 1.00, 1.00);' in hdr_shader
-        and 'brightnessGain, 0.55, 1.00);' in hdr_shader
-        and 'brightnessGain, 0.85, 0.96);' not in hdr_shader
-        and 'brightnessGain, 1.00, 0.96);' not in hdr_shader,
-        "owned core highlights must preserve SHORT tonal ranking without an arbitrary 0.96 plateau; only boundary ownership may blend")
+        and 'float coreOwnership = core * shortColorConfidence;' in hdr_shader
+        and 'float boundaryOwnership = 0.20' in hdr_shader
+        and 'float shortOwnership = clamp(max(coreOwnership, boundaryOwnership), 0.0, 1.0);' in hdr_shader,
+        "V2.11 coherent cores/boundaries must route source ownership before tone mapping")
+require('IRIS_V211_SCENE_DOMAIN_PROVENANCE_BEGIN' in hdr_shader
+        and 'vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;' in hdr_shader
+        and 'vec3 mergedScene = mix(longScene, shortScene, shortOwnership);' in hdr_shader
+        and 'vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);' in hdr_shader,
+        "V2.11 saved HDR provenance must compose scene-linear sources before presentation")
+v211_block = hdr_shader[hdr_shader.index('// IRIS_V211_SCENE_DOMAIN_PROVENANCE_BEGIN'):
+                        hdr_shader.index('// IRIS_V211_SCENE_DOMAIN_PROVENANCE_END')]
+v211_mode5_start = hdr_shader.index('    if (mode == 5) {')
+require(hashlib.sha256(hdr_shader[:v211_mode5_start].encode()).hexdigest()
+        == '58cd50aca1454d52b23f06bc64983249461303cdad340eb7fe701a9332bdee63',
+        "V2.11 evidence/support modes 3/4 and preceding shader logic must remain byte-identical to successful V2.10")
+v211_live_start = hdr_shader.index('    float ratio = clamp(exposureRatio, 1.0, 65536.0);',
+                                   hdr_shader.index('// IRIS_V211_SCENE_DOMAIN_PROVENANCE_END'))
+require(hashlib.sha256(hdr_shader[v211_live_start:].encode()).hexdigest()
+        == '555a109c49e28ed1bc9dfaec652111133745780e4fb229e554b8e86e0ac9c419',
+        "V2.11 live mode=2 shader remainder must remain byte-identical to successful V2.10")
+require('longDisplay' not in v211_block
+        and 'recoveredSourceDisplay' not in v211_block
+        and 'displayLinear = mix(' not in v211_block,
+        "V2.11 must not mix independently post-toned LONG/SHORT display values")
+require('float radianceFloorWeight = longHardClip' in hdr_shader
+        and 'float shortSceneY = linearLuma(shortScene);' in hdr_shader
+        and 'vec3 radianceRaised = mergedScene * (shortSceneY / mergedY);' in hdr_shader,
+        "V2.11 hard-clipped LONG must retain source-proven SHORT radiance lower bound without invented RGB")
 require('evidenceTexture = createTexture2d();' in gl
         and 'supportTexture = createTexture2d();' in gl
         and 'int analysisWidth = Math.max(1, (width + 7) / 8);' in gl
@@ -815,6 +833,12 @@ require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfin
 require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java').read_bytes()).hexdigest()
         == 'cc44224cac790d875e8e78bf2559eec0494c45b7d48051a71bba778d8581f48b',
         "CaptureSetSaver.java must remain byte-identical to successful V2.9")
+require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java').read_bytes()).hexdigest()
+        == 'fd882707d648289b9a3e255f0ee7a16b3aef0a175ba2111a4a56923af0982bc0',
+        "CameraController.java must remain byte-identical to successful V2.10 flicker authority")
+require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java').read_bytes()).hexdigest()
+        == '581e5fc4db763f063b3bf278fa514e41e0e5e22832bb6dc999c6101f4949aa2c',
+        "MainActivity.java must remain byte-identical to successful V2.10 flicker UI authority")
 require('liftShortProvenanceRgb' not in hdr_shader
         and 'mergeStillLumaAndChroma' not in hdr_shader,
         "older power-lift/luma-chroma hybrid paths must remain retired")
@@ -884,6 +908,47 @@ require(short_ownership_v27(0.30, 0.55, 0.99, 0.999, 2.0, 0.8, 0.8, 0.45) < 0.00
         "low registration confidence must force exact LONG fallback")
 require(short_ownership_v27(0.30, 0.55, 0.90, 0.92, 1.8, 0.9, 0.9, 1.0) > 0.50,
         "broad damaged LONG with coherent valid SHORT must remain eligible")
+
+# V2.11 exact visual regression from the V2.10 chandelier failure.
+# In the failing capture, a jointly saturated lamp pixel rendered at ~107/255
+# because saved mode 5 fell back to LONG after applying -4.5 EV. The same sources
+# prove ~16.905x scene radiance from SHORT, which must remain a bright clipped
+# highlight after the common HDR presentation path rather than a mid-gray plateau.
+def srgb_to_linear_math(value):
+    return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+
+def linear_to_srgb_math(value):
+    value = max(value, 0.0)
+    return 12.92 * value if value <= 0.0031308 else 1.055 * (value ** (1.0 / 2.4)) - 0.055
+
+def render_gray_v211(scene_value, ratio=16.0, brightness_ev=-4.5, gamma=1.55):
+    value = scene_value * (2.0 ** brightness_ev)
+    toe = smoothstep_math(0.015, 0.090, value)
+    highlight_protect = 1.0 - smoothstep_math(0.45, 0.68, value)
+    value = value + 0.45 * toe * highlight_protect * value * (1.0 - max(0.0, min(1.0, value)))
+    _, stops, _, white_anchor, display_ceiling = v147_policy(ratio)
+    if value > 0.70:
+        if value <= 1.0:
+            t = max(0.0, min(1.0, (value - 0.70) / 0.30))
+            value = 0.70 + (white_anchor - 0.70) * t
+        else:
+            t = max(0.0, min(1.0, math.log(value, 2.0) / max(stops, 0.0001)))
+            value = white_anchor + (display_ceiling - white_anchor) * t
+    value = max(0.0, min(1.0, value)) ** (1.0 / gamma)
+    return linear_to_srgb_math(value)
+
+v210_gray_failure = render_gray_v211(1.0)
+v211_short_radiance_floor = render_gray_v211(16.905159)
+require(abs(v210_gray_failure * 255.0 - 107.0) < 2.0,
+        "exact V2.10 chandelier gray-plateau regression no longer reproduces the observed failure")
+require(v211_short_radiance_floor > 0.88,
+        "V2.11 jointly clipped/source-proven highlight must remain visually bright, not ~107/255 gray")
+# The source-radiance floor must be monotonic: brighter SHORT evidence cannot map
+# to a darker saved highlight at the same clipped LONG location.
+short_codes = [0.80, 0.90, 0.95, 1.00]
+rendered = [render_gray_v211(srgb_to_linear_math(v) * 16.905159) for v in short_codes]
+require(all(rendered[i] <= rendered[i + 1] + 1e-9 for i in range(len(rendered) - 1)),
+        "V2.11 recovered highlight ordering must remain monotonic")
 
 # V2.8 permanent regression: clear encoded lost-LONG cores must become exact
 # registered SHORT ownership, while the V2.7 feather remains around the core.
@@ -994,9 +1059,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 27' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.10"' in Path('app/build.gradle.kts').read_text(),
-        "V2.10 version/build marker must be exact")
+require('versionCode = 28' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.11"' in Path('app/build.gradle.kts').read_text(),
+        "V2.11 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1100,4 +1165,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.10 REGRESSION PASS: exact successful V2.9 authority, V2.9 alignment/GPU-only routing protected, real AUTO/50/60/OFF flicker authority for both shutters, hard + visual/effective clipping, full source SHORT chroma, contextual saturation, temporal/source fail-closed")
+print("V1.4.11 V2.11 REGRESSION PASS: exact successful V2.10 authority, V2.10 flicker/alignment/GPU routing protected, scene-linear saved provenance before presentation, exact gray-plateau regression fixed, source-radiance ordering preserved")

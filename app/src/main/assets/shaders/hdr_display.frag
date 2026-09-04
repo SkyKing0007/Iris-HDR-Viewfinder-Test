@@ -547,24 +547,25 @@ void main() {
     }
 
     if (mode == 5) {
+        // IRIS_V211_SCENE_DOMAIN_PROVENANCE_BEGIN
+        // Saved fusion chooses source provenance in scene-linear space first, then
+        // uses the same global HDR presentation ordering as live mode 2. A SHORT
+        // sample that is too clipped for trustworthy RGB may still prove a radiance
+        // lower bound; that can keep a genuinely clipped emitter bright, but it may
+        // not invent texture or hue.
         float ratio = clamp(exposureRatio, 1.0, 65536.0);
         float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
         vec3 shortRgb = texture(shortTex, uv).rgb;
         vec3 longRgb = texture(longTex, uv).rgb;
         vec3 longScene = srgbToLinear(longRgb);
-        float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
-        vec3 longDisplay = adaptiveHdrToneMap(
-            applyPhotographicBodyTone(longScene * brightnessGain),
-            ratio,
-            bracketStops);
+        vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;
 
         float registrationGate = smoothstep(0.58, 0.78, stillRegistrationConfidence);
         vec4 support = texture(normalTex, uv);
         float shortNeighborhoodSafety = 1.0 - smoothstep(0.30, 0.75, shortSaturationContextAt(uv));
-        float centerShortValid = step(0.55, stillShortValidity(shortRgb));
+        float shortColorConfidence = smoothstep(0.55, 0.82, stillShortValidity(shortRgb));
         float broadCore = step(0.78, support.r)
             * shortNeighborhoodSafety
-            * centerShortValid
             * registrationGate;
 
         vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
@@ -582,26 +583,48 @@ void main() {
             * compactStructure
             * registrationGate;
 
+        // The 1/8-resolution support atlas is spatially coherent. Full-resolution
+        // SHORT validity now modulates color ownership continuously rather than
+        // switching individual pixels between two post-toned images.
         float core = max(broadCore, compactCore);
-        float partialOwnership = 0.20
+        float coreOwnership = core * shortColorConfidence;
+        float boundaryOwnership = 0.20
             * support.g
             * shortNeighborhoodSafety
-            * centerShortValid
+            * shortColorConfidence
             * registrationGate
             * (1.0 - core);
-        float shortOwnership = core > 0.5 ? 1.0 : partialOwnership;
+        float shortOwnership = clamp(max(coreOwnership, boundaryOwnership), 0.0, 1.0);
+        vec3 mergedScene = mix(longScene, shortScene, shortOwnership);
 
-        vec3 broadRecovered = recoveredSourceDisplay(
-            uv, longDisplay, ratio, bracketStops, brightnessGain, 1.00, 1.00);
-        vec3 compactRecovered = recoveredSourceDisplay(
-            uv, longDisplay, ratio, bracketStops, brightnessGain, 1.00, 1.00);
-        vec3 partialRecovered = recoveredSourceDisplay(
-            uv, longDisplay, ratio, bracketStops, brightnessGain, 0.55, 1.00);
-        vec3 coreRecovered = compactCore > 0.5 ? compactRecovered : broadRecovered;
-        vec3 recovered = core > 0.5 ? coreRecovered : partialRecovered;
-        vec3 displayLinear = mix(longDisplay, recovered, shortOwnership);
+        // If LONG is genuinely multi-channel clipped, a registered/coherent SHORT
+        // observation can still prove that scene radiance is much higher even when
+        // SHORT itself is too saturated to own complete RGB. Raise only the scene
+        // radiance lower bound while preserving the already-selected source chroma;
+        // do not synthesize detail from the saturated SHORT sample.
+        float longHardClip = smoothstep(0.985, 0.998, secondLargest3(longRgb));
+        float shortSignal = smoothstep(0.07, 0.13, encodedLuma(shortRgb));
+        float staticRadianceSupport = smoothstep(0.45, 0.72, stillStaticConfidenceAt(uv));
+        float radianceFloorWeight = longHardClip
+            * shortSignal
+            * staticRadianceSupport
+            * registrationGate;
+        float mergedY = linearLuma(mergedScene);
+        float shortSceneY = linearLuma(shortScene);
+        if (radianceFloorWeight > 0.0005 && mergedY > 0.000001 && shortSceneY > mergedY) {
+            vec3 radianceRaised = mergedScene * (shortSceneY / mergedY);
+            mergedScene = mix(mergedScene, radianceRaised, radianceFloorWeight);
+        }
+
+        // Presentation happens once, after provenance/radiance composition. This
+        // prevents displayBrightnessEv from turning a source-proven clipped light
+        // into a fixed mid-gray plateau and preserves source-supported SHORT RGB.
+        float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
+        vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
+        vec3 displayLinear = adaptiveHdrToneMap(bodyToned, ratio, bracketStops);
         displayLinear = applyDisplayGamma(displayLinear, displayGamma);
         outColor = vec4(clamp(linearToSrgb(displayLinear), 0.0, 1.0), 1.0);
+        // IRIS_V211_SCENE_DOMAIN_PROVENANCE_END
         return;
     }
 

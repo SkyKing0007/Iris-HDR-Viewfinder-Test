@@ -1,43 +1,45 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.10
+# Iris HDR Viewfinder Test V1.4.11 V2.11
 
-V2.10 is the universal **visual/effective clipping + real 50/60-Hz flicker-authority** correction derived only from the exact successful V2.9 GitHub Actions compiled candidate (`dcf49e339b3ecb89b032884b258fd2586e4b8b32`, run `33834010078`, artifact `9922681173`). V2.9 remains runtime and final Actions authority until V2.10 itself passes Actions.
+V2.11 is a localized **saved-HDR scene-domain provenance correction** derived from the exact successful V2.10 Actions compiled candidate (`7dcf9b7c3ef68455c05202cfd637ced85cd7f32b`, run `33837947958`, artifact `9923932300`). V2.10 remains final Actions/runtime authority until V2.11 passes the same authoritative build.
 
-## Real flicker authority
+## Why V2.10 failed visually
 
-V2.10 intentionally supersedes the inherited behavior that could use arbitrary AUTO shutters when Camera2 reported flicker `NONE`, and that kept MANUAL SHORT shutter exact while snapping only LONG. The user now has explicit `AUTO / 60Hz / 50Hz / OFF` authority.
+The new chandelier capture provided an exact visual failure rather than a threshold guess. The live HDR viewfinder looked reasonable, but the saved FUSED JPEG turned jointly saturated lamp pixels into a flat gray field and created stippled transition texture absent from both SHORT and LONG.
 
-When a real 50/60-Hz period is authoritative and legal sensor bounds allow it, **both SHORT and LONG** use integer mains-cycle integration windows. LONG ISO is used preferentially to preserve requested exposure energy; SHORT retains minimum-ISO preference. AUTO claims safety only when Camera2 explicitly proves 50Hz or 60Hz. `NONE` and unknown/PWM are explicitly reported unsafe rather than silently labeled protected. Initial AUTO anchor and later live solving share the same safe-period projection. Existing 60-FPS exposure limits remain intact.
+For the jointly near-white lamp population, roughly 96% of saved FUSED pixels landed near `107/255`. That value is reproduced by the V2.10 saved-mode math when a clipped LONG pixel fails SHORT ownership and the `-4.5 EV / gamma 1.55` presentation is applied to LONG. The same registered SHORT/LONG pair proves about `16.905x` SHORT-to-LONG linear scene radiance, which should remain visually bright under the same presentation.
 
-The existing AUTO metering convergence constants are unchanged. V2.10 fixes timing authority without using one slow-settling sample as justification for unrelated exposure-control retuning.
+This is therefore a rendering/provenance-order failure, not an alignment failure.
 
-## Visual/effective clipping
+## V2.11 correction
 
-V2.9's GPU-only production architecture is preserved: the existing `hdr_display.frag` still runs evidence, isotropic/topology support and final provenance passes in the existing HdrGlView GLES3 context. `HdrGlView.java`, `CaptureSetSaver.java` and `JpegFusion.java` remain byte-identical to successful V2.9, so SHORT→LONG registration/alignment, DNG/orientation ownership and GPU-only output routing are not redesigned.
+V2.11 changes only `hdr_display.frag` at runtime.
 
-V2.10 no longer defines recoverable clipping only as numerical near-white saturation. A bright LONG region may also be **effectively/visually clipped** when registered SHORT proves local response that LONG flattened: source-corresponding tonal range/gradient detail, shading, or coherent real chroma. Valid LONG remains LONG.
+Successful V2.10 evidence/support modes 3/4 and the entire live mode=2 remainder are byte-identical. Saved mode=5 now composes provenance in scene-linear space before presentation:
 
-Below hard clipping the detector is intentionally fail-closed against motion and display/flicker phase changes. A changed TV/LED frame cannot qualify from brightness or color difference alone: recovered range must have corresponding gradient structure, while chroma-only recovery requires supporting color topology from less-damaged LONG surroundings. If evidence is ambiguous, one source wins rather than blending a third temporal state.
+`LONG + registered SHORT -> source/radiance provenance -> one common brightness/body/HDR/gamma presentation -> JPEG`
 
-V2.9's compact near-neutral correction is intentionally superseded. Once SHORT legitimately owns a highlight, complete source-supported SHORT RGB/chromaticity survives; it is no longer collapsed to 15% chroma. A saturated center SHORT still cannot own. Nearby SHORT saturation is contextual rather than an unconditional poison radius, so a saturated filament can coexist with valid surrounding glass, brass, metal or surface evidence.
+Complete SHORT RGB ownership still requires valid V2.10 registration/source/support evidence. A SHORT sample that is itself too clipped cannot own complete RGB, but when LONG is genuinely multi-channel clipped and the registered/static SHORT proves greater radiance, it may raise only the scene-radiance lower bound. It cannot inject unsupported SHORT texture or hue.
 
-Recovered source luma is mapped from the trustworthy SHORT response and gamut-bounded, preserving source-supported local highlight ranking/contrast rather than driving different highlights toward one narrow bright plateau.
+Full-resolution SHORT validity is continuous rather than a binary post-tone switch, while the existing low-resolution support atlas remains the spatially coherent ownership context. This removes the failure mode where neighboring pixels alternate between darkened LONG and recovered SHORT and produce stipple not present in either source.
 
-## Universal scope
+## Protected V2.10 behavior
 
-The contract is intended for chandeliers/bulbs/brass, clouds/sky, windows, plant shelves/white pots, street lights/headlights, TVs/LED signs, reflections/chrome/speculars, faces/skin highlights, foliage and moving subjects. It uses no scene coordinates, object labels or scene-specific colors. Retained outdoor cloud/window, chandelier, plant-shelf and fan/shadow cases remain device regressions and require post-build 600–1000% visual inspection.
+- Real AUTO / 50Hz / 60Hz / OFF flicker authority is unchanged.
+- Both actual SHORT and LONG 60Hz-safe timing behavior is unchanged.
+- `CameraController.java` and `MainActivity.java` are byte-identical to successful V2.10.
+- `HdrGlView.java`, `CaptureSetSaver.java`, `JpegFusion.java`, registration/alignment, DNG/orientation, capture temporal ownership and GPU-only production routing are unchanged.
+- No new shader asset, CPU HDR fallback, local sharpening, RGB neighborhood fill or OpenCV dependency is introduced.
+
+## Permanent visual regressions
+
+V2.11 permanently adds the exact chandelier failure: jointly saturated source-supported lamp pixels must not collapse to ~107/255 gray at `-4.5 EV / gamma 1.55`, and stronger source-supported SHORT scene radiance must never render darker at the same clipped LONG location. Recovered boundaries may not create stippled/high-frequency structure absent from both sources.
+
+Retained cloud/window, plant shelf, chandelier, fan/shadow, TV/LED, street-light/headlight, reflection, foliage, skin-highlight and motion cases remain universal post-build visual regressions. Acceptance remains visual at 600–1000% as well as numeric.
 
 ## Runtime scope
 
-Exactly three runtime files change relative to successful V2.9:
+Exactly one runtime file changes relative to successful V2.10:
 
 - `app/src/main/assets/shaders/hdr_display.frag`
-- `app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java`
-- `app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java`
 
-`HdrGlView.java`, `CaptureSetSaver.java`, `JpegFusion.java`, DNG/orientation, SHORT→LONG registration geometry, capture adjacency/immutability and the protected live mode=2 shader remainder stay inherited from successful V2.9.
-
-## Verification
-
-The successful V2.9/V2.8 verification/build mechanics are inherited unchanged in step order, action versions and compiler/build commands. V2.10 advances only the exact V2.9 authority pins, version/hash/allowlist/artifact naming and applicable permanent regressions.
-
-V2.10 is **PREPARED / UPLOAD-READY** until GitHub Actions runs the exact pinned real GLSL compiler, real project Java compiler and full `:app:assembleDebug` successfully.
+V2.11 is **PREPARED / UPLOAD-READY**, not build-proven, until GitHub Actions passes the exact successful V2.10 pinned real GLSL compile, real project Java compile, full `:app:assembleDebug`, one-APK proof and post-build frozen-candidate invariance.
