@@ -416,10 +416,22 @@ final class JpegFusion {
                     float shortOwnership = computeShortOwnership(
                             s, l, appearanceGain, context2, context6,
                             registration.confidence);
+                    float shortCoreOwnership = computeShortCoreOwnership(
+                            s, l, appearanceGain, context2, context6,
+                            registration.confidence);
+                    shortOwnership = Math.max(shortOwnership, shortCoreOwnership);
 
-                    float sr = SRGB_TO_LINEAR[sr8] * appearanceGain.r;
-                    float sg = SRGB_TO_LINEAR[sg8] * appearanceGain.g;
-                    float sb = SRGB_TO_LINEAR[sb8] * appearanceGain.b;
+                    float scalarAppearanceGain = secondLargest3(
+                            appearanceGain.r, appearanceGain.g, appearanceGain.b);
+                    float srPerChannel = SRGB_TO_LINEAR[sr8] * appearanceGain.r;
+                    float sgPerChannel = SRGB_TO_LINEAR[sg8] * appearanceGain.g;
+                    float sbPerChannel = SRGB_TO_LINEAR[sb8] * appearanceGain.b;
+                    float srScalar = SRGB_TO_LINEAR[sr8] * scalarAppearanceGain;
+                    float sgScalar = SRGB_TO_LINEAR[sg8] * scalarAppearanceGain;
+                    float sbScalar = SRGB_TO_LINEAR[sb8] * scalarAppearanceGain;
+                    float sr = srPerChannel + (srScalar - srPerChannel) * shortCoreOwnership;
+                    float sg = sgPerChannel + (sgScalar - sgPerChannel) * shortCoreOwnership;
+                    float sb = sbPerChannel + (sbScalar - sbPerChannel) * shortCoreOwnership;
                     float lr = SRGB_TO_LINEAR[lr8];
                     float lg = SRGB_TO_LINEAR[lg8];
                     float lb = SRGB_TO_LINEAR[lb8];
@@ -681,6 +693,62 @@ final class JpegFusion {
         float registrationGate = smoothstep(0.58f, 0.78f, registrationConfidence);
         return shortSignal * shortHeadroom * primary
                 * Math.max(coherence, strong) * registrationGate;
+    }
+
+    private static float computeShortCoreOwnership(
+            int shortPixel,
+            int longPixel,
+            AppearanceGain gain,
+            float context2,
+            float context6,
+            float registrationConfidence) {
+        int sr8 = (shortPixel >>> 16) & 0xFF;
+        int sg8 = (shortPixel >>> 8) & 0xFF;
+        int sb8 = shortPixel & 0xFF;
+        int lr8 = (longPixel >>> 16) & 0xFF;
+        int lg8 = (longPixel >>> 8) & 0xFF;
+        int lb8 = longPixel & 0xFF;
+        float sr = sr8 / 255.0f;
+        float sg = sg8 / 255.0f;
+        float sb = sb8 / 255.0f;
+        float lr = lr8 / 255.0f;
+        float lg = lg8 / 255.0f;
+        float lb = lb8 / 255.0f;
+        float shortEncodedY = linearLuma(sr, sg, sb);
+        float longEncodedY = linearLuma(lr, lg, lb);
+        float shortPeak = Math.max(sr, Math.max(sg, sb));
+        float secondLong = secondLargest3(lr, lg, lb);
+        float longLinearY = linearLuma(
+                SRGB_TO_LINEAR[lr8], SRGB_TO_LINEAR[lg8], SRGB_TO_LINEAR[lb8]);
+        float mappedShortY = linearLuma(
+                SRGB_TO_LINEAR[sr8] * gain.r,
+                SRGB_TO_LINEAR[sg8] * gain.g,
+                SRGB_TO_LINEAR[sb8] * gain.b);
+        float radiometricRatio = mappedShortY / Math.max(longLinearY, 0.00001f);
+
+        float registrationGate = smoothstep(0.58f, 0.78f, registrationConfidence);
+        float neighborhood = (float) Math.sqrt(
+                smoothstep(0.08f, 0.30f, context2)
+                * smoothstep(0.08f, 0.28f, context6));
+        float veryStrongRadiometry = smoothstep(1.65f, 2.00f, radiometricRatio);
+        float clippedCoreProof = smoothstep(0.985f, 0.996f, secondLong)
+                * smoothstep(0.68f, 0.76f, longEncodedY)
+                * smoothstep(0.08f, 0.14f, shortEncodedY)
+                * (1.0f - smoothstep(0.94f, 0.975f, shortPeak))
+                * smoothstep(1.14f, 1.28f, radiometricRatio)
+                * Math.max(neighborhood, veryStrongRadiometry)
+                * registrationGate;
+        float featheredCore = smoothstep(0.45f, 0.82f, clippedCoreProof);
+
+        boolean strictCore = registrationConfidence >= 0.78f
+                && longEncodedY >= 0.70f
+                && secondLong >= 0.992f
+                && shortEncodedY >= 0.10f
+                && shortPeak <= 0.94f
+                && radiometricRatio >= 1.18f
+                && ((context2 >= 0.10f && context6 >= 0.10f)
+                || radiometricRatio >= 1.65f);
+        return strictCore ? 1.0f : featheredCore;
     }
 
     private static float cardinalSupportAverage(

@@ -1,46 +1,21 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.7
+# Iris HDR Viewfinder Test V1.4.11 V2.8
 
-V2.7 is derived only from the exact successful V1.4.11 V2.6 GitHub Actions compiled candidate (`baea5c2f5ee865d1cededa42d3b14f42dc5f23bd`, run `33785286598`, artifact `9905210635`). No backup branch is created. The successful V2.6 capture/exposure architecture and exact 15-step Actions verification/build procedure remain the foundation.
+V2.8 is a narrow saved-JPEG fusion correction derived only from the exact successful V2.7 GitHub Actions compiled candidate (`f6bd9202063cdabd7eea76f7c2575a6ec11c453e`, run `33813880497`, artifact `9915838166`). V2.7 remains runtime authority until V2.8 passes Actions.
 
+## What changes
 
-## V1.1 compiler-only correction
+Only `JpegFusion.java` changes at runtime. V2.7 alignment/registration, HdrGlView, all GLSL, capture/DNG ownership, AUTO/MANUAL exposure policy, live mode=2, orientation and unrelated runtime code are protected byte-for-byte.
 
-The first V2.7 Actions attempt (`33812132460`) passed exact V2.6 authority reconstruction, pinned GLSL installation, reserved-identifier scanning and real GLSL compilation, then stopped at the unchanged real Java compiler gate because `JpegFusion.java` still called `mapLut(float,float[])` after the V2.7 rewrite had accidentally omitted that proven V2.6 helper. V1.1 restores the exact V2.6 `mapLut` implementation byte-for-byte. No registration, radiometric ownership, SHORT/LONG fusion, tone, capture or shader math changes. The failure is now a permanent verifier regression.
+V2.7 correctly registered SHORT into LONG coordinates but could still leave fractional clipped LONG contribution inside genuinely destroyed highlight cores. V2.8 keeps V2.7's conservative fractional ownership as a feather while adding a strict inner state: if LONG is bright with two channels essentially clipped, registered SHORT has real signal/headroom, radiometric proof is positive, support is coherent and registration is fully trusted, the core becomes exactly 100% SHORT RGB.
 
-## LONG-reference registered SHORT
+In that hard core one common scalar linear-light exposure scale is applied to all three registered SHORT channels. This preserves SHORT's real RGB relationship. It does not globally neutralize warm clouds or invent white; genuine SHORT warmth remains genuine SHORT warmth.
 
-Saved HDR (`mode=3`) now registers SHORT into LONG coordinates before any SHORT ownership decision. Registration is bounded, forward/backward, uniqueness-aware and cycle-consistent; uncertainty fails closed. LONG never moves and remains the scene geometry/appearance reference.
+## Real-photo replay
 
-The registered SHORT is then mapped into LONG's rendered linear-light appearance with one robust per-channel calibration derived from non-clipped overlap. V2.6's power-based saved-SHORT lift is not used by V2.7.
+The exact outdoor cloud and indoor window pairs supplied after V2.7 were replayed before source translation. The replay reproduced the actual V2.7 fused JPEG within roughly 1–2 code values/channel, and independently recovered the observed subpixel registration. In the conservative clipped/SHORT-valid population, >99% SHORT ownership rises from about 26.5% to 82.3% outdoors and 48.5% to 87.3% indoors, while valid-LONG pixels (`secondLong < 0.90`) receive no new core ownership.
 
-## Radiometric lost-LONG recovery
+## Verification
 
-SHORT does not gain ownership merely because a region is bright. The center must have usable SHORT signal/headroom and the mapped SHORT must prove that LONG lost radiance. Multi-channel LONG damage is required, which protects single-channel color saturation.
+The successful V2.7 verification/build mechanics are inherited unchanged in order and compiler commands. The workflow advances only the exact V2.7 Actions authority pins, V2.8 version/hash/allowlist/protected-file proofs, artifact names and permanent V2.8 regressions. Runtime allowlist equality is exactly one file: `app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java`.
 
-Spatial coherence is deliberately sparse and implementation-identical on GPU and CPU: four cardinal samples at radius 2 plus four at radius 6. This lets smooth genuinely clipped whites/lights recover from SHORT without requiring artificial texture, while preventing broad gray/black replacement patches from spreading into healthy LONG regions.
-
-When SHORT is admitted, the complete registered mapped SHORT RGB center sample is used. Otherwise the complete LONG RGB center sample remains authoritative. There is no luma-from-SHORT/chroma-from-LONG hybrid, neighbor RGB fill, inpainting, sharpening, local tone mapping or OpenCV runtime dependency.
-
-## Real-photo simulation gate
-
-The final implementation-equivalent architecture was accepted on the exact re-uploaded 1536x2048 LONG/SHORT pairs before runtime translation:
-
-- Window `133823`: positive SHORT recovery; source-equivalent ownership above 0.5 is about 1.113%.
-- Desk `134010`: positive recovery of genuinely clipped ceiling/light/paper/desk areas; about 8.235%.
-- Under-desk `134056`: leakage-protection scene; about 0.103%, with the known gray bottle/binder contamination absent.
-
-The Android-source-equivalent registration estimator remains subpixel/full-confidence on these pairs and reproduces essentially the same ownership rates as the accepted simulation. Low registration confidence, clipped SHORT, one-channel saturation and other unsafe conditions fail closed.
-
-## Preserved V2.6 behavior
-
-- V2.6 global photographic body tone and 0.70 HDR shoulder remain downstream.
-- Brightness remains `-16.0..+1.0 EV`; Gamma remains `0.50..2.00`.
-- Live `mode=2` retains the successful physical-ratio HDR behavior.
-- AUTO/MANUAL capture ownership and real MANUAL SHORT shutter behavior are unchanged.
-- CameraController, DNG ownership, capture routing, preview cadence/FOV/orientation and unrelated runtime files are protected by byte equality.
-
-## Verification mechanics
-
-V2.7 keeps the exact successful V2.6 15-step Actions sequence: exact prior artifact reconstruction and allowlist proof; Java 17; Android SDK 37; Gradle 9.6.0; pinned real `glslangValidator`; complete reserved-identifier scan; real GLSL compile; real project Java compile; regressions on the compiler-tested candidate; full `:app:assembleDebug`; exactly-one-APK and post-build invariance; artifact upload. Deterministic full-index forward/rollback patch proof remains inside the same precompiler gate.
-
-Before GitHub Actions this package is **PREPARED / UPLOAD-READY, NOT BUILD-PROVEN**. No unrun real compiler is represented as passed.
+V2.8 is **PREPARED / UPLOAD-READY** until GitHub Actions runs the real Java compiler and full `:app:assembleDebug` successfully.

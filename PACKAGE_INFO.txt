@@ -1,39 +1,35 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.7 V1.1 COMPILER-CORRECTION PACKAGE INFO
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.8 CLIPPED-CORE TRUE-SHORT OWNERSHIP PACKAGE INFO
 
 STATUS
 PREPARED / UPLOAD-READY, NOT BUILD-PROVEN.
-This V1.1 correction supersedes failed V2.7 run 33812132460; it restores only the exact V2.6 mapLut helper in runtime math and adds the failure as a regression assertion.
 No source commit or push performed by ChatGPT.
-No backup created; this is a localized saved-fusion correction and preserves successful V2.6 capture/exposure architecture.
+No backup created; this is a narrow saved-fusion correction.
 
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 24
-Target versionName: 1.0-v1.4.11-v2.7
+Target versionCode: 25
+Target versionName: 1.0-v1.4.11-v2.8
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: baea5c2f5ee865d1cededa42d3b14f42dc5f23bd
-Tree: ca44fa112e4f4c11bf8aaaee2dd84d02a0809515
-GitHub Actions run: 33785286598 — SUCCESS
-Artifact ID: 9905210635
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.6
-Artifact digest: sha256:7fb51dffd02de94badb75f496b330c3f471f93e012e563b74dd7d67fb63f6266
-V2.6 APK SHA-256: 11ce0746db94f59c49c44955ddb0b4b253f2efa9c34602d6fc8554ef8dfb7b8a
-V2.6 source-candidate TAR SHA-256: e1c7d31ef0ad2b31f3f51f728d5b797b4fc9a43364bd9bb01f629e67f76a021b
-V2.6 runtime manifest SHA-256: f229c5846acd14f2db05d896e7003bf116105444a4456ed6f6dfb39ec35278a7
-V2.6 repository manifest SHA-256: f38dbf2192dbd099ea723884d74575283bd3e00d2109daed2e2b48eb4b066cc3
-V2.6 regressions SHA-256: 954a4e74285f9e6134265ee0063ab44a3dddccda6c4bd6cec4c64d1900b0c446
+Commit: f6bd9202063cdabd7eea76f7c2575a6ec11c453e
+Tree: 7437b96f23544297f621980f96a57a3565a81382
+GitHub Actions run: 33813880497 — SUCCESS
+Artifact ID: 9915838166
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.7
+Artifact digest: sha256:4f1363bd029b493d8742e9432c2d44ff24eccfc8547ca5bce2e6c3b7767c74e7
+V2.7 APK SHA-256: 0fa95db26b2a2e85bc222803026befcc4bcb768e7cc4a878f043726c13cb92d8
+V2.7 source-candidate TAR SHA-256: 8cd1c4e7400a3070ef4db4d661b97731181afc35370b1822f75646020e1e74b9
+V2.7 runtime manifest SHA-256: f4b955d149910554f6429df491e5511964bd4b99ea9f6e222c8c4bfe80237faa
+V2.7 repository manifest SHA-256: a2ac6673f5d393850b994289a9f461a238d29ed3f0bed550ef6a9fc4d988f3e2
+V2.7 regressions SHA-256: 6125200b984c37258564addaa73c8e1fdc87ed267ba2b96c2eacc008c5fff575
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.6 workflow/build implementation and 15-step order.
+Exact successful V2.7 workflow/build implementation, itself inherited from the successful V2.6 15-step sequence.
 No compiler/build/patch/freeze stage is added, removed, reordered, simplified or substituted.
-Infrastructure changes are narrow authority/version/hash/allowlist/protected-set/regression-pin advances only. V1.1 does not add/remove/reorder any workflow step.
 
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 3
-- app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 1
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 
 INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
@@ -49,38 +45,34 @@ CANDIDATE METADATA / DELIVERY CHANGES
 - app/build.gradle.kts
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-YES, NARROWLY. Only exact authority pins, target version, candidate runtime digest, protected-file set, changed-file allowlist, artifact names and applicable V2.7 regressions advance. The proven V2.6 15-step verification/build procedure itself is unchanged.
+YES, NARROWLY. Only authority/version/hash/allowlist/protected-set/artifact naming and applicable regression pins advance. The successful V2.7 verification/build procedure and step order are unchanged.
 
-V2.7 RUNTIME DIGEST
-f4b955d149910554f6429df491e5511964bd4b99ea9f6e222c8c4bfe80237faa
+V2.8 RUNTIME DIGEST
+8a09f550fd23b97d23b49af41b001b86b90125fdf034979cdb6ddf8fe27372ef
 Runtime universe remains exactly 12 files; no runtime file is added or deleted.
 
-V2.7 SAVED-FUSION ARCHITECTURE
-- LONG remains output geometry and overall appearance/reference authority.
-- SHORT is registered into LONG coordinates first using bounded forward/backward log-luma-gradient registration with cycle consistency.
-- One robust per-channel linear-light SHORT->LONG appearance calibration is estimated from registered non-clipped overlap.
-- SHORT ownership requires usable SHORT signal/headroom plus proof that LONG lost radiance; brightness alone never grants ownership.
-- Smooth genuinely clipped whites/lights remain valid recovery targets when mapped SHORT contains usable radiance; texture is not required merely because the surface is smooth.
-- One-channel saturation, clipped SHORT, invalid borders and low registration confidence fail closed to LONG.
-- Spatial coherence uses only four cardinal samples at radius 2 and four at radius 6. No Gaussian/box/OpenCV/variable-kernel runtime operation is used.
-- Owned pixels use complete registered mapped SHORT RGB. Unowned pixels remain complete LONG RGB. No V2.5 luma/chroma hybrid, neighbor RGB fill, inpainting, sharpening or local tone map.
-- V2.6 global photographic body tone and HDR shoulder remain downstream.
-- Live mode=2, AUTO/MANUAL exposure, MANUAL SHORT shutter behavior, DNG ownership and capture routing remain protected.
+V2.8 RUNTIME CORRECTION
+- V2.7 registration/alignment and appearance-calibration source slices are hash-pinned unchanged.
+- Existing conservative V2.7 fractional SHORT ownership remains as the feather/boundary behavior.
+- A new strict clipped core requires: high registration confidence, bright LONG, two LONG channels near encoded clipping, usable non-clipped SHORT, radiometric proof, and coherent support (or very strong radiometry).
+- When that strict core is proven, SHORT ownership is exactly 1.0. No residual clipped LONG RGB is allowed in the core.
+- Hard-core SHORT color uses one common scalar linear-light exposure scale for R/G/B, preserving the registered SHORT RGB relationship instead of applying separate channel gains there.
+- Valid LONG and one-channel saturation remain fail-closed to V2.7 behavior.
+- HdrGlView, all GLSL, CameraController, CaptureSetSaver, DNG/capture routing, AUTO/MANUAL exposure policy and live mode=2 are protected byte-for-byte from V2.7.
 
-REAL-PHOTO SIMULATION ACCEPTANCE
-Exact re-uploaded 1536x2048 pairs were used before source translation.
-- WINDOW 133823: positive SHORT highlight recovery; source-equivalent ownership >0.5 ~1.113%.
-- DESK 134010: positive SHORT recovery of clipped ceiling/light/paper/desk areas; source-equivalent ownership >0.5 ~8.235%.
-- UNDER-DESK 134056: leakage protection; source-equivalent ownership >0.5 ~0.103% and known gray bottle/binder contamination absent.
-- Source-equivalent Android registration remained subpixel and full-confidence on all three pairs.
-- Adversarial low-confidence, clipped-SHORT, one-channel saturation and noisy-SHORT conditions fail closed as applicable.
+REAL-PHOTO REPLAY BEFORE SOURCE WRITE
+Exact 1536x2048 outdoor-cloud and indoor-window capture pairs were replayed through a source-equivalent implementation.
+- Replay of V2.7 reproduced the actual fused JPEG at about 1-2 code values/channel error, validating the replay path.
+- Registration: outdoor approx (+0.136,+0.058) px, confidence 1.0, cycle ~0.132 px; indoor approx (+0.368,+0.037) px, confidence 1.0, cycle ~0.205 px.
+- Among conservative genuinely clipped/SHORT-valid pixels, exact >99% SHORT ownership rises from ~26.5% to ~82.3% outdoors and ~48.5% to ~87.3% indoors.
+- Pixels with valid LONG (secondLong < 0.90) receive no new V2.8 core ownership in replay.
+- Genuine SHORT warmth is preserved; V2.8 does not globally neutralize cloud color.
 
 LOCAL COMPILER / BUILD STATUS
-GLSL RESERVED IDENTIFIER SCAN: PASS.
-PINNED REAL GLSLANG COMPILE: NOT RUN locally; no substitute counted.
-REAL PROJECT JAVA COMPILE: NOT RUN locally; Android/Gradle toolchain unavailable here.
-FULL ANDROID :app:assembleDebug: NOT RUN locally.
-GitHub Actions remains authoritative for all unrun compiler/build gates.
+GLSL source bytes: UNCHANGED from successful V2.7; V2.7 pinned real GLSL compile passed.
+REAL PROJECT JAVA COMPILE FOR V2.8: NOT RUN locally.
+FULL ANDROID :app:assembleDebug FOR V2.8: NOT RUN locally.
+GitHub Actions is authoritative for the new Java compile and full build.
 
 FINAL ACTIONS AUTHORITY
-Until V2.7 Actions succeeds, final authority remains V2.6 run 33785286598 / artifact 9905210635.
+Until V2.8 succeeds, final authority remains V2.7 commit f6bd9202063cdabd7eea76f7c2575a6ec11c453e / run 33813880497 / artifact 9915838166.

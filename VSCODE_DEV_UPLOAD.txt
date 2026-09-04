@@ -1,20 +1,26 @@
-V1.4.11 V2.7 V1.1 vscode.dev retry upload
+V1.4.11 V2.8 — VSCODE.DEV UPLOAD
 
-TARGET BRANCH
-experiment-v1.4.11-v2-brightness-4ev
+Branch: experiment-v1.4.11-v2-brightness-4ev
+Required direct parent / runtime authority: f6bd9202063cdabd7eea76f7c2575a6ec11c453e (successful V2.7)
 
-1. IMPORTANT: the failed V2.7 commit 0116960d85dd62762742b498a238c1d09bcc8790 must NOT remain as HEAD/parent for this retry.
-   Restore this branch to the exact successful V2.6 authority first:
-   baea5c2f5ee865d1cededa42d3b14f42dc5f23bd
-   This preserves the successful V2.6 workflow mechanic that requires HEAD^ to equal the exact successful authority.
+1. Open a fresh vscode.dev session on the branch at the successful V2.7 commit above.
+2. Upload/replace ALL files from this ZIP at repository root, preserving paths.
+3. Do not add extra files or folders.
+4. Source Control should show exactly 9 changed tracked files relative to V2.7:
+   .github/workflows/build.yml
+   BUILD_WORKFLOW_COPY.yml
+   PACKAGE_INFO.txt
+   PACKAGE_MANIFEST_SHA256.txt
+   README.md
+   VSCODE_DEV_UPLOAD.txt
+   app/build.gradle.kts
+   app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+   scripts/verify_orientation.py
+5. Commit once and push once.
 
-2. In vscode.dev on that branch, upload/replace the complete contents of the V2.7 FULL-UPLOAD ZIP at repository root. Do not add extra files.
+Suggested commit message:
+V1.4.11 V2.8 exact SHORT clipped-core ownership
 
-3. Commit exactly once. Suggested message:
-   V1.4.11 V2.7 V1.1 restore V2.6 mapLut compiler helper
-
-4. Push and let the branch-isolated GitHub Actions workflow run.
-
-GitHub Actions is the authoritative compiler/build proof. Do not add another commit before the V2.7 build because the workflow intentionally requires HEAD^ to equal the exact successful V2.6 authority commit.
-
-Do not upload this package to main or dev. Do not push APK files.
+Do not commit the ZIP itself.
+Do not alter dev/main.
+Actions is the authoritative compiler/build proof.

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from pathlib import Path
+import hashlib
 import math
 import os
 import textwrap
@@ -19,7 +20,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.7 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.8 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -49,7 +50,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.7 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.8 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -249,10 +250,12 @@ require('float requestedScale = mappedY / y;' in hdr_shader
 require('adaptiveClipStart(bracketStops)' in hdr_shader and '0.995' in hdr_shader,
         "live mode must retain V2.5 near-clipping SHORT admission")
 require('float shortOwnership = computeShortOwnership(' in fusion
+        and 'float shortCoreOwnership = computeShortCoreOwnership(' in fusion
+        and 'shortOwnership = Math.max(shortOwnership, shortCoreOwnership);' in fusion
         and 'float mr = lr + (sr - lr) * shortOwnership;' in fusion
         and 'float mg = lg + (sg - lg) * shortOwnership;' in fusion
         and 'float mb = lb + (sb - lb) * shortOwnership;' in fusion,
-        "CPU fallback must use V2.7 complete-RGB registered SHORT ownership")
+        "CPU fallback must use V2.8 complete-RGB registered SHORT ownership with a hard clipped core")
 require('mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);' in hdr_shader
         and 'mergedScene = mix(longScene, shortScene, highlightWeight);' in hdr_shader,
         "shared shader must separate V2.7 saved registered provenance from unchanged live physical-ratio merge")
@@ -600,15 +603,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.7 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.6' in workflow
-        and 'run-id: 33785286598' in workflow,
-        "workflow must download the exact successful V1.4.11 V2.6 Actions authority")
-require('run-id: 33712399624' not in workflow
-        and 'run-id: 33708991821' not in workflow
-        and 'run-id: 33691180722' not in workflow
-        and 'run-id: 33678538693' not in workflow,
-        "V1.4.11 V2.7 must never fall back behind successful V2.6 authority")
+# 038 / 042 / V2.8 - Exact current pre-handoff authority pin regression.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.7' in workflow
+        and 'run-id: 33813880497' in workflow
+        and "authority='f6bd9202063cdabd7eea76f7c2575a6ec11c453e'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.7 Actions authority")
+require('run-id: 33785286598' not in workflow,
+        "V1.4.11 V2.8 must not use V2.6 as runtime authority after successful V2.7")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -777,11 +778,12 @@ for token in [
 require('vec3 shortProvenanceScene = srgbToLinear(shortRgb) * stillShortLinearGain;' in hdr_shader
         and 'mergedScene = mix(longScene, shortProvenanceScene, stillShortOwnership);' in hdr_shader,
         "saved GPU output must mix complete LONG RGB with complete mapped registered SHORT RGB")
-require('float sr = SRGB_TO_LINEAR[sr8] * appearanceGain.r;' in fusion
-        and 'float sg = SRGB_TO_LINEAR[sg8] * appearanceGain.g;' in fusion
-        and 'float sb = SRGB_TO_LINEAR[sb8] * appearanceGain.b;' in fusion
+require('float srPerChannel = SRGB_TO_LINEAR[sr8] * appearanceGain.r;' in fusion
+        and 'float sgPerChannel = SRGB_TO_LINEAR[sg8] * appearanceGain.g;' in fusion
+        and 'float sbPerChannel = SRGB_TO_LINEAR[sb8] * appearanceGain.b;' in fusion
+        and 'float sr = srPerChannel + (srScalar - srPerChannel) * shortCoreOwnership;' in fusion
         and 'float mr = lr + (sr - lr) * shortOwnership;' in fusion,
-        "CPU output must mix complete LONG RGB with complete mapped registered SHORT RGB")
+        "CPU output must keep complete registered SHORT RGB and may change only its common core exposure scale")
 require('liftShortProvenanceRgb' not in hdr_shader
         and 'buildShortProvenanceLiftLut' not in fusion
         and 'mergeStillLumaAndChroma' not in hdr_shader
@@ -820,6 +822,70 @@ require(short_ownership_v27(0.30, 0.55, 0.99, 0.999, 2.0, 0.8, 0.8, 0.45) < 0.00
         "low registration confidence must force exact LONG fallback")
 require(short_ownership_v27(0.30, 0.55, 0.90, 0.92, 1.8, 0.9, 0.9, 1.0) > 0.50,
         "broad damaged LONG with coherent valid SHORT must remain eligible")
+
+# V2.8 permanent regression: clear encoded lost-LONG cores must become exact
+# registered SHORT ownership, while the V2.7 feather remains around the core.
+def short_core_v28(short_y, short_peak, long_y, second_long, rr, c2, c6, reg):
+    reg_gate = smoothstep_math(0.58, 0.78, reg)
+    neighborhood = math.sqrt(smoothstep_math(0.08, 0.30, c2) * smoothstep_math(0.08, 0.28, c6))
+    very_strong = smoothstep_math(1.65, 2.00, rr)
+    proof = (smoothstep_math(0.985, 0.996, second_long)
+             * smoothstep_math(0.68, 0.76, long_y)
+             * smoothstep_math(0.08, 0.14, short_y)
+             * (1.0 - smoothstep_math(0.94, 0.975, short_peak))
+             * smoothstep_math(1.14, 1.28, rr)
+             * max(neighborhood, very_strong) * reg_gate)
+    feather = smoothstep_math(0.45, 0.82, proof)
+    strict = (reg >= 0.78 and long_y >= 0.70 and second_long >= 0.992
+              and short_y >= 0.10 and short_peak <= 0.94 and rr >= 1.18
+              and ((c2 >= 0.10 and c6 >= 0.10) or rr >= 1.65))
+    return 1.0 if strict else feather
+
+require('private static float computeShortCoreOwnership(' in fusion
+        and 'return strictCore ? 1.0f : featheredCore;' in fusion,
+        "V2.8 strict clipped core must snap to exact 100% SHORT ownership")
+for token in [
+        'smoothstep(0.985f, 0.996f, secondLong)',
+        'smoothstep(0.68f, 0.76f, longEncodedY)',
+        'smoothstep(0.08f, 0.14f, shortEncodedY)',
+        '1.0f - smoothstep(0.94f, 0.975f, shortPeak)',
+        'smoothstep(1.14f, 1.28f, radiometricRatio)',
+        'smoothstep(0.08f, 0.30f, context2)',
+        'smoothstep(0.08f, 0.28f, context6)',
+        'smoothstep(1.65f, 2.00f, radiometricRatio)']:
+    require(token in fusion, f"V2.8 clipped-core proof changed: {token}")
+require('secondLong >= 0.992f' in fusion
+        and 'longEncodedY >= 0.70f' in fusion
+        and 'shortPeak <= 0.94f' in fusion
+        and 'registrationConfidence >= 0.78f' in fusion,
+        "V2.8 strict core fail-closed thresholds changed")
+require('float scalarAppearanceGain = secondLargest3(' in fusion
+        and 'float srScalar = SRGB_TO_LINEAR[sr8] * scalarAppearanceGain;' in fusion
+        and 'float sgScalar = SRGB_TO_LINEAR[sg8] * scalarAppearanceGain;' in fusion
+        and 'float sbScalar = SRGB_TO_LINEAR[sb8] * scalarAppearanceGain;' in fusion,
+        "V2.8 core must apply one common linear-light exposure scale to SHORT RGB")
+require(math.isclose(short_core_v28(0.40, 0.55, 0.99, 0.999, 1.8, 0.8, 0.8, 1.0), 1.0),
+        "clear two-channel clipped LONG with valid SHORT must be exact SHORT in V2.8")
+require(short_core_v28(0.40, 0.55, 0.90, 0.90, 1.8, 0.8, 0.8, 1.0) == 0.0,
+        "valid LONG must not enter the new clipped core")
+require(short_core_v28(0.40, 0.55, 0.99, 0.55, 2.0, 0.8, 0.8, 1.0) == 0.0,
+        "one-channel saturation must fail closed in the new core")
+require(short_core_v28(0.90, 0.98, 0.99, 0.999, 2.0, 0.8, 0.8, 1.0) < 0.001,
+        "clipped/near-clipped SHORT must fail closed in the new core")
+require(short_core_v28(0.40, 0.55, 0.99, 0.999, 2.0, 0.8, 0.8, 0.45) < 0.001,
+        "low registration confidence must fail closed in the new core")
+
+# Exact V2.7 alignment and calibration source slices are verification authority.
+registration_slice = fusion[fusion.index('    static Registration estimateRegistration'):
+                            fusion.index('    static AppearanceGain estimateAppearanceGain')]
+appearance_slice = fusion[fusion.index('    static AppearanceGain estimateAppearanceGain'):
+                          fusion.index('    private static float[] logLuma')]
+require(hashlib.sha256(registration_slice.encode()).hexdigest() ==
+        '88b51b43a1256f84ce8b91d38a1e290ca1e10a196784bf0705b2f8a51ebcb4b9',
+        "V2.8 must not change any successful V2.7 registration/alignment bytes")
+require(hashlib.sha256(appearance_slice.encode()).hexdigest() ==
+        'd83dc871411da89ae113a85284ab493400baad0347eeb6c127fa8a20086e7e97',
+        "V2.8 must not change successful V2.7 appearance-calibration bytes")
 
 # Global photographic body tone is tone reproduction only: black stays anchored,
 # body/midtones rise, and extra lift is zero before the 0.70 HDR shoulder.
@@ -865,9 +931,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 24' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.7"' in Path('app/build.gradle.kts').read_text(),
-        "V2.7 version/build marker must be exact")
+require('versionCode = 25' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.8"' in Path('app/build.gradle.kts').read_text(),
+        "V2.8 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -971,4 +1037,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.7 REGRESSION PASS: exact successful V2.6 authority, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, real MANUAL SHORT shutter, LONG-reference registered SHORT, radiometric lost-LONG proof, clipped desk/window recovery, under-desk fail-closed, global photographic body tone, GLES3-primary saved fusion, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")
+print("V1.4.11 V2.8 REGRESSION PASS: exact successful V2.7 authority, fixed-3EV HDR, -16..+1EV Brightness, 0.50..2.00 Gamma, immediate scene-cut AUTO, real MANUAL SHORT shutter, LONG-reference registered SHORT, radiometric lost-LONG proof, clipped desk/window recovery, under-desk fail-closed, global photographic body tone, GLES3-primary saved fusion, CPU fallback equivalence, fixed-height status, frozen capture controls, producer-owned orientation, capture protection")
