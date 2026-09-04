@@ -1,43 +1,37 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.12
+# Iris HDR Viewfinder Test V1.4.11 V2.13 V1.1
 
-V2.12 is the **scene-adaptive AUTO exposure + adaptive presentation** build derived from the exact successful V2.11 Actions compiled candidate (`7e5a295d01748da0255e831ff19d3d31a2da0e3b`, run `33872977271`, artifact `9936710832`). V2.11 remains final Actions/runtime authority until V2.12 passes the same authoritative build procedure.
+V2.13 V1.1 is the **compiler-contract correction of the unchanged independent two-exposure HDR + source-proven rendering candidate** derived from exact successful V2.12 Actions authority (`34ac4dd0b47be62833f25990c4284c3206741f52`, run `33892034499`, artifact `9944278389`).
 
-## Why AUTO was wrong
+## Visual failure being corrected
 
-The supplied AUTO/MANUAL plant-room pair is nearly controlled: both SHORT captures are about `1/120s ISO50`, but AUTO used LONG about `1/120s ISO1556` (~4.96 EV separation) while the visually successful MANUAL used LONG about `1/120s ISO200` (2.00 EV). Fusion was therefore receiving an unnecessarily overexposed LONG in AUTO.
+The supplied V2.12 office capture proved SHORT and LONG were effectively identical (`~1/156s ISO50`), while FUSED was brighter and developed unsupported-looking peach/orange pastel fill at the window/ground. 800% inspection showed real mottled source texture was flattened/expanded by saved presentation. MANUAL SPLIT also showed Long ISO could indirectly re-solve SHORT through the shared flicker-safe pair solver.
 
-The active V2.11 controller preserved the initial HAL-derived scene brightness and could let the bracket expand when SHORT hit its physical/flicker/minimum-ISO floor. V2.12 removes that ownership error.
+## V2.13 V1.2 post-build hash correction
 
-## V2.12 exposure controller
+Failed Actions run `33900980849` proved `CameraController` consumed `stats.shortP90Linear` while `HdrGlView.SceneStats` published P50/P95/P98/P99 but omitted P90. V1.1 changes no HDR policy: it publishes the intended SHORT P90 statistic from the existing 32x24 stats surface and adds the exact producer/consumer mismatch as a permanent regression.
 
-AUTO now treats SHORT as the highlight-information anchor. The existing 32x24 paired live-statistics path measures the SHORT highlight tail and chooses a feasible LONG/SHORT separation from actual scene content. On the supplied good scene, the runtime-domain SHORT statistics infer about 4x / 2 EV, matching the successful manual bracket without hard-coding ISO200.
+## V2.13 capture contract
 
-If SHORT cannot become darker because of sensor/ISO/flicker constraints, LONG is reduced to the achieved SHORT times the learned bracket instead of silently increasing bracket depth. The successful V2.10/V2.11 50/60-Hz timing authority and live hysteresis/update/scene-cut constants are preserved.
+- SHORT and LONG are independent captures.
+- MANUAL SHORT is solved only from SHORT shutter + minimum ISO + flicker mode; Long ISO cannot alter SHORT or the left SPLIT frame.
+- AUTO unknown/PWM flicker stays explicitly `FLICKER UNSAFE`, but never collapses SHORT onto LONG.
+- AUTO learns bracket depth from robust SHORT body/headroom statistics, targets at least 4x in HDR, and may grow to 64x when scene/sensor constraints support it.
+- P99/near-clip pressure reduces SHORT exposure; it never collapses LONG onto SHORT.
 
-## Adaptive presentation
+## V2.13 fusion/presentation contract
 
-Capture and presentation are separate owners:
+V2.11/V2.12 registration and evidence/support geometry remain the production foundation. Hard multi-channel LONG clipping with valid registered/static SHORT now has a direct source-ownership route into FUSED. If the physical bracket collapses below 2x, the saved path fails closed to trustworthy SHORT rather than rendering processed LONG as pseudo-HDR.
 
-`scene statistics -> feasible SHORT/LONG capture -> V2.11 GPU fusion -> adaptive global presentation`
-
-AUTO learns global Brightness/Gamma from fused-scene statistics. MANUAL keeps the user's Brightness/Gamma sliders authoritative. In both modes, a bounded scene-adaptive clarity controller recalculates dehaze/microcontrast around the current scene and slider presentation.
-
-The clarity stage is intentionally conservative: luminance-only, RGB-ratio preserving, a symmetric five-tap range-weighted guide, and explicit noise-floor/strong-edge/highlight protection. It does not use CLAHE, unsharp mask, sharpening, independent RGB dehaze or local-HDR texture synthesis.
-
-Brightness, Gamma, dehaze and microcontrast freeze together at shutter and are used by saved GPU fusion and written to capture metadata, preventing live/saved presentation drift.
-
-## Protected V2.11 behavior
-
-V2.11 scene-domain provenance remains intact. Evidence mode 3 and support mode 4 are byte-pinned; JpegFusion, registration geometry, DNG/orientation, capture temporal ownership and GPU-only saved fusion remain protected. V2.10/V2.11 AUTO/50Hz/60Hz/OFF flicker behavior is unchanged.
+Saved clarity is now a separate GPU presentation pass driven by the already-FUSED image. Dehaze/microcontrast remain luminance-only and RGB-ratio preserving; LONG can no longer act as the spatial guide after SHORT has won source ownership.
 
 ## Runtime scope
 
-Exactly five runtime files change relative to successful V2.11:
+Exactly three runtime files change relative to successful V2.12:
 
 - `app/src/main/assets/shaders/hdr_display.frag`
 - `app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java`
-- `app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java`
 - `app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java`
-- `app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java`
 
-V2.12 is **PREPARED / UPLOAD-READY only after the final clean-extract replay**, and is not build-proven until GitHub Actions passes real glslang, real project javac, full `:app:assembleDebug`, one-APK proof and post-build frozen-candidate invariance.
+`CaptureSetSaver.java`, `MainActivity.java`, `FrameMeta.java`, `JpegFusion.java`, `MediaStoreWriter.java`, DNG/orientation, registration math, shader modes 3/4, V2.10 50/60-Hz safety semantics and GPU-only saved output ownership remain protected.
+
+V2.13 is **PREPARED / UPLOAD-READY only after clean-extract replay** and is not build-proven until GitHub Actions passes real glslang, real project javac, full `:app:assembleDebug`, one-APK proof and post-build invariance.

@@ -1,12 +1,13 @@
-V1.4.11 V2.12 — VSCODE.DEV UPLOAD
+V1.4.11 V2.13 V1.1 — VSCODE.DEV UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: 7e5a295d01748da0255e831ff19d3d31a2da0e3b (successful V2.11)
+Required direct parent / runtime authority: 34ac4dd0b47be62833f25990c4284c3206741f52 (successful V2.12)
 
-1. Open a fresh vscode.dev session on the branch at the successful V2.11 commit above.
-2. Upload/replace ALL files from this ZIP at repository root, preserving paths.
-3. Do not add extra files or folders.
-4. Source Control must show exactly 13 changed tracked files relative to V2.11:
+1. IMPORTANT: the branch currently contains failed V2.13 commit a6cd0f7b0847e3121ef30c1a35422154ef92f0c7. Reset the branch back to the successful V2.12 authority commit above before uploading this correction, so the verified V2.12 procedure retains the successful authority as the direct parent.
+2. Open a fresh vscode.dev session on that reset branch.
+3. Upload/replace ALL files from this ZIP at repository root, preserving paths.
+4. Do not add extra files or folders.
+5. Source Control must show exactly 11 changed tracked files relative to V2.12:
    .github/workflows/build.yml
    BUILD_WORKFLOW_COPY.yml
    PACKAGE_INFO.txt
@@ -16,14 +17,12 @@ Required direct parent / runtime authority: 7e5a295d01748da0255e831ff19d3d31a2da
    app/build.gradle.kts
    app/src/main/assets/shaders/hdr_display.frag
    app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-   app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
    app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-   app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
    scripts/verify_orientation.py
-5. Commit once and push once.
+6. Commit once and push once.
 
 Suggested commit message:
-V1.4.11 V2.12 adaptive AUTO exposure and scene presentation
+V1.4.11 V2.13 independent HDR exposure and source-proven rendering V1.1 compiler correction
 
 Do not commit the ZIP itself.
 Do not alter dev/main.

@@ -44,6 +44,7 @@ final class HdrGlView extends GLSurfaceView {
         final double shortExposureProduct;
         final double longExposureProduct;
         final float shortP50Linear;
+        final float shortP90Linear;
         final float shortP95Linear;
         final float shortP98Linear;
         final float shortP99Linear;
@@ -68,6 +69,7 @@ final class HdrGlView extends GLSurfaceView {
                 double shortExposureProduct,
                 double longExposureProduct,
                 float shortP50Linear,
+                float shortP90Linear,
                 float shortP95Linear,
                 float shortP98Linear,
                 float shortP99Linear,
@@ -90,6 +92,7 @@ final class HdrGlView extends GLSurfaceView {
             this.shortExposureProduct = shortExposureProduct;
             this.longExposureProduct = longExposureProduct;
             this.shortP50Linear = shortP50Linear;
+            this.shortP90Linear = shortP90Linear;
             this.shortP95Linear = shortP95Linear;
             this.shortP98Linear = shortP98Linear;
             this.shortP99Linear = shortP99Linear;
@@ -648,6 +651,7 @@ final class HdrGlView extends GLSurfaceView {
                     lastShortMeta.exposureProduct(),
                     lastLongMeta.exposureProduct(),
                     percentileSorted(shortSorted, 0.50f),
+                    percentileSorted(shortSorted, 0.90f),
                     percentileSorted(shortSorted, 0.95f),
                     percentileSorted(shortSorted, 0.98f),
                     percentileSorted(shortSorted, 0.99f),
@@ -829,6 +833,7 @@ final class HdrGlView extends GLSurfaceView {
             int longTexture = 0;
             int evidenceTexture = 0;
             int supportTexture = 0;
+            int presentationTexture = 0;
             int outputTexture = 0;
             Bitmap output = null;
             try {
@@ -836,6 +841,7 @@ final class HdrGlView extends GLSurfaceView {
                 longTexture = createTexture2d();
                 evidenceTexture = createTexture2d();
                 supportTexture = createTexture2d();
+                presentationTexture = createTexture2d();
                 outputTexture = createTexture2d();
 
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shortTexture);
@@ -846,15 +852,17 @@ final class HdrGlView extends GLSurfaceView {
                 int analysisHeight = Math.max(1, (height + 7) / 8);
                 allocateRgbTexture(evidenceTexture, analysisWidth, analysisHeight);
                 allocateRgbTexture(supportTexture, analysisWidth, analysisHeight);
+                allocateRgbTexture(presentationTexture, width, height);
                 allocateRgbTexture(outputTexture, width, height);
                 JpegFusion.recycleBitmap(shortBitmap);
                 shortBitmap = null;
                 JpegFusion.recycleBitmap(longBitmap);
                 longBitmap = null;
 
-                // V2.9 uses the already compiled hdr_display.frag for all still passes:
-                // 3=evidence, 4=isotropic/topology support, 5=final provenance composition.
-                // The existing live mode=2 path and shader-file universe are unchanged.
+                // V2.13 keeps the proven evidence/provenance passes and adds one
+                // presentation-only pass: 3=evidence, 4=isotropic/topology support,
+                // 5=source-proven fused presentation base, 6=fused-source clarity.
+                // mode 6 samples the already-fused image, never LONG geometry/color.
                 renderStillPass(
                         evidenceTexture, analysisWidth, analysisHeight,
                         3, longTexture, shortTexture, longTexture,
@@ -866,8 +874,13 @@ final class HdrGlView extends GLSurfaceView {
                         exposureRatio, brightnessEv, gamma, dehaze, microContrast,
                         registration.confidence, scalarGain);
                 renderStillPass(
-                        outputTexture, width, height,
+                        presentationTexture, width, height,
                         5, supportTexture, shortTexture, longTexture,
+                        exposureRatio, brightnessEv, gamma, dehaze, microContrast,
+                        registration.confidence, scalarGain);
+                renderStillPass(
+                        outputTexture, width, height,
+                        6, presentationTexture, shortTexture, longTexture,
                         exposureRatio, brightnessEv, gamma, dehaze, microContrast,
                         registration.confidence, scalarGain);
 
@@ -900,7 +913,8 @@ final class HdrGlView extends GLSurfaceView {
                 JpegFusion.recycleBitmap(longBitmap);
                 JpegFusion.recycleBitmap(output);
                 int[] textures = {
-                        shortTexture, longTexture, evidenceTexture, supportTexture, outputTexture};
+                        shortTexture, longTexture, evidenceTexture, supportTexture,
+                        presentationTexture, outputTexture};
                 for (int texture : textures) {
                     if (texture != 0) {
                         int[] one = {texture};

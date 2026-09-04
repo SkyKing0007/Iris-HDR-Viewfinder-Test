@@ -104,11 +104,11 @@ final class CameraController {
     private static final double AUTO_LIVE_SCENE_CUT_EV = 0.70;
     private static final double AUTO_LIVE_SCENE_CUT_MAX_STEP_EV = 6.0;
     private static final long AUTO_LIVE_UPDATE_MIN_NS = 80_000_000L;
-    private static final double AUTO_BRACKET_MIN_RATIO = 1.0;
-    private static final double AUTO_BRACKET_MAX_RATIO = 16.0;
-    private static final double AUTO_SHORT_P95_LONG_TARGET = 0.21;
-    private static final double AUTO_SHORT_P98_LONG_TARGET = 0.29;
-    private static final double AUTO_SHORT_P99_LONG_TARGET = 0.34;
+    private static final double AUTO_BRACKET_MIN_RATIO = 4.0;
+    private static final double AUTO_BRACKET_MAX_RATIO = 64.0;
+    private static final double AUTO_SHORT_P50_LONG_TARGET = 0.12;
+    private static final double AUTO_SHORT_P90_LONG_TARGET = 0.42;
+    private static final double AUTO_SHORT_P98_LONG_HEADROOM = 0.85;
     private static final float AUTO_PRESENT_BRIGHTNESS_MIN_EV = -1.25f;
     private static final float AUTO_PRESENT_BRIGHTNESS_MAX_EV = 0.75f;
     private static final float AUTO_PRESENT_GAMMA_MIN = 0.85f;
@@ -1535,15 +1535,13 @@ final class CameraController {
         autoLongExposureNs = longExposure;
         autoLongIso = longIso;
         autoShortIso = minIso;
-        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE
-                || flickerMode == FLICKER_MODE_OFF) {
-            double targetShortProduct = Math.max(1.0,
-                    ((double) autoLongExposureNs * autoLongIso) / HDR_BRACKET_RATIO);
-            long desiredShort = Math.round(targetShortProduct / Math.max(1, minIso));
-            autoShortExposureNs = Math.min(autoLongExposureNs, clampExposure(desiredShort));
-        } else {
-            autoShortExposureNs = autoLongExposureNs;
-        }
+        // V2.13: an unknown/PWM flicker report is a safety-status problem, never
+        // permission to collapse HDR. Preserve an independent SHORT even when no
+        // integer-cycle authority exists, and continue to report FLICKER UNSAFE.
+        double targetShortProduct = Math.max(1.0,
+                ((double) autoLongExposureNs * autoLongIso) / HDR_BRACKET_RATIO);
+        long desiredShort = Math.round(targetShortProduct / Math.max(1, minIso));
+        autoShortExposureNs = Math.min(autoLongExposureNs, clampExposure(desiredShort));
         double actualShortProduct = Math.max(1.0,
                 (double) autoShortExposureNs * autoShortIso);
         double actualLongProduct = Math.max(1.0,
@@ -1580,28 +1578,29 @@ final class CameraController {
                 Math.max(1.0, stats.shortExposureProduct) / expectedShortProduct) / Math.log(2.0));
         if (staleLongEv > 0.30 || staleShortEv > 0.30 || stats.shortP98Linear <= 0.0005f) return;
 
-        // IRIS_V212_SCENE_EXPOSURE_BEGIN
-        // SHORT is the highlight-information anchor.  AUTO predicts how much LONG
-        // exposure the actual SHORT highlight tail can tolerate instead of preserving
-        // the HAL AE median.  This makes bracket depth scene-dependent and prevents a
-        // minimum-ISO/flicker-limited SHORT from silently expanding a nominal 3-EV
-        // bracket into the ~5-EV failure reproduced by the V2.11 plant-room capture.
-        double ratioP95 = AUTO_SHORT_P95_LONG_TARGET / Math.max(0.002, stats.shortP95Linear);
-        double ratioP98 = AUTO_SHORT_P98_LONG_TARGET / Math.max(0.002, stats.shortP98Linear);
-        double ratioP99 = AUTO_SHORT_P99_LONG_TARGET / Math.max(0.002, stats.shortP99Linear);
+        // IRIS_V213_INDEPENDENT_HDR_EXPOSURE_BEGIN
+        // SHORT owns highlight protection; LONG independently owns body/shadow SNR.
+        // Do not let the brightest 1% veto HDR depth: P99 is allowed to trigger a
+        // SHORT reduction, but bracket learning comes from robust body + bright-tail
+        // evidence.  The requested ratio is scene-driven, never less than 4x in HDR,
+        // and can grow to 64x when the captured scene and sensor bounds support it.
+        double ratioBody = Math.sqrt(
+                (AUTO_SHORT_P50_LONG_TARGET / Math.max(0.002, stats.shortP50Linear))
+                        * (AUTO_SHORT_P90_LONG_TARGET / Math.max(0.002, stats.shortP90Linear)));
+        double ratioHeadroom = AUTO_SHORT_P98_LONG_HEADROOM
+                / Math.max(0.002, stats.shortP98Linear);
         double desiredRatio = Math.max(AUTO_BRACKET_MIN_RATIO,
                 Math.min(AUTO_BRACKET_MAX_RATIO,
-                        Math.min(ratioP95, Math.min(ratioP98, ratioP99))));
-        if (stats.shortNearClipFraction > 0.010f) {
-            desiredRatio = Math.min(desiredRatio, 2.0);
-        }
+                        Math.min(ratioBody, 2.0 * ratioHeadroom)));
 
+        // P99/clip pressure changes SHORT itself, never collapses LONG onto SHORT.
         double shortScale = Math.min(1.0,
                 0.78 / Math.max(0.010, stats.shortP99Linear));
         if (stats.shortNearClipFraction > 0.010f) shortScale = Math.min(shortScale, 0.80);
         shortScale = Math.max(0.25, shortScale);
         double targetShortProduct = Math.max(1.0, stats.shortExposureProduct * shortScale);
-        double targetLongProduct = Math.max(targetShortProduct, targetShortProduct * desiredRatio);
+        double targetLongProduct = Math.max(targetShortProduct * AUTO_BRACKET_MIN_RATIO,
+                targetShortProduct * desiredRatio);
 
         double errorEv = Math.log(targetLongProduct / expectedLongProduct) / Math.log(2.0);
         double ratioErrorEv = Math.log(desiredRatio / Math.max(1.0, autoDesiredBracketRatio)) / Math.log(2.0);
@@ -1638,8 +1637,9 @@ final class CameraController {
         RuntimeLogger.event(
                 "AUTO_SCENE_ADAPT",
                 String.format(Locale.US,
-                        "shortP98=%.4f shortP99=%.4f shortClip=%.3f longClip=%.3f targetRatio=%.2fx err=%+.2fEV step=%+.2fEV short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
-                        stats.shortP98Linear, stats.shortP99Linear, stats.shortNearClipFraction,
+                        "shortP50=%.4f shortP90=%.4f shortP98=%.4f shortP99=%.4f shortClip=%.3f longClip=%.3f targetRatio=%.2fx err=%+.2fEV step=%+.2fEV short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
+                        stats.shortP50Linear, stats.shortP90Linear, stats.shortP98Linear,
+                        stats.shortP99Linear, stats.shortNearClipFraction,
                         stats.longNearClipFraction, desiredRatio, errorEv, stepEv,
                         exposureText(autoShortExposureNs), autoShortIso,
                         exposureText(autoLongExposureNs), autoLongIso, bracketEv, flickerStatusLocked()));
@@ -1647,7 +1647,7 @@ final class CameraController {
                 autoShortExposureNs, autoShortIso, autoLongExposureNs, autoLongIso,
                 flickerStatusLocked(), bracketEv);
         applyPreviewRepeatingLocked();
-        // IRIS_V212_SCENE_EXPOSURE_END
+        // IRIS_V213_INDEPENDENT_HDR_EXPOSURE_END
     }
 
     private void deriveAutoPairFromSceneTargetsLocked() {
@@ -1723,6 +1723,9 @@ final class CameraController {
         float oldMicroContrast = displayMicroContrast;
         float targetBrightness = displayBrightnessEv;
         float targetGamma = displayGamma;
+        double physicalRatio = Math.max(1.0, stats.longExposureProduct)
+                / Math.max(1.0, stats.shortExposureProduct);
+        boolean collapsedBracket = physicalRatio < 2.0;
         if (automatic) {
             float highlightPressure = smoothstepFloat(0.45f, 0.75f, stats.fusedP95Linear);
             float targetP90 = lerpFloat(0.18f, 0.16f, highlightPressure);
@@ -1744,6 +1747,11 @@ final class CameraController {
                         AUTO_PRESENT_GAMMA_MAX);
             } else {
                 targetGamma = 1.0f;
+            }
+            if (collapsedBracket) {
+                // A failed physical bracket may not be disguised with aggressive tone.
+                targetBrightness = Math.min(targetBrightness, 0.15f);
+                targetGamma = Math.min(targetGamma, 1.20f);
             }
 
             displayBrightnessEv = stepToward(
@@ -1768,11 +1776,13 @@ final class CameraController {
                 0.24f + 0.24f * shadowDeficit + 0.12f * midDeficit
                         + 0.10f * compressedShadows + 0.10f * sliderLift,
                 0.12f, 0.68f);
+        if (collapsedBracket) targetDehaze = Math.min(targetDehaze, 0.30f);
         float usefulShadowSignal = smoothstepFloat(0.006f, 0.030f, stats.fusedP25Linear);
         float targetMicro = clampFloat(
                 0.18f + 0.16f * midDeficit + 0.09f * shadowDeficit * usefulShadowSignal
                         + 0.07f * sliderLift,
                 0.10f, 0.48f);
+        if (collapsedBracket) targetMicro = Math.min(targetMicro, 0.22f);
         displayDehaze = stepToward(
                 displayDehaze, targetDehaze, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
         displayMicroContrast = stepToward(
@@ -1938,30 +1948,33 @@ final class CameraController {
         manualFlickerSafetyApplied = false;
 
         if (period > 0L) {
+            // V2.13 MANUAL ownership: solve SHORT from SHORT controls only.  LONG ISO
+            // must never feed back into SHORT shutter/ISO or the left SPLIT frame.
+            long maxShortAllowed = targetPreviewFps >= 60
+                    ? SIXTY_FPS_DURATION_NS : Math.max(manualFrameDurationNs, shortExposureNs);
             long maxLongAllowed = targetPreviewFps >= 60
                     ? SIXTY_FPS_DURATION_NS : Math.max(manualFrameDurationNs, longExposureNs);
+            ExposureSetting safeShort = solveMinimumIsoFlickerSettingLocked(
+                    Math.max(1.0, (double) shortExposureNs * minIso),
+                    shortExposureNs, period, maxShortAllowed);
             ExposureSetting safeLong = solveFlickerSafeSettingForProductLocked(
                     targetLongProduct, longExposureNs, period, maxLongAllowed);
-            ExposureSetting safeShort = safeLong == null ? null : solveMinimumIsoFlickerSettingLocked(
-                    Math.max(1.0, (double) shortExposureNs * minIso),
-                    shortExposureNs,
-                    period,
-                    Math.min(maxLongAllowed, safeLong.exposureNs));
-            if (safeLong != null && safeShort != null) {
-                manualEffectiveLongExposureNs = safeLong.exposureNs;
-                manualEffectiveLongIso = safeLong.iso;
+
+            if (safeShort != null) {
                 manualEffectiveShortExposureNs = safeShort.exposureNs;
                 manualEffectiveShortIso = safeShort.iso;
-                manualFlickerSafetyApplied = true;
             } else {
-                // No legal integer-cycle pair can preserve LONG appearance in the
-                // sensor ISO/exposure bounds. Keep requested exposure instead of
-                // silently overexposing and report FLICKER UNSAFE.
                 manualEffectiveShortExposureNs = shortExposureNs;
                 manualEffectiveShortIso = minIso;
+            }
+            if (safeLong != null) {
+                manualEffectiveLongExposureNs = safeLong.exposureNs;
+                manualEffectiveLongIso = safeLong.iso;
+            } else {
                 manualEffectiveLongExposureNs = longExposureNs;
                 manualEffectiveLongIso = manualIso;
             }
+            manualFlickerSafetyApplied = safeShort != null && safeLong != null;
         } else {
             manualEffectiveShortExposureNs = shortExposureNs;
             manualEffectiveShortIso = minIso;

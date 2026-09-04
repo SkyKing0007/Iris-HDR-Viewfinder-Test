@@ -434,9 +434,14 @@ vec3 recoveredSourceDisplay(
 // IRIS_V210_VISUAL_LOSS_END
 
 // IRIS_V212_ADAPTIVE_CLARITY_BEGIN
-float longGuideLumaAt(vec2 sampleUv) {
-    vec3 guide = srgbToLinear(texture(longTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb);
-    return linearLuma(guide);
+float presentationGuideLumaAt(vec2 sampleUv) {
+    // Saved mode 6 guides clarity from the already source-proven FUSED image.
+    // Live mode 2 retains its established LONG guide.  This prevents a LONG-only
+    // local pattern/color decision from being painted back over SHORT-owned stills.
+    vec3 encodedGuide = mode == 6
+        ? texture(normalTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb
+        : texture(longTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;
+    return linearLuma(srgbToLinear(encodedGuide));
 }
 
 float guideRangeWeight(float centerGuide, float neighborGuide) {
@@ -453,11 +458,11 @@ vec3 applyAdaptiveClarity(vec3 rgb, vec2 sampleUv) {
     // so shutters/window frames/lamp edges cannot create a broad clarity halo.
     vec2 texel = 1.0 / vec2(textureSize(longTex, 0));
     vec2 radius = 6.0 * texel;
-    float centerGuide = longGuideLumaAt(sampleUv);
-    float guideXp = longGuideLumaAt(sampleUv + vec2( radius.x, 0.0));
-    float guideXm = longGuideLumaAt(sampleUv + vec2(-radius.x, 0.0));
-    float guideYp = longGuideLumaAt(sampleUv + vec2(0.0,  radius.y));
-    float guideYm = longGuideLumaAt(sampleUv + vec2(0.0, -radius.y));
+    float centerGuide = presentationGuideLumaAt(sampleUv);
+    float guideXp = presentationGuideLumaAt(sampleUv + vec2( radius.x, 0.0));
+    float guideXm = presentationGuideLumaAt(sampleUv + vec2(-radius.x, 0.0));
+    float guideYp = presentationGuideLumaAt(sampleUv + vec2(0.0,  radius.y));
+    float guideYm = presentationGuideLumaAt(sampleUv + vec2(0.0, -radius.y));
     float weightXp = guideRangeWeight(centerGuide, guideXp);
     float weightXm = guideRangeWeight(centerGuide, guideXm);
     float weightYp = guideRangeWeight(centerGuide, guideYp);
@@ -542,6 +547,15 @@ void main() {
 
     if (haveShort == 0 || haveLong == 0) {
         outColor = vec4(fallbackColor(uv), 1.0);
+        return;
+    }
+
+    if (mode == 6) {
+        // IRIS_V213_FUSED_SOURCE_CLARITY_BEGIN
+        vec3 fusedLinear = srgbToLinear(texture(normalTex, uv).rgb);
+        vec3 clarified = applyAdaptiveClarity(fusedLinear, uv);
+        outColor = vec4(clamp(linearToSrgb(clarified), 0.0, 1.0), 1.0);
+        // IRIS_V213_FUSED_SOURCE_CLARITY_END
         return;
     }
 
@@ -657,21 +671,38 @@ void main() {
             * shortColorConfidence
             * registrationGate
             * (1.0 - core);
-        float shortOwnership = clamp(max(coreOwnership, boundaryOwnership), 0.0, 1.0);
-        vec3 mergedScene = mix(longScene, shortScene, shortOwnership);
+
+        // Hard LONG clipping with a valid registered SHORT is direct provenance,
+        // not a tone hint.  This guarantees that true SHORT highlight information
+        // actually enters FUSED rather than leaving a processed LONG as the image.
+        float longHardClipForOwnership = smoothstep(0.985, 0.998, secondLargest3(longRgb));
+        float directShortOwnership = longHardClipForOwnership
+            * shortColorConfidence
+            * smoothstep(0.45, 0.72, stillStaticConfidenceAt(uv))
+            * registrationGate;
+        float shortOwnership = clamp(
+            max(directShortOwnership, max(coreOwnership, boundaryOwnership)), 0.0, 1.0);
+
+        // A collapsed physical bracket is not HDR. Fail closed to the intended
+        // highlight source instead of rendering LONG plus pseudo-HDR processing.
+        float usableBracket = step(2.0, ratio);
+        vec3 mergedScene = usableBracket > 0.5
+            ? mix(longScene, shortScene, shortOwnership)
+            : srgbToLinear(shortRgb);
 
         // If LONG is genuinely multi-channel clipped, a registered/coherent SHORT
         // observation can still prove that scene radiance is much higher even when
         // SHORT itself is too saturated to own complete RGB. Raise only the scene
         // radiance lower bound while preserving the already-selected source chroma;
         // do not synthesize detail from the saturated SHORT sample.
-        float longHardClip = smoothstep(0.985, 0.998, secondLargest3(longRgb));
+        float longHardClip = longHardClipForOwnership;
         float shortSignal = smoothstep(0.07, 0.13, encodedLuma(shortRgb));
         float staticRadianceSupport = smoothstep(0.45, 0.72, stillStaticConfidenceAt(uv));
         float radianceFloorWeight = longHardClip
             * shortSignal
             * staticRadianceSupport
-            * registrationGate;
+            * registrationGate
+            * usableBracket;
         float mergedY = linearLuma(mergedScene);
         float shortSceneY = linearLuma(shortScene);
         if (radianceFloorWeight > 0.0005 && mergedY > 0.000001 && shortSceneY > mergedY) {
@@ -686,7 +717,8 @@ void main() {
         vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
         vec3 displayLinear = adaptiveHdrToneMap(bodyToned, ratio, bracketStops);
         displayLinear = applyDisplayGamma(displayLinear, displayGamma);
-        displayLinear = applyAdaptiveClarity(displayLinear, uv);
+        // Clarity/dehaze is deferred to mode 6 so its spatial guide is the actual
+        // source-proven fused image, never LONG alone.
         outColor = vec4(clamp(linearToSrgb(displayLinear), 0.0, 1.0), 1.0);
         // IRIS_V211_SCENE_DOMAIN_PROVENANCE_END
         return;
