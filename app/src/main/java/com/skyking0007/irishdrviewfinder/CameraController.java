@@ -74,6 +74,12 @@ final class CameraController {
                 int longIso,
                 String flickerLabel,
                 double bracketEv);
+        void onPresentationSettings(
+                float brightnessEv,
+                float gamma,
+                float dehaze,
+                float microContrast,
+                boolean automatic);
         void onCaptureFinished(String captureId, boolean success, String message);
     }
 
@@ -98,6 +104,18 @@ final class CameraController {
     private static final double AUTO_LIVE_SCENE_CUT_EV = 0.70;
     private static final double AUTO_LIVE_SCENE_CUT_MAX_STEP_EV = 6.0;
     private static final long AUTO_LIVE_UPDATE_MIN_NS = 80_000_000L;
+    private static final double AUTO_BRACKET_MIN_RATIO = 1.0;
+    private static final double AUTO_BRACKET_MAX_RATIO = 16.0;
+    private static final double AUTO_SHORT_P95_LONG_TARGET = 0.21;
+    private static final double AUTO_SHORT_P98_LONG_TARGET = 0.29;
+    private static final double AUTO_SHORT_P99_LONG_TARGET = 0.34;
+    private static final float AUTO_PRESENT_BRIGHTNESS_MIN_EV = -1.25f;
+    private static final float AUTO_PRESENT_BRIGHTNESS_MAX_EV = 0.75f;
+    private static final float AUTO_PRESENT_GAMMA_MIN = 0.85f;
+    private static final float AUTO_PRESENT_GAMMA_MAX = 1.60f;
+    private static final float AUTO_PRESENT_BRIGHTNESS_STEP_EV = 0.18f;
+    private static final float AUTO_PRESENT_GAMMA_STEP = 0.05f;
+    private static final float PRESENT_ENHANCEMENT_STEP = 0.06f;
     private static final int DEFAULT_POST_RAW_BOOST = 100;
     private static final int MAX_SRGB_CURVE_POINTS = 64;
     private static final double FOV_MAX_REPORTED_SCALE = 1.03;
@@ -144,6 +162,10 @@ final class CameraController {
     private float captureDisplayBrightnessEv;
     private float displayGamma = 1.0f;
     private float captureDisplayGamma = 1.0f;
+    private float displayDehaze = 0.28f;
+    private float captureDisplayDehaze = 0.28f;
+    private float displayMicroContrast = 0.20f;
+    private float captureDisplayMicroContrast = 0.20f;
     private long shortExposureNs = ONE_SECOND_NS / 480;
     private long longExposureNs = ONE_SECOND_NS / 60;
     private int manualIso = 400;
@@ -168,8 +190,10 @@ final class CameraController {
     private double autoMeterLastProduct = -1.0;
     private long lastAutoAnchorNs;
     private double autoLiveLongProduct = -1.0;
-    private double autoLiveTargetMedianLinear = -1.0;
+    private double autoLiveShortProduct = -1.0;
+    private double autoDesiredBracketRatio = HDR_BRACKET_RATIO;
     private long lastAutoLiveStatsFrame = -1L;
+    private HdrGlView.SceneStats latestSceneStats;
     private long lastAutoLiveUpdateNs;
     private volatile int jpegOrientationDegrees;
     private long lastAeExposureNs = ONE_SECOND_NS / 60;
@@ -293,13 +317,21 @@ final class CameraController {
     }
 
     void setDisplayBrightnessEv(float ev) {
-        displayBrightnessEv = Math.max(-16.0f, Math.min(1.0f, ev));
-        RuntimeLogger.event("DISPLAY_BRIGHTNESS", String.format(Locale.US, "%.1fEV", displayBrightnessEv));
+        final float requested = Math.max(-16.0f, Math.min(1.0f, ev));
+        cameraHandler.post(() -> {
+            displayBrightnessEv = requested;
+            RuntimeLogger.event("DISPLAY_BRIGHTNESS", String.format(Locale.US, "%.1fEV", displayBrightnessEv));
+            updateAdaptivePresentationLocked(latestSceneStats, autoHdrExposure, true);
+        });
     }
 
     void setDisplayGamma(float gamma) {
-        displayGamma = Math.max(0.50f, Math.min(2.00f, gamma));
-        RuntimeLogger.event("DISPLAY_GAMMA", String.format(Locale.US, "%.2f", displayGamma));
+        final float requested = Math.max(0.50f, Math.min(2.00f, gamma));
+        cameraHandler.post(() -> {
+            displayGamma = requested;
+            RuntimeLogger.event("DISPLAY_GAMMA", String.format(Locale.US, "%.2f", displayGamma));
+            updateAdaptivePresentationLocked(latestSceneStats, autoHdrExposure, true);
+        });
     }
 
     void setAutoHdrExposure(boolean enabled) {
@@ -308,10 +340,14 @@ final class CameraController {
             autoMetering = false;
             lastAutoLiveStatsFrame = -1L;
             lastAutoLiveUpdateNs = 0L;
-            autoLiveTargetMedianLinear = -1.0;
+            autoLiveShortProduct = -1.0;
+            autoDesiredBracketRatio = HDR_BRACKET_RATIO;
             if (!enabled) {
                 recomputeManualFlickerSafetyLocked();
                 listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
+                updateAdaptivePresentationLocked(latestSceneStats, false, true);
+            } else {
+                updateAdaptivePresentationLocked(latestSceneStats, true, true);
             }
             RuntimeLogger.event("HDR_MODE", enabled ? "AUTO_ANCHORED" : manualSafetySummaryLocked());
             if (previewMode != PreviewMode.NORMAL) {
@@ -331,7 +367,7 @@ final class CameraController {
 
             if (autoHdrExposure) {
                 if (haveAeSample) {
-                    if (autoLiveLongProduct > 0.0) deriveAutoPairFromLiveProductLocked();
+                    if (autoLiveLongProduct > 0.0) deriveAutoPairFromSceneTargetsLocked();
                     else deriveAutoPairFromAnchorLocked();
                 }
             } else {
@@ -432,7 +468,9 @@ final class CameraController {
             haveAeSample = false;
             autoMetering = false;
             autoLiveLongProduct = -1.0;
-            autoLiveTargetMedianLinear = -1.0;
+            autoLiveShortProduct = -1.0;
+            autoDesiredBracketRatio = HDR_BRACKET_RATIO;
+            latestSceneStats = null;
             lastAutoLiveStatsFrame = -1L;
             lastAutoLiveUpdateNs = 0L;
             autoMeterFrames = 0;
@@ -902,6 +940,8 @@ final class CameraController {
         capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;
         captureDisplayBrightnessEv = displayBrightnessEv;
         captureDisplayGamma = displayGamma;
+        captureDisplayDehaze = displayDehaze;
+        captureDisplayMicroContrast = displayMicroContrast;
         captureBeginRealtimeNs = System.nanoTime();
         String captureId = "IrisHDR_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date());
         RuntimeLogger.event(
@@ -910,8 +950,9 @@ final class CameraController {
                         + " frozen short=" + exposureText(captureShortExposureNs) + " ISO" + captureShortIso
                         + " long=" + exposureText(captureLongExposureNs) + " ISO" + captureLongIso
                         + " boost=" + capturePostRawBoost + "%"
-                        + String.format(Locale.US, " brightness=%+.1fEV gamma=%.2f",
-                                captureDisplayBrightnessEv, captureDisplayGamma)
+                        + String.format(Locale.US, " brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
+                                captureDisplayBrightnessEv, captureDisplayGamma,
+                                captureDisplayDehaze, captureDisplayMicroContrast)
                         + " mode=" + (autoHdrExposure ? "AUTO " + flickerStatusLocked() : manualSafetySummaryLocked()));
         listener.onStatus("Capturing matched SHORT/LONG RAW + JPEG set…");
         captureSaver = new CaptureSetSaver(
@@ -922,6 +963,8 @@ final class CameraController {
                 jpegOrientationDegrees,
                 captureDisplayBrightnessEv,
                 captureDisplayGamma,
+                captureDisplayDehaze,
+                captureDisplayMicroContrast,
                 stillFusionView,
                 new CaptureSetSaver.Listener() {
                     @Override
@@ -1201,7 +1244,9 @@ final class CameraController {
         haveAeSample = false;
         lastAutoAnchorNs = 0L;
         autoLiveLongProduct = -1.0;
-        autoLiveTargetMedianLinear = -1.0;
+        autoLiveShortProduct = -1.0;
+        autoDesiredBracketRatio = HDR_BRACKET_RATIO;
+        latestSceneStats = null;
         lastAutoLiveStatsFrame = -1L;
         lastAutoLiveUpdateNs = 0L;
         autoMetering = false;
@@ -1238,7 +1283,9 @@ final class CameraController {
         haveAeSample = false;
         lastAutoAnchorNs = 0L;
         autoLiveLongProduct = -1.0;
-        autoLiveTargetMedianLinear = -1.0;
+        autoLiveShortProduct = -1.0;
+        autoDesiredBracketRatio = HDR_BRACKET_RATIO;
+        latestSceneStats = null;
         lastAutoLiveStatsFrame = -1L;
         lastAutoLiveUpdateNs = 0L;
         autoMetering = false;
@@ -1316,7 +1363,9 @@ final class CameraController {
                         haveAeSample = false;
                         lastAutoAnchorNs = 0L;
                         autoLiveLongProduct = -1.0;
-                        autoLiveTargetMedianLinear = -1.0;
+                        autoLiveShortProduct = -1.0;
+                        autoDesiredBracketRatio = HDR_BRACKET_RATIO;
+                        latestSceneStats = null;
                         lastAutoLiveStatsFrame = -1L;
                         lastAutoLiveUpdateNs = 0L;
                         autoMetering = false;
@@ -1404,7 +1453,8 @@ final class CameraController {
         lastAutoAnchorNs = now;
         deriveAutoPairFromAnchorLocked();
         autoLiveLongProduct = Math.max(1.0, (double) autoLongExposureNs * autoLongIso);
-        autoLiveTargetMedianLinear = -1.0;
+        autoLiveShortProduct = Math.max(1.0, (double) autoShortExposureNs * autoShortIso);
+        autoDesiredBracketRatio = HDR_BRACKET_RATIO;
         lastAutoLiveStatsFrame = -1L;
         lastAutoLiveUpdateNs = 0L;
 
@@ -1460,6 +1510,14 @@ final class CameraController {
                         period,
                         Math.min(maxAllowed, safeLong.exposureNs));
                 if (safeShort != null) {
+                    double safeShortProduct = Math.max(1.0,
+                            (double) safeShort.exposureNs * safeShort.iso);
+                    double feasibleLongProduct = Math.min(
+                            Math.max(1.0, (double) safeLong.exposureNs * safeLong.iso),
+                            safeShortProduct * HDR_BRACKET_RATIO);
+                    ExposureSetting boundedLong = solveFlickerSafeSettingForProductLocked(
+                            feasibleLongProduct, safeLong.exposureNs, period, maxAllowed);
+                    if (boundedLong != null) safeLong = boundedLong;
                     autoLongExposureNs = safeLong.exposureNs;
                     autoLongIso = safeLong.iso;
                     autoShortExposureNs = safeShort.exposureNs;
@@ -1486,49 +1544,90 @@ final class CameraController {
         } else {
             autoShortExposureNs = autoLongExposureNs;
         }
+        double actualShortProduct = Math.max(1.0,
+                (double) autoShortExposureNs * autoShortIso);
+        double actualLongProduct = Math.max(1.0,
+                (double) autoLongExposureNs * autoLongIso);
+        if (actualLongProduct > actualShortProduct * HDR_BRACKET_RATIO) {
+            double bounded = actualShortProduct * HDR_BRACKET_RATIO;
+            ExposureSetting boundedLong = solveLiveLongSettingForProductLocked(
+                    bounded, autoLongExposureNs, actualLongProduct);
+            if (boundedLong.exposureNs < autoShortExposureNs) {
+                autoLongExposureNs = autoShortExposureNs;
+                autoLongIso = solveIsoForProduct(bounded, autoLongExposureNs);
+            } else {
+                autoLongExposureNs = boundedLong.exposureNs;
+                autoLongIso = boundedLong.iso;
+            }
+        }
     }
 
     private void processHdrSceneStatsLocked(HdrGlView.SceneStats stats) {
+        latestSceneStats = stats;
+        updateAdaptivePresentationLocked(stats, autoHdrExposure, false);
+
         if (!autoHdrExposure || previewMode == PreviewMode.NORMAL || stillSessionActive
                 || autoMetering || characteristics == null || captureSession == null
                 || !haveAeSample) return;
         if (stats.longFrameNumber <= lastAutoLiveStatsFrame) return;
         lastAutoLiveStatsFrame = stats.longFrameNumber;
 
-        double expectedLongProduct = Math.max(1.0,
-                (double) autoLongExposureNs * autoLongIso);
-        double staleEv = Math.abs(Math.log(
+        double expectedLongProduct = Math.max(1.0, (double) autoLongExposureNs * autoLongIso);
+        double expectedShortProduct = Math.max(1.0, (double) autoShortExposureNs * autoShortIso);
+        double staleLongEv = Math.abs(Math.log(
                 Math.max(1.0, stats.longExposureProduct) / expectedLongProduct) / Math.log(2.0));
-        if (staleEv > 0.20 || stats.longMedianLinear <= 0.002f) return;
+        double staleShortEv = Math.abs(Math.log(
+                Math.max(1.0, stats.shortExposureProduct) / expectedShortProduct) / Math.log(2.0));
+        if (staleLongEv > 0.30 || staleShortEv > 0.30 || stats.shortP98Linear <= 0.0005f) return;
 
-        if (autoLiveTargetMedianLinear <= 0.0) {
-            autoLiveTargetMedianLinear = Math.max(0.003, Math.min(0.80, stats.longMedianLinear));
-            autoLiveLongProduct = expectedLongProduct;
-            RuntimeLogger.event(
-                    "AUTO_LIVE_TARGET",
-                    String.format(Locale.US,
-                            "median=%.4f product=%.0f bootstrap-only AE brightness/gamma=presentation",
-                            autoLiveTargetMedianLinear, autoLiveLongProduct));
-            return;
+        // IRIS_V212_SCENE_EXPOSURE_BEGIN
+        // SHORT is the highlight-information anchor.  AUTO predicts how much LONG
+        // exposure the actual SHORT highlight tail can tolerate instead of preserving
+        // the HAL AE median.  This makes bracket depth scene-dependent and prevents a
+        // minimum-ISO/flicker-limited SHORT from silently expanding a nominal 3-EV
+        // bracket into the ~5-EV failure reproduced by the V2.11 plant-room capture.
+        double ratioP95 = AUTO_SHORT_P95_LONG_TARGET / Math.max(0.002, stats.shortP95Linear);
+        double ratioP98 = AUTO_SHORT_P98_LONG_TARGET / Math.max(0.002, stats.shortP98Linear);
+        double ratioP99 = AUTO_SHORT_P99_LONG_TARGET / Math.max(0.002, stats.shortP99Linear);
+        double desiredRatio = Math.max(AUTO_BRACKET_MIN_RATIO,
+                Math.min(AUTO_BRACKET_MAX_RATIO,
+                        Math.min(ratioP95, Math.min(ratioP98, ratioP99))));
+        if (stats.shortNearClipFraction > 0.010f) {
+            desiredRatio = Math.min(desiredRatio, 2.0);
         }
 
-        double errorEv = Math.log(autoLiveTargetMedianLinear / stats.longMedianLinear) / Math.log(2.0);
-        if (Math.abs(errorEv) <= AUTO_LIVE_HYSTERESIS_EV) return;
+        double shortScale = Math.min(1.0,
+                0.78 / Math.max(0.010, stats.shortP99Linear));
+        if (stats.shortNearClipFraction > 0.010f) shortScale = Math.min(shortScale, 0.80);
+        shortScale = Math.max(0.25, shortScale);
+        double targetShortProduct = Math.max(1.0, stats.shortExposureProduct * shortScale);
+        double targetLongProduct = Math.max(targetShortProduct, targetShortProduct * desiredRatio);
+
+        double errorEv = Math.log(targetLongProduct / expectedLongProduct) / Math.log(2.0);
+        double ratioErrorEv = Math.log(desiredRatio / Math.max(1.0, autoDesiredBracketRatio)) / Math.log(2.0);
+        if (Math.abs(errorEv) <= AUTO_LIVE_HYSTERESIS_EV
+                && Math.abs(ratioErrorEv) <= 0.08) return;
         boolean sceneCut = Math.abs(errorEv) >= AUTO_LIVE_SCENE_CUT_EV;
         long now = System.nanoTime();
         if (!sceneCut && lastAutoLiveUpdateNs != 0L
                 && now - lastAutoLiveUpdateNs < AUTO_LIVE_UPDATE_MIN_NS) return;
 
-        // V2.10 preserves the proven V2.2/V2.3 convergence constants. Flicker-safe
-        // quantization changes only the final shutter/ISO realization of that product.
         double maxStep = sceneCut ? AUTO_LIVE_SCENE_CUT_MAX_STEP_EV : AUTO_LIVE_MAX_STEP_EV;
         double stepEv = Math.max(-maxStep, Math.min(maxStep, errorEv));
-        autoLiveLongProduct = Math.max(1.0, autoLiveLongProduct * Math.pow(2.0, stepEv));
+        double ratioStepEv = sceneCut
+                ? ratioErrorEv
+                : Math.max(-AUTO_LIVE_MAX_STEP_EV, Math.min(AUTO_LIVE_MAX_STEP_EV, ratioErrorEv));
+        autoLiveLongProduct = Math.max(1.0, expectedLongProduct * Math.pow(2.0, stepEv));
+        autoLiveShortProduct = Math.max(1.0, targetShortProduct);
+        autoDesiredBracketRatio = Math.max(AUTO_BRACKET_MIN_RATIO,
+                Math.min(AUTO_BRACKET_MAX_RATIO,
+                        autoDesiredBracketRatio * Math.pow(2.0, ratioStepEv)));
+
         long oldLongNs = autoLongExposureNs;
         int oldLongIso = autoLongIso;
         long oldShortNs = autoShortExposureNs;
         int oldShortIso = autoShortIso;
-        deriveAutoPairFromLiveProductLocked();
+        deriveAutoPairFromSceneTargetsLocked();
         if (oldLongNs == autoLongExposureNs && oldLongIso == autoLongIso
                 && oldShortNs == autoShortExposureNs && oldShortIso == autoShortIso) return;
 
@@ -1537,56 +1636,193 @@ final class CameraController {
         double shortProduct = Math.max(1.0, (double) autoShortExposureNs * autoShortIso);
         double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);
         RuntimeLogger.event(
-                "AUTO_LIVE_ADAPT",
+                "AUTO_SCENE_ADAPT",
                 String.format(Locale.US,
-                        "median=%.4f target=%.4f err=%+.2fEV step=%+.2fEV sceneCut=%s short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
-                        stats.longMedianLinear, autoLiveTargetMedianLinear, errorEv, stepEv, sceneCut,
+                        "shortP98=%.4f shortP99=%.4f shortClip=%.3f longClip=%.3f targetRatio=%.2fx err=%+.2fEV step=%+.2fEV short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
+                        stats.shortP98Linear, stats.shortP99Linear, stats.shortNearClipFraction,
+                        stats.longNearClipFraction, desiredRatio, errorEv, stepEv,
                         exposureText(autoShortExposureNs), autoShortIso,
                         exposureText(autoLongExposureNs), autoLongIso, bracketEv, flickerStatusLocked()));
         listener.onAutoHdrSettings(
                 autoShortExposureNs, autoShortIso, autoLongExposureNs, autoLongIso,
                 flickerStatusLocked(), bracketEv);
         applyPreviewRepeatingLocked();
+        // IRIS_V212_SCENE_EXPOSURE_END
     }
 
-    private void deriveAutoPairFromLiveProductLocked() {
+    private void deriveAutoPairFromSceneTargetsLocked() {
         if (characteristics == null || !haveAeSample) return;
         double anchorProduct = Math.max(1.0, (double) lastAeExposureNs * lastAeIso);
         if (autoLiveLongProduct <= 0.0) autoLiveLongProduct = anchorProduct;
-        ExposureSetting longSetting = solveLiveLongSettingForProductLocked(
-                autoLiveLongProduct, lastAeExposureNs, anchorProduct);
-        autoLongExposureNs = longSetting.exposureNs;
-        autoLongIso = longSetting.iso;
+        if (autoLiveShortProduct <= 0.0) {
+            autoLiveShortProduct = Math.max(1.0, autoLiveLongProduct / autoDesiredBracketRatio);
+        }
 
         long period = effectiveFlickerPeriodNsLocked();
-        if (period > 0L && isFlickerSafeExposure(autoLongExposureNs, period)) {
-            long maxAllowed = targetPreviewFps >= 60
-                    ? SIXTY_FPS_DURATION_NS : Math.max(manualFrameDurationNs, autoLongExposureNs);
-            ExposureSetting safeShort = solveMinimumIsoFlickerSettingLocked(
-                    Math.max(1.0, ((double) autoLongExposureNs * autoLongIso) / HDR_BRACKET_RATIO),
-                    Math.min(autoLongExposureNs, lastAeExposureNs),
+        long maxAllowed = targetPreviewFps >= 60
+                ? SIXTY_FPS_DURATION_NS : Math.max(manualFrameDurationNs, lastAeExposureNs);
+        ExposureSetting longSetting;
+        ExposureSetting shortSetting = null;
+        if (period > 0L) {
+            shortSetting = solveMinimumIsoFlickerSettingLocked(
+                    autoLiveShortProduct,
+                    Math.min(autoShortExposureNs, lastAeExposureNs),
                     period,
-                    Math.min(maxAllowed, autoLongExposureNs));
-            if (safeShort != null) {
-                autoShortExposureNs = safeShort.exposureNs;
-                autoShortIso = safeShort.iso;
-                autoFlickerSafetySatisfied = true;
-                return;
+                    maxAllowed);
+            if (shortSetting != null) {
+                double shortProduct = Math.max(1.0,
+                        (double) shortSetting.exposureNs * shortSetting.iso);
+                double feasibleLongProduct = Math.max(shortProduct,
+                        Math.min(autoLiveLongProduct, shortProduct * autoDesiredBracketRatio));
+                longSetting = solveFlickerSafeSettingForProductLocked(
+                        feasibleLongProduct,
+                        autoLongExposureNs,
+                        period,
+                        maxAllowed);
+                if (longSetting != null) {
+                    autoShortExposureNs = shortSetting.exposureNs;
+                    autoShortIso = shortSetting.iso;
+                    autoLongExposureNs = longSetting.exposureNs;
+                    autoLongIso = longSetting.iso;
+                    autoFlickerSafetySatisfied = true;
+                    return;
+                }
             }
         }
 
         autoFlickerSafetySatisfied = false;
         int minIso = sensorMinIsoLocked();
+        long shortExposure = clampExposure(Math.round(autoLiveShortProduct / Math.max(1, minIso)));
+        autoShortExposureNs = Math.min(shortExposure, maxAllowed);
         autoShortIso = minIso;
-        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE
-                || flickerMode == FLICKER_MODE_OFF) {
-            double targetShortProduct = Math.max(1.0,
-                    ((double) autoLongExposureNs * autoLongIso) / HDR_BRACKET_RATIO);
-            long desiredShort = Math.round(targetShortProduct / Math.max(1, minIso));
-            autoShortExposureNs = Math.min(autoLongExposureNs, clampExposure(desiredShort));
+        double achievedShortProduct = Math.max(1.0,
+                (double) autoShortExposureNs * autoShortIso);
+        double feasibleLongProduct = Math.max(achievedShortProduct,
+                Math.min(autoLiveLongProduct, achievedShortProduct * autoDesiredBracketRatio));
+        longSetting = solveLiveLongSettingForProductLocked(
+                feasibleLongProduct, lastAeExposureNs, anchorProduct);
+        if (longSetting.exposureNs < autoShortExposureNs) {
+            autoLongExposureNs = autoShortExposureNs;
+            autoLongIso = solveIsoForProduct(feasibleLongProduct, autoLongExposureNs);
         } else {
-            autoShortExposureNs = autoLongExposureNs;
+            autoLongExposureNs = longSetting.exposureNs;
+            autoLongIso = longSetting.iso;
         }
+    }
+
+    private void updateAdaptivePresentationLocked(
+            HdrGlView.SceneStats stats, boolean automatic, boolean immediate) {
+        if (stats == null) {
+            publishPresentationLocked(automatic);
+            return;
+        }
+
+        float oldBrightness = displayBrightnessEv;
+        float oldGamma = displayGamma;
+        float oldDehaze = displayDehaze;
+        float oldMicroContrast = displayMicroContrast;
+        float targetBrightness = displayBrightnessEv;
+        float targetGamma = displayGamma;
+        if (automatic) {
+            float highlightPressure = smoothstepFloat(0.45f, 0.75f, stats.fusedP95Linear);
+            float targetP90 = lerpFloat(0.18f, 0.16f, highlightPressure);
+            targetBrightness = clampFloat(
+                    (float) (Math.log(targetP90 / Math.max(0.010f, stats.fusedP90Linear)) / Math.log(2.0)),
+                    AUTO_PRESENT_BRIGHTNESS_MIN_EV,
+                    AUTO_PRESENT_BRIGHTNESS_MAX_EV);
+
+            float brightMedian = stats.fusedP50Linear * (float) Math.pow(2.0, targetBrightness);
+            float contrastStops = (float) (Math.log(
+                    Math.max(0.001f, stats.fusedP90Linear)
+                            / Math.max(0.001f, stats.fusedP50Linear)) / Math.log(2.0));
+            float targetMedian = lerpFloat(
+                    0.075f, 0.055f, smoothstepFloat(2.0f, 4.0f, contrastStops));
+            if (brightMedian > 0.0005f && brightMedian < 0.98f && targetMedian < 0.98f) {
+                targetGamma = clampFloat(
+                        (float) (Math.log(brightMedian) / Math.log(targetMedian)),
+                        AUTO_PRESENT_GAMMA_MIN,
+                        AUTO_PRESENT_GAMMA_MAX);
+            } else {
+                targetGamma = 1.0f;
+            }
+
+            displayBrightnessEv = stepToward(
+                    displayBrightnessEv, targetBrightness,
+                    immediate ? 8.0f : AUTO_PRESENT_BRIGHTNESS_STEP_EV);
+            displayGamma = stepToward(
+                    displayGamma, targetGamma,
+                    immediate ? 2.0f : AUTO_PRESENT_GAMMA_STEP);
+        }
+
+        float shadowDeficit = 1.0f - smoothstepFloat(
+                0.18f, 0.34f, stats.shadowLocalContrast);
+        float midDeficit = 1.0f - smoothstepFloat(
+                0.20f, 0.36f, stats.midLocalContrast);
+        float shadowSpreadStops = (float) (Math.log(
+                Math.max(0.001f, stats.fusedP50Linear)
+                        / Math.max(0.001f, stats.fusedP10Linear)) / Math.log(2.0));
+        float compressedShadows = 1.0f - smoothstepFloat(2.5f, 4.2f, shadowSpreadStops);
+        float sliderLift = 0.55f * smoothstepFloat(1.05f, 1.55f, displayGamma)
+                + 0.45f * smoothstepFloat(0.05f, 0.70f, displayBrightnessEv);
+        float targetDehaze = clampFloat(
+                0.24f + 0.24f * shadowDeficit + 0.12f * midDeficit
+                        + 0.10f * compressedShadows + 0.10f * sliderLift,
+                0.12f, 0.68f);
+        float usefulShadowSignal = smoothstepFloat(0.006f, 0.030f, stats.fusedP25Linear);
+        float targetMicro = clampFloat(
+                0.18f + 0.16f * midDeficit + 0.09f * shadowDeficit * usefulShadowSignal
+                        + 0.07f * sliderLift,
+                0.10f, 0.48f);
+        displayDehaze = stepToward(
+                displayDehaze, targetDehaze, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
+        displayMicroContrast = stepToward(
+                displayMicroContrast, targetMicro, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
+
+        boolean changed = Math.abs(displayBrightnessEv - oldBrightness) >= 0.005f
+                || Math.abs(displayGamma - oldGamma) >= 0.005f
+                || Math.abs(displayDehaze - oldDehaze) >= 0.005f
+                || Math.abs(displayMicroContrast - oldMicroContrast) >= 0.005f;
+        if (changed || immediate) {
+            RuntimeLogger.event(
+                    "PRESENTATION_ADAPT",
+                    String.format(Locale.US,
+                            "auto=%s p10=%.4f p50=%.4f p90=%.4f p95=%.4f shadowC=%.3f midC=%.3f -> brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
+                            automatic, stats.fusedP10Linear, stats.fusedP50Linear,
+                            stats.fusedP90Linear, stats.fusedP95Linear,
+                            stats.shadowLocalContrast, stats.midLocalContrast,
+                            displayBrightnessEv, displayGamma, displayDehaze, displayMicroContrast));
+            publishPresentationLocked(automatic);
+        }
+    }
+
+    private void publishPresentationLocked(boolean automatic) {
+        if (stillFusionView != null) {
+            stillFusionView.setDisplayBrightnessEv(displayBrightnessEv);
+            stillFusionView.setDisplayGamma(displayGamma);
+            stillFusionView.setDisplayEnhancement(displayDehaze, displayMicroContrast);
+        }
+        listener.onPresentationSettings(
+                displayBrightnessEv, displayGamma, displayDehaze, displayMicroContrast, automatic);
+    }
+
+    private static float clampFloat(float value, float low, float high) {
+        return Math.max(low, Math.min(high, value));
+    }
+
+    private static float smoothstepFloat(float edge0, float edge1, float value) {
+        if (edge1 <= edge0) return value >= edge1 ? 1.0f : 0.0f;
+        float t = clampFloat((value - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+        return t * t * (3.0f - 2.0f * t);
+    }
+
+    private static float lerpFloat(float a, float b, float t) {
+        return a + (b - a) * t;
+    }
+
+    private static float stepToward(float current, float target, float maxStep) {
+        float delta = target - current;
+        if (Math.abs(delta) <= maxStep) return target;
+        return current + Math.copySign(maxStep, delta);
     }
 
     private ExposureSetting solveLiveLongSettingForProductLocked(

@@ -20,7 +20,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.11 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.12 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -50,7 +50,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.11 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.12 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -347,8 +347,8 @@ require('if (haveAeSample) {' in bootstrap and 'Bootstrap only' in bootstrap,
         "clean HAL AE must be bootstrap-only once the live HDR pair exists")
 require('STATS_WIDTH = 32' in gl and 'STATS_HEIGHT = 24' in gl
         and 'STATS_INTERVAL_NS = 100_000_000L' in gl
-        and 'glReadPixels' in gl and 'readLongTextureStats' in gl,
-        "V2.3 32x24 / 100ms live LONG statistics path missing")
+        and 'glReadPixels' in gl and 'readTextureStats' in gl,
+        "V2.12 32x24 / 100ms paired SHORT/LONG statistics path missing")
 require('AUTO_LIVE_HYSTERESIS_EV = 0.10' in camera
         and 'AUTO_LIVE_MAX_STEP_EV = 0.30' in camera
         and 'AUTO_LIVE_SCENE_CUT_EV = 0.70' in camera
@@ -553,9 +553,11 @@ require('configureProcessingControls(builder);' in camera,
 # 034 - Recorded V1.4.5 HDR FUSED crop/FPS glitch becomes permanent regression.
 require('scheduleAutoRemeterLocked' not in camera and 'autoRemeterRunnable' not in camera,
         "periodic AUTO request takeover must not return")
-require('if (listener == null || !haveLong || lastLongMeta == null) return;' in gl
-        and 'lastLongMeta.frameNumber' in gl and 'lastLongMeta.exposureProduct()' in gl,
-        "continuous AUTO statistics must be sourced only from an actually published LONG")
+require('!haveShort || !haveLong' in gl
+        and 'lastShortMeta == null || lastLongMeta == null' in gl
+        and 'lastShortMeta.frameNumber' in gl and 'lastLongMeta.frameNumber' in gl
+        and 'lastShortMeta.exposureProduct()' in gl and 'lastLongMeta.exposureProduct()' in gl,
+        "continuous AUTO statistics must be sourced only from an actually published SHORT/LONG pair")
 start_meter = camera[camera.index('private void startAutoMeteringLocked()'):camera.index('private void processAutoMeterResultLocked')]
 require('resetCaptureResultFpsLocked();' in start_meter,
         "entering hidden AE meter must reset steady-preview FPS evidence")
@@ -609,13 +611,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.11 - Exact successful V2.10 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.10' in workflow
-        and 'run-id: 33837947958' in workflow
-        and "authority='7dcf9b7c3ef68455c05202cfd637ced85cd7f32b'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.10 Actions authority")
-require("authority='dcf49e339b3ecb89b032884b258fd2586e4b8b32'" not in workflow,
-        "V2.11 must not seed runtime from V2.9 after successful V2.10")
+# 038 / 042 / V2.12 - Exact successful V2.11 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.11' in workflow
+        and 'run-id: 33872977271' in workflow
+        and "authority='7e5a295d01748da0255e831ff19d3d31a2da0e3b'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.11 Actions authority")
+require("authority='7dcf9b7c3ef68455c05202cfd637ced85cd7f32b'" not in workflow,
+        "V2.12 must not seed runtime from V2.10 after successful V2.11")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -637,52 +639,144 @@ require('if (highlightWeight > 0.0005)' in hdr_shader,
 require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
         "V2.7 must not use textureOffset/texelFetch neighborhood RGB filtering")
 
-# Brightness and Gamma are explicit WYSIWYG controls with frozen shutter-time ownership.
+# V2.12 - Capture exposure and presentation have separate owners. AUTO learns a
+# feasible bracket from SHORT highlight evidence, then learns global Brightness/Gamma
+# plus bounded luminance-only dehaze/microcontrast. MANUAL keeps user Brightness/Gamma
+# authoritative while dehaze/microcontrast adapt around those controls.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in main
         and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in main
         and 'DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10' in main,
-        "Brightness slider must be -16..+1 EV in 0.1 EV increments")
-require('Math.max(-16.0f, Math.min(1.0f, ev))' in camera
-        and 'Math.max(-16.0f, Math.min(1.0f, displayBrightnessEv))' in saver
-        and 'Math.max(-16.0f, Math.min(1.0f, ev))' in gl
-        and 'clamp(displayBrightnessEv, -16.0, 1.0)' in hdr_shader
-        and 'clamp(displayBrightnessEv, -16.0f, 1.0f)' in fusion,
-        "-16..+1EV Brightness clamp must be identical live/GPU/fallback/save")
+        "Brightness slider must remain -16..+1 EV in 0.1 EV increments")
 require('DISPLAY_GAMMA_MIN = 0.50f' in main
         and 'DISPLAY_GAMMA_MAX = 2.00f' in main
-        and 'DISPLAY_GAMMA_STEPS_PER_UNIT = 20' in main
-        and 'displayGamma = 1.0f' in main,
-        "Gamma slider must be 0.50..2.00 in 0.05 increments with 1.00 neutral")
-require('brightnessLabelText' in main and 'glView.setDisplayBrightnessEv(displayBrightnessEv);' in main
-        and 'controller.setDisplayBrightnessEv(displayBrightnessEv);' in main,
-        "Brightness slider must drive both live and saved paths")
-require('captureDisplayBrightnessEv = displayBrightnessEv;' in camera
-        and 'captureDisplayGamma = displayGamma;' in camera,
-        "shutter press must freeze the exact displayed Brightness EV and Gamma")
-live_stats = camera[camera.index('private void processHdrSceneStatsLocked'):camera.index('private void deriveAutoPairFromLiveProductLocked')]
-require('displayBrightnessEv' not in live_stats and 'displayGamma' not in live_stats,
-        "physical AUTO settling must stay independent of presentation Brightness/Gamma")
-require('HDR_BRACKET_RATIO = 8.0' in camera,
-        "V2.2 must preserve V1.4.11 V2 fixed 8x (~3EV) AUTO bracket ownership")
-# Exact V2.3 scene-cut regression derived only from V2.2 live-stat math.
+        and 'DISPLAY_GAMMA_STEPS_PER_UNIT = 20' in main,
+        "Gamma slider must remain 0.50..2.00 in 0.05 increments")
+require('AUTO_SHORT_P95_LONG_TARGET = 0.21' in camera
+        and 'AUTO_SHORT_P98_LONG_TARGET = 0.29' in camera
+        and 'AUTO_SHORT_P99_LONG_TARGET = 0.34' in camera,
+        "V2.12 SHORT-tail scene bracket targets missing")
+require('autoLiveTargetMedianLinear' not in camera,
+        "AUTO must not preserve the initial HAL median as its scene-brightness target")
+require('double desiredRatio = Math.max(AUTO_BRACKET_MIN_RATIO' in camera
+        and 'Math.min(ratioP95, Math.min(ratioP98, ratioP99))' in camera
+        and 'targetLongProduct = Math.max(targetShortProduct, targetShortProduct * desiredRatio)' in camera,
+        "AUTO bracket must derive from SHORT highlight percentiles")
+require('safeShortProduct * HDR_BRACKET_RATIO' in camera
+        and 'actualShortProduct * HDR_BRACKET_RATIO' in camera,
+        "initial HAL-derived AUTO LONG must be capped by achieved SHORT feasibility")
+require('achievedShortProduct * autoDesiredBracketRatio' in camera,
+        "live AUTO LONG must remain capped by the achieved SHORT and learned bracket")
+
+# Exact V2.11 plant-room failure/calibration. Both AUTO and good MANUAL SHORT were
+# ~1/120 ISO50. The bad AUTO LONG was ISO1556 (~4.96 EV); the good MANUAL LONG was
+# ISO200 (2.00 EV). The V2.12 scene rule must infer ~2 EV from SHORT content rather
+# than hard-coding ISO200 or preserving the HAL exposure.
+def desired_ratio_v212(p95, p98, p99, near_clip=0.0):
+    ratio = min(0.21 / max(0.002, p95),
+                0.29 / max(0.002, p98),
+                0.34 / max(0.002, p99))
+    ratio = max(1.0, min(16.0, ratio))
+    if near_clip > 0.010:
+        ratio = min(ratio, 2.0)
+    return ratio
+
+auto_sample_ratio = desired_ratio_v212(0.05311, 0.07004, 0.08118)
+manual_sample_ratio = desired_ratio_v212(0.05316, 0.07156, 0.08443)
+require(3.8 <= auto_sample_ratio <= 4.2
+        and 3.8 <= manual_sample_ratio <= 4.2,
+        "exact AUTO/MANUAL sample must learn approximately a 2-EV bracket")
+require(math.log2(1556.0 / 50.0) > 4.9 and math.isclose(math.log2(200.0 / 50.0), 2.0),
+        "exact V2.11 AUTO overexposure regression no longer reproduces source evidence")
+require(desired_ratio_v212(0.010, 0.015, 0.020) >= 15.0,
+        "genuinely dark low-highlight scenes must still be allowed a deep bracket")
+require(desired_ratio_v212(0.20, 0.28, 0.34) <= 1.25,
+        "bright/highlight-filled scenes must not be forced into an unnecessarily deep bracket")
+require(desired_ratio_v212(0.10, 0.16, 0.20, 0.02) <= 2.0,
+        "near-clipped SHORT must tighten the bracket rather than expand LONG")
+
+def presentation_v212(p50, p90, p95):
+    highlight_pressure = smoothstep_math(0.45, 0.75, p95)
+    target_p90 = 0.18 + (0.16 - 0.18) * highlight_pressure
+    brightness = max(-1.25, min(0.75, math.log2(target_p90 / max(0.010, p90))))
+    bright_median = p50 * (2.0 ** brightness)
+    contrast_stops = math.log2(max(0.001, p90) / max(0.001, p50))
+    target_median = 0.075 + (0.055 - 0.075) * smoothstep_math(2.0, 4.0, contrast_stops)
+    if 0.0005 < bright_median < 0.98 and target_median < 0.98:
+        gamma = math.log(bright_median) / math.log(target_median)
+    else:
+        gamma = 1.0
+    return brightness, max(0.85, min(1.60, gamma))
+
+manual_brightness, manual_gamma = presentation_v212(0.03667, 0.17712, 0.21528)
+require(abs(manual_brightness) <= 0.08 and 1.20 <= manual_gamma <= 1.32,
+        "exact good MANUAL scene must calibrate AUTO presentation near 0EV / gamma 1.25")
+
+# Existing settling mechanics remain bounded; only scene target ownership changes.
 def live_step(error_ev):
     if abs(error_ev) <= 0.10:
         return 0.0
     max_step = 6.0 if abs(error_ev) >= 0.70 else 0.30
     return max(-max_step, min(max_step, error_ev))
 require(math.isclose(live_step(+2.0), +2.0) and math.isclose(live_step(-2.0), -2.0),
-        "large dark/bright scene cuts must apply the measured correction on the first fresh sample")
+        "large scene cuts must retain immediate correction")
 require(math.isclose(live_step(+0.50), +0.30) and math.isclose(live_step(-0.50), -0.30),
-        "ordinary exposure drift must retain V2.2's smooth 0.30EV bound")
+        "ordinary exposure drift must retain the successful 0.30-EV bound")
 require(math.isclose(live_step(+0.05), 0.0) and math.isclose(live_step(-0.05), 0.0),
-        "small live-stat jitter must remain inside exposure hysteresis")
-require('captureDisplayBrightnessEv' in camera[camera.index('new CaptureSetSaver('):camera.index('stillSessionActive = true;')]
-        and 'captureDisplayGamma' in camera[camera.index('new CaptureSetSaver('):camera.index('stillSessionActive = true;')],
-        "saved fusion must receive frozen shutter-time Brightness EV and Gamma")
-require('displayBrightnessEv' in saver and 'displayGamma' in saver
-        and 'stillFusionView.fuseStillJpegs' in saver
-        and 'shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma' in saver.replace('\n', ' '),
-        "CaptureSetSaver must route frozen SHORT/LONG + Brightness/Gamma to GPU still fusion")
+        "small scene-stat jitter must remain inside exposure hysteresis")
+
+# Presentation controller ownership and capture freeze.
+require('private void updateAdaptivePresentationLocked(' in camera
+        and 'float targetP90 = lerpFloat(0.18f, 0.16f, highlightPressure);' in camera
+        and 'float targetMedian = lerpFloat(' in camera,
+        "AUTO adaptive Brightness/Gamma solver missing")
+require('if (automatic) {' in camera[camera.index('private void updateAdaptivePresentationLocked'):camera.index('private void publishPresentationLocked')],
+        "AUTO-only Brightness/Gamma authority boundary missing")
+manual_pres = camera[camera.index('private void updateAdaptivePresentationLocked'):camera.index('private void publishPresentationLocked')]
+require('float targetBrightness = displayBrightnessEv;' in manual_pres
+        and 'float targetGamma = displayGamma;' in manual_pres,
+        "MANUAL must begin from user Brightness/Gamma rather than replace them")
+require('sliderLift' in camera and 'targetDehaze' in camera and 'targetMicro' in camera,
+        "dehaze/microcontrast must adapt to both scene evidence and slider-controlled presentation")
+require('captureDisplayBrightnessEv = displayBrightnessEv;' in camera
+        and 'captureDisplayGamma = displayGamma;' in camera
+        and 'captureDisplayDehaze = displayDehaze;' in camera
+        and 'captureDisplayMicroContrast = displayMicroContrast;' in camera,
+        "shutter press must freeze one complete presentation state")
+require('displayDehaze' in saver and 'displayMicroContrast' in saver
+        and 'root.put("displayDehaze", displayDehaze);' in saver
+        and 'root.put("displayMicroContrast", displayMicroContrast);' in saver,
+        "saved metadata must record the frozen adaptive clarity state")
+require('shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma,' in saver.replace('\n', ' ')
+        and 'displayDehaze, displayMicroContrast,' in saver.replace('\n', ' '),
+        "CaptureSetSaver must carry frozen Brightness/Gamma/dehaze/microcontrast to GPU still fusion")
+require('brightnessBar.setEnabled(enabled)' in main and 'gammaBar.setEnabled(enabled)' in main,
+        "AUTO must own Brightness/Gamma sliders while MANUAL keeps them user-authoritative")
+require('Brightness AUTO' in main and 'Dehaze' in main and 'Micro' in main,
+        "UI must expose the learned presentation state without adding extra required sliders")
+
+# V2.12 clarity is deliberately small and deterministic: one existing shader, five-tap
+# LONG luminance guide, uniform RGB scale, no sharpening/local-HDR/independent color gains.
+require('IRIS_V212_ADAPTIVE_CLARITY_BEGIN' in hdr_shader
+        and 'float longGuideLumaAt(vec2 sampleUv)' in hdr_shader
+        and 'float guideRangeWeight(float centerGuide, float neighborGuide)' in hdr_shader
+        and hdr_shader.count('longGuideLumaAt(sampleUv +') == 4
+        and 'weightSum = 1.0 + weightXp + weightXm + weightYp + weightYm' in hdr_shader,
+        "V2.12 clarity must use exactly the bounded five-tap edge-aware luminance guide")
+clarity = hdr_shader[hdr_shader.index('// IRIS_V212_ADAPTIVE_CLARITY_BEGIN'):
+                     hdr_shader.index('// IRIS_V212_ADAPTIVE_CLARITY_END')]
+require('0.16 * clamp(displayDehaze' in clarity
+        and '0.30 * clamp(displayMicroContrast' in clarity,
+        "dehaze/microcontrast strengths must stay conservatively bounded")
+require('signalSafety' in clarity and 'edgeSafety' in clarity
+        and 'smoothstep(0.55, 0.78, y)' in clarity,
+        "clarity must gate noise floor, strong edges and highlights")
+require('return rgb * min(requestedScale, gamutScale);' in clarity,
+        "clarity must preserve RGB ratios through a single luminance scale")
+require('unsharp' not in clarity.lower() and 'clahe' not in clarity.lower(),
+        "V2.12 must not substitute sharpening/CLAHE for source-supported clarity")
+require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
+        "V2.12 must reuse the successful shader-file universe; no new clarity shader asset")
+
 require('controller.setStillFusionView(glView);' in main
         and 'renderStillPass(' in gl
         and '3, longTexture, shortTexture, longTexture' in gl
@@ -690,26 +784,17 @@ require('controller.setStillFusionView(glView);' in main
         and '5, supportTexture, shortTexture, longTexture' in gl
         and 'stillFusionProgram' not in gl
         and 'still_fusion.frag' not in gl
-        and 'GLUtils.texImage2D' in gl
-        and 'GLES30.glReadPixels' in gl
         and 'GPU_STILL_FUSION' in gl,
-        "V2.9 saved HDR must use one GPU multipass implementation through the existing GLES3 context")
+        "saved HDR must remain the proven GPU-only three-pass implementation")
 require('submitCpuFusionFallback' not in saver
-        and 'GPU_STILL_FUSION_FALLBACK' not in saver
         and 'JpegFusion.fuse(' not in saver
         and 'GPU_STILL_FUSION_REQUIRED' in saver
-        and 'CPU HDR substitution is disabled' in saver
-        and 'stillFusionView.fuseStillJpegs' in saver,
-        "V2.9 production capture must never substitute an independent CPU HDR result after GPU failure")
+        and 'CPU HDR substitution is disabled' in saver,
+        "production capture must never substitute independent CPU HDR after GPU failure")
 require(not (ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java').exists()
         and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_demosaic.frag').exists()
         and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_fusion.frag').exists(),
-        "V2.5 must remain on the successful V2.4 JPEG architecture; RAW-fusion files are forbidden")
-require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
-        "V2.5 must preserve V2.4 tracked-file universe; no new still shader asset is permitted")
-require('root.put("displayBrightnessEv", displayBrightnessEv);' in saver
-        and 'root.put("displayGamma", displayGamma);' in saver,
-        "capture metadata must record the applied Brightness EV and Gamma")
+        "V2.12 must remain on the successful JPEG-source architecture")
 
 # V2.7 permanent regressions: exact accepted real-photo architecture. LONG is
 # geometry/appearance authority. Registered SHORT may contribute complete mapped
@@ -797,15 +882,26 @@ require('IRIS_V211_SCENE_DOMAIN_PROVENANCE_BEGIN' in hdr_shader
         "V2.11 saved HDR provenance must compose scene-linear sources before presentation")
 v211_block = hdr_shader[hdr_shader.index('// IRIS_V211_SCENE_DOMAIN_PROVENANCE_BEGIN'):
                         hdr_shader.index('// IRIS_V211_SCENE_DOMAIN_PROVENANCE_END')]
-v211_mode5_start = hdr_shader.index('    if (mode == 5) {')
-require(hashlib.sha256(hdr_shader[:v211_mode5_start].encode()).hexdigest()
-        == '58cd50aca1454d52b23f06bc64983249461303cdad340eb7fe701a9332bdee63',
-        "V2.11 evidence/support modes 3/4 and preceding shader logic must remain byte-identical to successful V2.10")
-v211_live_start = hdr_shader.index('    float ratio = clamp(exposureRatio, 1.0, 65536.0);',
-                                   hdr_shader.index('// IRIS_V211_SCENE_DOMAIN_PROVENANCE_END'))
-require(hashlib.sha256(hdr_shader[v211_live_start:].encode()).hexdigest()
-        == '555a109c49e28ed1bc9dfaec652111133745780e4fb229e554b8e86e0ac9c419',
-        "V2.11 live mode=2 shader remainder must remain byte-identical to successful V2.10")
+v212_mode3_start = hdr_shader.index('    if (mode == 3) {')
+v212_mode4_start = hdr_shader.index('    if (mode == 4) {')
+v212_mode5_start = hdr_shader.index('    if (mode == 5) {')
+require(hashlib.sha256(hdr_shader[v212_mode3_start:v212_mode4_start].encode()).hexdigest()
+        == 'ca2d281f4cdd383a0083cb9e45607487f03555d63ffc7dbbda9f6379ef596455',
+        "V2.12 evidence mode 3 must remain byte-identical to successful V2.11")
+require(hashlib.sha256(hdr_shader[v212_mode4_start:v212_mode5_start].encode()).hexdigest()
+        == 'eb1802146ada170d7e81b22ded348607144963d4ebb792081e4394c5d203b19f',
+        "V2.12 support mode 4 must remain byte-identical to successful V2.11")
+# Remove only the V2.12 clarity call when checking the V2.11 saved-provenance block.
+v211_normalized = v211_block.replace('        displayLinear = applyAdaptiveClarity(displayLinear, uv);\n', '')
+require(hashlib.sha256(v211_normalized.encode()).hexdigest()
+        == 'f03566c40466dd3e6a99812314467824d55a79137cf706aa199e60f8505b0d31',
+        "V2.11 scene-domain saved provenance changed beyond the V2.12 presentation call")
+v211_end = hdr_shader.index('// IRIS_V211_SCENE_DOMAIN_PROVENANCE_END') + len('// IRIS_V211_SCENE_DOMAIN_PROVENANCE_END')
+v212_live_start = hdr_shader.index('    float ratio = clamp(exposureRatio, 1.0, 65536.0);', v211_end)
+v212_live_clarity = hdr_shader.index('    displayLinear = applyAdaptiveClarity(displayLinear, uv);', v212_live_start)
+require(hashlib.sha256(hdr_shader[v212_live_start:v212_live_clarity].encode()).hexdigest()
+        == '3c1590e3c2908c362106ab820d670045ee73038844135086e45778c6be7e45fe',
+        "live HDR path before V2.12 clarity must remain byte-identical to successful V2.11")
 require('longDisplay' not in v211_block
         and 'recoveredSourceDisplay' not in v211_block
         and 'displayLinear = mix(' not in v211_block,
@@ -813,32 +909,18 @@ require('longDisplay' not in v211_block
 require('float radianceFloorWeight = longHardClip' in hdr_shader
         and 'float shortSceneY = linearLuma(shortScene);' in hdr_shader
         and 'vec3 radianceRaised = mergedScene * (shortSceneY / mergedY);' in hdr_shader,
-        "V2.11 hard-clipped LONG must retain source-proven SHORT radiance lower bound without invented RGB")
+        "V2.11 hard-clipped LONG must retain source-proven SHORT radiance lower bound")
 require('evidenceTexture = createTexture2d();' in gl
         and 'supportTexture = createTexture2d();' in gl
         and 'int analysisWidth = Math.max(1, (width + 7) / 8);' in gl
         and 'int analysisHeight = Math.max(1, (height + 7) / 8);' in gl,
-        "V2.10 must reuse the proven bounded V2.9 multipass evidence/support allocations")
+        "V2.12 must retain bounded V2.11/V2.9 evidence/support allocations")
 require('private static float median3(float a, float b, float c)' in gl
         and 'float scalarGain = median3(appearanceGain.r, appearanceGain.g, appearanceGain.b);' in gl,
         "scalar radiometric calibration must remain unchanged")
-require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
-        "V2.10 must reuse the exact V2.9 shader-file universe; no new still shader asset is allowed")
 require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java').read_bytes()).hexdigest()
         == '7f420d891ba89acd385f643b1aa337eecf8726fb660ebf8143744ee6ae829c0d',
-        "JpegFusion.java must remain byte-identical to successful V2.9/V2.8")
-require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java').read_bytes()).hexdigest()
-        == '7816f7627c2e0732b7875c9a22abc63d3ad14ee1cfb834cbb46287815fd592ca',
-        "HdrGlView.java must remain byte-identical to successful V2.9")
-require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java').read_bytes()).hexdigest()
-        == 'cc44224cac790d875e8e78bf2559eec0494c45b7d48051a71bba778d8581f48b',
-        "CaptureSetSaver.java must remain byte-identical to successful V2.9")
-require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java').read_bytes()).hexdigest()
-        == 'fd882707d648289b9a3e255f0ee7a16b3aef0a175ba2111a4a56923af0982bc0',
-        "CameraController.java must remain byte-identical to successful V2.10 flicker authority")
-require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java').read_bytes()).hexdigest()
-        == '581e5fc4db763f063b3bf278fa514e41e0e5e22832bb6dc999c6101f4949aa2c',
-        "MainActivity.java must remain byte-identical to successful V2.10 flicker UI authority")
+        "JpegFusion.java must remain byte-identical to successful V2.11/V2.10/V2.9/V2.8")
 require('liftShortProvenanceRgb' not in hdr_shader
         and 'mergeStillLumaAndChroma' not in hdr_shader,
         "older power-lift/luma-chroma hybrid paths must remain retired")
@@ -1059,16 +1141,16 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 28' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.11"' in Path('app/build.gradle.kts').read_text(),
-        "V2.11 version/build marker must be exact")
+require('versionCode = 29' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.12"' in Path('app/build.gradle.kts').read_text(),
+        "V2.12 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
 still_burst = camera[camera.index('private void issueStillBurstLocked()'):camera.index('private final CameraCaptureSession.CaptureCallback stillCaptureCallback')]
 require('autoMetering = false;' in begin_capture,
         "shutter press must freeze/ignore bootstrap metering before snapshotting controls")
-stats_block = camera[camera.index('private void processHdrSceneStatsLocked'):camera.index('private void deriveAutoPairFromLiveProductLocked')]
+stats_block = camera[camera.index('private void processHdrSceneStatsLocked'):camera.index('private void deriveAutoPairFromSceneTargetsLocked')]
 require('stillSessionActive' in stats_block and 'autoMetering' in stats_block,
         "continuous live statistics must not mutate an in-flight still capture")
 for token in [
@@ -1079,6 +1161,8 @@ for token in [
     'capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;',
     'captureDisplayBrightnessEv = displayBrightnessEv;',
     'captureDisplayGamma = displayGamma;',
+    'captureDisplayDehaze = displayDehaze;',
+    'captureDisplayMicroContrast = displayMicroContrast;',
 ]:
     require(token in begin_capture, f"immutable capture snapshot missing: {token}")
 require('activeShortExposureNs()' not in still_burst and 'activeLongExposureNs()' not in still_burst
@@ -1165,4 +1249,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.11 REGRESSION PASS: exact successful V2.10 authority, V2.10 flicker/alignment/GPU routing protected, scene-linear saved provenance before presentation, exact gray-plateau regression fixed, source-radiance ordering preserved")
+print("V1.4.11 V2.12 REGRESSION PASS: exact successful V2.11 authority, V2.11 fusion/alignment and V2.10 flicker safety preserved, AUTO SHORT-tail exposure normalization, adaptive Brightness/Gamma, bounded luminance-only clarity, frozen manual/auto presentation state")

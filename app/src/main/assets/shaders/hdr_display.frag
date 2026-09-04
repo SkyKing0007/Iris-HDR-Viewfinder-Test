@@ -13,6 +13,8 @@ uniform int haveLong;
 uniform float exposureRatio;
 uniform float displayBrightnessEv;
 uniform float displayGamma;
+uniform float displayDehaze;
+uniform float displayMicroContrast;
 uniform float stillRegistrationConfidence;
 uniform vec3 stillShortLinearGain;
 uniform float stillShortScalarGain;
@@ -431,6 +433,67 @@ vec3 recoveredSourceDisplay(
 }
 // IRIS_V210_VISUAL_LOSS_END
 
+// IRIS_V212_ADAPTIVE_CLARITY_BEGIN
+float longGuideLumaAt(vec2 sampleUv) {
+    vec3 guide = srgbToLinear(texture(longTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb);
+    return linearLuma(guide);
+}
+
+float guideRangeWeight(float centerGuide, float neighborGuide) {
+    float relativeDifference = abs(neighborGuide - centerGuide) / max(centerGuide, 0.03);
+    return 1.0 - smoothstep(0.10, 0.30, relativeDifference);
+}
+
+vec3 applyAdaptiveClarity(vec3 rgb, vec2 sampleUv) {
+    float y = linearLuma(rgb);
+    if (y <= 0.000001) return rgb;
+
+    // Five-tap, luminance-only range guide. The cross is symmetric, and neighbors
+    // across a strong luminance boundary lose weight before the local base is formed,
+    // so shutters/window frames/lamp edges cannot create a broad clarity halo.
+    vec2 texel = 1.0 / vec2(textureSize(longTex, 0));
+    vec2 radius = 6.0 * texel;
+    float centerGuide = longGuideLumaAt(sampleUv);
+    float guideXp = longGuideLumaAt(sampleUv + vec2( radius.x, 0.0));
+    float guideXm = longGuideLumaAt(sampleUv + vec2(-radius.x, 0.0));
+    float guideYp = longGuideLumaAt(sampleUv + vec2(0.0,  radius.y));
+    float guideYm = longGuideLumaAt(sampleUv + vec2(0.0, -radius.y));
+    float weightXp = guideRangeWeight(centerGuide, guideXp);
+    float weightXm = guideRangeWeight(centerGuide, guideXm);
+    float weightYp = guideRangeWeight(centerGuide, guideYp);
+    float weightYm = guideRangeWeight(centerGuide, guideYm);
+    float weightSum = 1.0 + weightXp + weightXm + weightYp + weightYm;
+    float localBase = (centerGuide
+            + guideXp * weightXp + guideXm * weightXm
+            + guideYp * weightYp + guideYm * weightYm) / max(weightSum, 1.0);
+
+    float relativeDetail = abs(centerGuide - localBase) / max(localBase, 0.02);
+    float edgeSafety = 1.0 - smoothstep(0.12, 0.42, relativeDetail);
+    float signalSafety = smoothstep(0.008, 0.040, y)
+        * (1.0 - smoothstep(0.55, 0.78, y));
+
+    // "Dehaze" is a bounded luminance-only veil suppression, not an atmospheric
+    // RGB dehaze model. True blacks and highlights stay anchored; strong edges are
+    // excluded so shutters, window frames, lamps, and silhouettes cannot halo.
+    float dehazeGate = smoothstep(0.012, 0.070, localBase)
+        * (1.0 - smoothstep(0.32, 0.60, localBase))
+        * edgeSafety;
+    float targetY = y * (1.0 - 0.16 * clamp(displayDehaze, 0.0, 1.0) * dehazeGate);
+
+    // Microcontrast restores only moderate source-supported luminance structure.
+    // The noise floor, strong edges, and highlights remain untouched.
+    float normalizedDetail = (centerGuide - localBase) / max(centerGuide, 0.02);
+    targetY += y * normalizedDetail
+        * (0.30 * clamp(displayMicroContrast, 0.0, 1.0))
+        * signalSafety * edgeSafety;
+    targetY = clamp(targetY, 0.0, 1.0);
+
+    float requestedScale = targetY / y;
+    float gamutScale = 1.0 / max(max3(rgb), 0.000001);
+    return rgb * min(requestedScale, gamutScale);
+}
+// IRIS_V212_ADAPTIVE_CLARITY_END
+
 vec3 applyPhotographicBodyTone(vec3 rgb) {
     // Global SDR photographic tone reproduction: anchor true blacks, lift the
     // body/midtones modestly, and make that lift exactly disappear before the
@@ -623,6 +686,7 @@ void main() {
         vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
         vec3 displayLinear = adaptiveHdrToneMap(bodyToned, ratio, bracketStops);
         displayLinear = applyDisplayGamma(displayLinear, displayGamma);
+        displayLinear = applyAdaptiveClarity(displayLinear, uv);
         outColor = vec4(clamp(linearToSrgb(displayLinear), 0.0, 1.0), 1.0);
         // IRIS_V211_SCENE_DOMAIN_PROVENANCE_END
         return;
@@ -661,6 +725,7 @@ void main() {
         displayLinear = highlightColorOwnership(
                 displayLinear, longScene, shortScene, longRgb, shortRgb, highlightWeight);
     }
+    displayLinear = applyAdaptiveClarity(displayLinear, uv);
     vec3 displayRgb = linearToSrgb(displayLinear);
     outColor = vec4(clamp(displayRgb, 0.0, 1.0), 1.0);
 }

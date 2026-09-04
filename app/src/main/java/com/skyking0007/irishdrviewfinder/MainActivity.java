@@ -155,6 +155,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         controller.setStillFusionView(glView);
         glView.setDisplayBrightnessEv(displayBrightnessEv);
         glView.setDisplayGamma(displayGamma);
+        glView.setDisplayEnhancement(0.28f, 0.20f);
         controller.setDisplayBrightnessEv(displayBrightnessEv);
         controller.setDisplayGamma(displayGamma);
         controller.setAllowCropped60Fps(allowCropped60Fps);
@@ -608,6 +609,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         glView.setProducerOwnedOrientationDegrees(previewRelation);
         glView.setDisplayBrightnessEv(displayBrightnessEv);
         glView.setDisplayGamma(displayGamma);
+        glView.setDisplayEnhancement(0.28f, 0.20f);
         controller.setDisplayBrightnessEv(displayBrightnessEv);
         controller.setDisplayGamma(displayGamma);
         controller.setJpegOrientationDegrees(jpegOrientation);
@@ -675,6 +677,39 @@ public final class MainActivity extends Activity implements CameraController.Lis
                     bracketEv,
                     flickerLabel));
             setManualControlsEnabled(false);
+        });
+    }
+
+    @Override
+    public void onPresentationSettings(
+            float brightnessEv,
+            float gamma,
+            float dehaze,
+            float microContrast,
+            boolean automatic) {
+        runOnUiThread(() -> {
+            updatingControls = true;
+            displayBrightnessEv = brightnessEv;
+            displayGamma = gamma;
+            brightnessBar.setProgress(brightnessProgressForEv(displayBrightnessEv));
+            gammaBar.setProgress(gammaProgressForValue(displayGamma));
+            brightnessLabel.setText(String.format(
+                    Locale.US,
+                    automatic ? "Brightness AUTO %+.1f EV  Dehaze %.0f%%"
+                            : "Brightness %+.1f EV  Dehaze auto %.0f%%",
+                    displayBrightnessEv,
+                    100.0f * dehaze));
+            gammaLabel.setText(String.format(
+                    Locale.US,
+                    automatic ? "Gamma AUTO %.2f  Micro %.0f%%"
+                            : "Gamma %.2f  Micro auto %.0f%%",
+                    displayGamma,
+                    100.0f * microContrast));
+            glView.setDisplayBrightnessEv(displayBrightnessEv);
+            glView.setDisplayGamma(displayGamma);
+            glView.setDisplayEnhancement(dehaze, microContrast);
+            updatingControls = false;
+            setManualControlsEnabled(!autoHdrEnabled);
         });
     }
 
@@ -751,15 +786,14 @@ public final class MainActivity extends Activity implements CameraController.Lis
         if (shortBar != null) shortBar.setEnabled(enabled);
         if (longBar != null) longBar.setEnabled(enabled);
         if (isoBar != null) isoBar.setEnabled(enabled);
-        if (!enabled) {
-            if (shortBar != null) shortBar.setAlpha(0.45f);
-            if (longBar != null) longBar.setAlpha(0.45f);
-            if (isoBar != null) isoBar.setAlpha(0.45f);
-        } else {
-            if (shortBar != null) shortBar.setAlpha(1.0f);
-            if (longBar != null) longBar.setAlpha(1.0f);
-            if (isoBar != null) isoBar.setAlpha(1.0f);
-        }
+        if (brightnessBar != null) brightnessBar.setEnabled(enabled);
+        if (gammaBar != null) gammaBar.setEnabled(enabled);
+        float alpha = enabled ? 1.0f : 0.55f;
+        if (shortBar != null) shortBar.setAlpha(alpha);
+        if (longBar != null) longBar.setAlpha(alpha);
+        if (isoBar != null) isoBar.setAlpha(alpha);
+        if (brightnessBar != null) brightnessBar.setAlpha(alpha);
+        if (gammaBar != null) gammaBar.setAlpha(alpha);
     }
 
     private static HdrGlView.Mode glModeForIndex(int index) {

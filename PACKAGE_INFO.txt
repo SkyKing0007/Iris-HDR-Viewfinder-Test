@@ -1,36 +1,38 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.11 SCENE-DOMAIN SAVED HDR PROVENANCE PACKAGE INFO
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.12 ADAPTIVE AUTO EXPOSURE + PRESENTATION PACKAGE INFO
 
 STATUS
-PREPARED / UPLOAD-READY, NOT BUILD-PROVEN.
-No source commit or push performed by ChatGPT.
-No backup created; this is a localized shader-only runtime correction with exact deterministic rollback proof.
+PREPARED / UPLOAD-READY only after packaged proof completes; NOT BUILD-PROVEN until GitHub Actions succeeds.
+No backup branch requested or created.
 
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 28
-Target versionName: 1.0-v1.4.11-v2.11
+Target versionCode: 29
+Target versionName: 1.0-v1.4.11-v2.12
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: 7dcf9b7c3ef68455c05202cfd637ced85cd7f32b
-Tree: bca379e436cc0b5c25c1c4686f537e1e4a38f613
-GitHub Actions run: 33837947958 — SUCCESS
-Artifact ID: 9923932300
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.10
-Artifact ZIP digest: sha256:dd823c578040ea5a08baa41a327dddecd79caf1da9cd4399cfa0960eff3c1029
-V2.10 APK SHA-256: ea63efddbbda8187aab454eed304708bb35cb77857951fc9b36ce6ae4cf6b54c
-V2.10 source-candidate TAR SHA-256: 5205d78b895a647d3c924e3b0b175f4176459a0589f963e48a11b2cf68b34abb
-V2.10 runtime manifest SHA-256: 43dc5cb682b478f9b701029c52404d0cb26c780caec8557c50805c033cd7bc78
-V2.10 repository manifest SHA-256: 3dd037cfd1932ffd5d1f58ca0981e162ad032c67ab7b7e7a73c2ead83a152142
-V2.10 regressions SHA-256: f9b1e4094bd6273905277dd81b7ff6e055e8593dea076926f28d0006b5c29ba1
+Commit: 7e5a295d01748da0255e831ff19d3d31a2da0e3b
+Tree: fda1e7b38cb0cbb004382123579b7d8420a1da8d
+GitHub Actions run: 33872977271 — SUCCESS
+Artifact ID: 9936710832
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.11
+Artifact ZIP digest: sha256:1f67f65905ac25c7f59e6e0b6ef7d42a835684e0b6b57c6b357507ff26767e85
+V2.11 APK SHA-256: 6a991e24a87eb5e8793f2299947200d5e471775fce0614103e3176d9ba8bba82
+V2.11 source-candidate TAR SHA-256: 510538c3c1cd5d4d3305f735a385bdc5b4ca0bc4f4263e45f463b3f56c118f88
+V2.11 runtime manifest SHA-256: dc020eb88219a3f0e2e0f65aea9a06626d0b792b4996b93bdf941f8d89921d6b
+V2.11 repository manifest SHA-256: 15809d13fe031eb38f459a08df5f06b66d5e4de34cb4becc618fcc79c9120771
+V2.11 regressions SHA-256: d760cb0daed6ad2685aafe47505a5ed60ee8c307c7bc0fd22f8a17fe4d7030a5
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.10 workflow/build implementation, inherited unchanged from successful V2.9/V2.8.
-The same 15-step sequence, action versions, pinned glslang package/commands, real Java compiler command, regression order, full :app:assembleDebug, patch proof, frozen-candidate invariance and deterministic artifact export are retained.
+Exact successful V2.11 workflow/build implementation, inherited from successful V2.10/V2.9/V2.8. The same 15-step sequence, action versions, pinned glslang package/commands, real Java compiler command, regression order, full :app:assembleDebug, deterministic patch proof, candidate freeze, one-APK proof and artifact export are retained.
 
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 1
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 5
 - app/src/main/assets/shaders/hdr_display.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
 INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - .github/workflows/build.yml
@@ -45,52 +47,50 @@ CANDIDATE METADATA / DELIVERY CHANGES
 - app/build.gradle.kts
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-YES, NARROWLY. Only authority/version/hash/allowlist/artifact/regression payload advances for V2.11. Compiler commands, step order, action versions, deterministic patch mechanics, candidate freeze, build command and artifact structure remain the successful V2.10 mechanics.
+YES, NARROWLY. Only authority/version/hash/allowlist/regression/artifact payload advances for V2.12. Compiler commands, step order, action versions, deterministic patch mechanics, candidate freeze, build command and artifact structure remain the successful V2.11 mechanics.
 
-V2.11 RUNTIME DIGEST
-dc020eb88219a3f0e2e0f65aea9a06626d0b792b4996b93bdf941f8d89921d6b
+V2.12 RUNTIME DIGEST
+66ca7d03ada64f95fbb367ec5cd0f65747a2de7cd33050ff199063bb0f7c65ef
 Runtime universe remains exactly 12 files; no runtime file is added or deleted.
 
-EXACT VISUAL FAILURE THAT V2.11 CORRECTS
-The V2.10 chandelier capture proved the saved FUSED path was visually wrong even though live HDR looked correct.
-- In the saved FUSED JPEG, pixels jointly near-white in SHORT and LONG collapsed to approximately 107/255 gray; about 96% of that jointly saturated population landed at 0.4196 encoded luma.
-- V2.10 shader math at Brightness -4.5EV / Gamma 1.55 predicts 106.6–107/255 when a clipped LONG pixel fails SHORT color ownership and is presentation-darkened as LONG.
-- The registered SHORT/LONG source pair independently estimates a scalar SHORT->LONG linear gain around 16.905x. That source-supported radiance lower bound renders around 0.904 encoded under the same global presentation, matching the visually bright-light behavior rather than the gray plateau.
-- The saved transition also showed stippled/high-frequency ownership texture absent from both source JPEGs.
+EXACT VISUAL / EXPOSURE CALIBRATION
+The V2.11 plant-room comparison is the source regression:
+- AUTO SHORT: about 1/120s ISO50; AUTO LONG: about 1/120s ISO1556 (~4.96 EV separation), visibly overexposed.
+- Good MANUAL SHORT: about 1/120s ISO50; good MANUAL LONG: about 1/120s ISO200 (2.00 EV separation), visually correct fusion.
+- On the actual 32x24 live-statistics surface, both SHORT captures measure approximately P95=0.053, P98=0.071, P99=0.083 linear. V2.12 therefore learns ~4x/~2EV for this scene from the SHORT tail instead of preserving HAL brightness or hard-coding ISO200.
 
-V2.11 SCENE-DOMAIN SAVED HDR CORRECTION
-- V2.10 evidence/support modes 3/4 remain byte-identical.
-- Successful V2.10 live mode=2 remains byte-identical.
-- Saved mode=5 no longer mixes independently post-toned LONG and SHORT display values.
-- LONG/registered SHORT provenance is composed first in scene-linear space using the existing one-scalar SHORT calibration.
-- Valid SHORT complete-RGB ownership remains gated by V2.10 registration, visual-loss, static/source and contextual-saturation evidence.
-- Full-resolution SHORT validity now modulates complete-RGB ownership continuously instead of hard-switching individual pixels between two post-toned images.
-- When LONG is genuinely multi-channel clipped and registered/static SHORT proves higher scene radiance, even a SHORT sample too clipped for complete RGB may raise only the scene-radiance lower bound. It does not inject SHORT texture or hue.
-- Brightness/body tone/HDR shoulder/gamma are applied once after scene-domain provenance/radiance composition, matching the successful live-path ordering.
-- Recovered highlight ordering is monotonic: stronger source-supported SHORT radiance cannot map darker at the same clipped LONG location.
-- Changed TV/LED/flicker-phase protections remain inherited below hard clipping; low registration/static confidence suppresses the radiance-floor path.
+V2.12 AUTO EXPOSURE OWNERSHIP
+- HAL AE remains bootstrap-only.
+- AUTO no longer preserves the initial HAL LONG median as the target.
+- Paired SHORT/LONG statistics are sourced only from published timestamp-matched textures/metadata.
+- SHORT highlight P95/P98/P99 determine scene-supported bracket depth, bounded 1x..16x.
+- If SHORT reaches physical/flicker/ISO floor, LONG is reduced to the achieved SHORT times the learned bracket; bracket depth cannot silently expand.
+- Existing V2.10/V2.11 50/60-Hz safe timing authority and convergence hysteresis/update/scene-cut constants remain intact.
 
-PROTECTED SUCCESSFUL V2.10 RUNTIME
-- CameraController.java SHA-256 fd882707d648289b9a3e255f0ee7a16b3aef0a175ba2111a4a56923af0982bc0
-- MainActivity.java SHA-256 581e5fc4db763f063b3bf278fa514e41e0e5e22832bb6dc999c6101f4949aa2c
-- HdrGlView.java SHA-256 7816f7627c2e0732b7875c9a22abc63d3ad14ee1cfb834cbb46287815fd592ca
-- CaptureSetSaver.java SHA-256 cc44224cac790d875e8e78bf2559eec0494c45b7d48051a71bba778d8581f48b
-- JpegFusion.java SHA-256 7f420d891ba89acd385f643b1aa337eecf8726fb660ebf8143744ee6ae829c0d
-- V2.10 flicker AUTO/50/60/OFF behavior and actual dual 60Hz-safe 1/120 capture behavior are frozen.
-- Alignment/registration, DNG/orientation, capture adjacency/immutability and GPU-only production ownership are frozen.
+V2.12 ADAPTIVE PRESENTATION
+- AUTO learns global Brightness and Gamma from fused-scene statistics; the accepted manual plant-room scene calibrates near 0 EV / gamma ~1.25.
+- MANUAL keeps user Brightness/Gamma authoritative.
+- In both AUTO and MANUAL, dehaze/microcontrast re-solve from scene statistics and the current presentation controls.
+- Dehaze is bounded luminance-only veil suppression.
+- Microcontrast is bounded luminance-only detail using a symmetric five-tap range-weighted guide; noise floor, strong edges and highlights are protected.
+- RGB ratios are preserved with one scalar luma scale; no RGB dehaze, CLAHE, sharpening, unsharp mask or local-HDR texture synthesis.
+- Brightness/Gamma/dehaze/microcontrast freeze as one state at shutter and are passed to saved GPU fusion and recorded in metadata.
+
+PROTECTED SUCCESSFUL V2.11 BEHAVIOR
+- V2.11 scene-domain source/provenance math remains unchanged before the new final clarity presentation call.
+- Shader evidence mode 3 and support mode 4 remain byte-identical to successful V2.11.
+- Registration/alignment geometry, JpegFusion implementation, DNG/orientation, capture adjacency/immutability and GPU-only production ownership remain unchanged.
+- V2.10/V2.11 real AUTO/50Hz/60Hz/OFF flicker authority remains unchanged.
 
 LOCAL VERIFICATION STATUS BEFORE ACTIONS
-Exact V2.10 artifact authority/hash/manifests: PASS.
-V2.11 exact runtime changed-file allowlist (shader only): PASS.
-V2.10 mode3/4 shader prefix byte identity: PASS.
-V2.10 live mode=2 shader remainder byte identity: PASS.
-Exact V2.10 chandelier ~107/255 failure reproduction: PASS.
-V2.11 source-equivalent bright-clipped correction and monotonic highlight ordering: PASS.
-Packaged V2.11 regression verifier: PASS.
-Complete GLSL/GLSL ES reserved-identifier scan: PASS on all four shaders.
-Pinned real glslangValidator for modified hdr_display.frag: NOT RUN locally; GitHub Actions must run the exact successful V2.10 pinned command.
-Real project Java compiler: NOT RUN locally; Java runtime files are protected byte-identical, but the successful workflow still runs :app:compileDebugJavaWithJavac.
+Exact V2.11 Actions artifact authority/hash/manifests: PASS.
+V2.12 candidate-first runtime scope and protected-file checks: PASS when final packaged verifier completes.
+Source-equivalent exact plant-room bracket calibration: PASS.
+V2.11 provenance/evidence/support byte-pins: PASS when final packaged verifier completes.
+Complete GLSL reserved-identifier scan: must PASS before packaging.
+Pinned real glslangValidator: NOT RUN locally; GitHub Actions must run exact successful V2.11 commands.
+Real project Java compiler: NOT RUN locally; GitHub Actions must run :app:compileDebugJavaWithJavac.
 Full Android :app:assembleDebug: NOT RUN locally; GitHub Actions remains authoritative.
 
 FINAL ACTIONS AUTHORITY
-Until V2.11 succeeds, final authority remains V2.10 commit 7dcf9b7c3ef68455c05202cfd637ced85cd7f32b / run 33837947958 / artifact 9923932300.
+Until V2.12 succeeds, final authority remains V2.11 commit 7e5a295d01748da0255e831ff19d3d31a2da0e3b / run 33872977271 / artifact 9936710832.

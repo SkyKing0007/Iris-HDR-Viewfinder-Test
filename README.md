@@ -1,45 +1,43 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.11
+# Iris HDR Viewfinder Test V1.4.11 V2.12
 
-V2.11 is a localized **saved-HDR scene-domain provenance correction** derived from the exact successful V2.10 Actions compiled candidate (`7dcf9b7c3ef68455c05202cfd637ced85cd7f32b`, run `33837947958`, artifact `9923932300`). V2.10 remains final Actions/runtime authority until V2.11 passes the same authoritative build.
+V2.12 is the **scene-adaptive AUTO exposure + adaptive presentation** build derived from the exact successful V2.11 Actions compiled candidate (`7e5a295d01748da0255e831ff19d3d31a2da0e3b`, run `33872977271`, artifact `9936710832`). V2.11 remains final Actions/runtime authority until V2.12 passes the same authoritative build procedure.
 
-## Why V2.10 failed visually
+## Why AUTO was wrong
 
-The new chandelier capture provided an exact visual failure rather than a threshold guess. The live HDR viewfinder looked reasonable, but the saved FUSED JPEG turned jointly saturated lamp pixels into a flat gray field and created stippled transition texture absent from both SHORT and LONG.
+The supplied AUTO/MANUAL plant-room pair is nearly controlled: both SHORT captures are about `1/120s ISO50`, but AUTO used LONG about `1/120s ISO1556` (~4.96 EV separation) while the visually successful MANUAL used LONG about `1/120s ISO200` (2.00 EV). Fusion was therefore receiving an unnecessarily overexposed LONG in AUTO.
 
-For the jointly near-white lamp population, roughly 96% of saved FUSED pixels landed near `107/255`. That value is reproduced by the V2.10 saved-mode math when a clipped LONG pixel fails SHORT ownership and the `-4.5 EV / gamma 1.55` presentation is applied to LONG. The same registered SHORT/LONG pair proves about `16.905x` SHORT-to-LONG linear scene radiance, which should remain visually bright under the same presentation.
+The active V2.11 controller preserved the initial HAL-derived scene brightness and could let the bracket expand when SHORT hit its physical/flicker/minimum-ISO floor. V2.12 removes that ownership error.
 
-This is therefore a rendering/provenance-order failure, not an alignment failure.
+## V2.12 exposure controller
 
-## V2.11 correction
+AUTO now treats SHORT as the highlight-information anchor. The existing 32x24 paired live-statistics path measures the SHORT highlight tail and chooses a feasible LONG/SHORT separation from actual scene content. On the supplied good scene, the runtime-domain SHORT statistics infer about 4x / 2 EV, matching the successful manual bracket without hard-coding ISO200.
 
-V2.11 changes only `hdr_display.frag` at runtime.
+If SHORT cannot become darker because of sensor/ISO/flicker constraints, LONG is reduced to the achieved SHORT times the learned bracket instead of silently increasing bracket depth. The successful V2.10/V2.11 50/60-Hz timing authority and live hysteresis/update/scene-cut constants are preserved.
 
-Successful V2.10 evidence/support modes 3/4 and the entire live mode=2 remainder are byte-identical. Saved mode=5 now composes provenance in scene-linear space before presentation:
+## Adaptive presentation
 
-`LONG + registered SHORT -> source/radiance provenance -> one common brightness/body/HDR/gamma presentation -> JPEG`
+Capture and presentation are separate owners:
 
-Complete SHORT RGB ownership still requires valid V2.10 registration/source/support evidence. A SHORT sample that is itself too clipped cannot own complete RGB, but when LONG is genuinely multi-channel clipped and the registered/static SHORT proves greater radiance, it may raise only the scene-radiance lower bound. It cannot inject unsupported SHORT texture or hue.
+`scene statistics -> feasible SHORT/LONG capture -> V2.11 GPU fusion -> adaptive global presentation`
 
-Full-resolution SHORT validity is continuous rather than a binary post-tone switch, while the existing low-resolution support atlas remains the spatially coherent ownership context. This removes the failure mode where neighboring pixels alternate between darkened LONG and recovered SHORT and produce stipple not present in either source.
+AUTO learns global Brightness/Gamma from fused-scene statistics. MANUAL keeps the user's Brightness/Gamma sliders authoritative. In both modes, a bounded scene-adaptive clarity controller recalculates dehaze/microcontrast around the current scene and slider presentation.
 
-## Protected V2.10 behavior
+The clarity stage is intentionally conservative: luminance-only, RGB-ratio preserving, a symmetric five-tap range-weighted guide, and explicit noise-floor/strong-edge/highlight protection. It does not use CLAHE, unsharp mask, sharpening, independent RGB dehaze or local-HDR texture synthesis.
 
-- Real AUTO / 50Hz / 60Hz / OFF flicker authority is unchanged.
-- Both actual SHORT and LONG 60Hz-safe timing behavior is unchanged.
-- `CameraController.java` and `MainActivity.java` are byte-identical to successful V2.10.
-- `HdrGlView.java`, `CaptureSetSaver.java`, `JpegFusion.java`, registration/alignment, DNG/orientation, capture temporal ownership and GPU-only production routing are unchanged.
-- No new shader asset, CPU HDR fallback, local sharpening, RGB neighborhood fill or OpenCV dependency is introduced.
+Brightness, Gamma, dehaze and microcontrast freeze together at shutter and are used by saved GPU fusion and written to capture metadata, preventing live/saved presentation drift.
 
-## Permanent visual regressions
+## Protected V2.11 behavior
 
-V2.11 permanently adds the exact chandelier failure: jointly saturated source-supported lamp pixels must not collapse to ~107/255 gray at `-4.5 EV / gamma 1.55`, and stronger source-supported SHORT scene radiance must never render darker at the same clipped LONG location. Recovered boundaries may not create stippled/high-frequency structure absent from both sources.
-
-Retained cloud/window, plant shelf, chandelier, fan/shadow, TV/LED, street-light/headlight, reflection, foliage, skin-highlight and motion cases remain universal post-build visual regressions. Acceptance remains visual at 600–1000% as well as numeric.
+V2.11 scene-domain provenance remains intact. Evidence mode 3 and support mode 4 are byte-pinned; JpegFusion, registration geometry, DNG/orientation, capture temporal ownership and GPU-only saved fusion remain protected. V2.10/V2.11 AUTO/50Hz/60Hz/OFF flicker behavior is unchanged.
 
 ## Runtime scope
 
-Exactly one runtime file changes relative to successful V2.10:
+Exactly five runtime files change relative to successful V2.11:
 
 - `app/src/main/assets/shaders/hdr_display.frag`
+- `app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java`
+- `app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java`
+- `app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java`
+- `app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java`
 
-V2.11 is **PREPARED / UPLOAD-READY**, not build-proven, until GitHub Actions passes the exact successful V2.10 pinned real GLSL compile, real project Java compile, full `:app:assembleDebug`, one-APK proof and post-build frozen-candidate invariance.
+V2.12 is **PREPARED / UPLOAD-READY only after the final clean-extract replay**, and is not build-proven until GitHub Actions passes real glslang, real project javac, full `:app:assembleDebug`, one-APK proof and post-build frozen-candidate invariance.

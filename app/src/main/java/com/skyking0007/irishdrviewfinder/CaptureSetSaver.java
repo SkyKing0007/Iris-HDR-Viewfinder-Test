@@ -43,6 +43,8 @@ final class CaptureSetSaver {
     private final int dngOrientation;
     private final float displayBrightnessEv;
     private final float displayGamma;
+    private final float displayDehaze;
+    private final float displayMicroContrast;
     private final HdrGlView stillFusionView;
     private final Listener listener;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -67,6 +69,8 @@ final class CaptureSetSaver {
             int captureOrientationDegrees,
             float displayBrightnessEv,
             float displayGamma,
+            float displayDehaze,
+            float displayMicroContrast,
             HdrGlView stillFusionView,
             Listener listener) {
         this.context = context.getApplicationContext();
@@ -76,6 +80,8 @@ final class CaptureSetSaver {
         this.dngOrientation = dngOrientationForDegrees(captureOrientationDegrees);
         this.displayBrightnessEv = Math.max(-16.0f, Math.min(1.0f, displayBrightnessEv));
         this.displayGamma = Math.max(0.50f, Math.min(2.00f, displayGamma));
+        this.displayDehaze = Math.max(0.0f, Math.min(1.0f, displayDehaze));
+        this.displayMicroContrast = Math.max(0.0f, Math.min(1.0f, displayMicroContrast));
         this.stillFusionView = stillFusionView;
         this.listener = listener;
     }
@@ -229,6 +235,7 @@ final class CaptureSetSaver {
         }
         stillFusionView.fuseStillJpegs(
                 shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma,
+                displayDehaze, displayMicroContrast,
                 (fused, error) -> {
                     if (error != null || fused == null) {
                         Throwable failure = error == null
@@ -272,12 +279,14 @@ final class CaptureSetSaver {
                 JSONObject root = new JSONObject();
                 root.put("captureId", captureId);
                 root.put("cameraId", cameraId);
-                root.put("fusion", "V2.9 GPU-only multipass saved fusion: LONG reference, source-supported registered SHORT recovery, no CPU HDR substitution");
+                root.put("fusion", "V2.11 GPU-only scene-domain saved fusion + V2.12 adaptive presentation: LONG reference, source-supported registered SHORT recovery, no CPU HDR substitution");
                 root.put("short", resultJson(shortResult));
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));
                 root.put("displayBrightnessEv", displayBrightnessEv);
                 root.put("displayGamma", displayGamma);
+                root.put("displayDehaze", displayDehaze);
+                root.put("displayMicroContrast", displayMicroContrast);
                 Integer sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
                 if (sensorOrientation != null) root.put("sensorOrientation", sensorOrientation);
                 JSONArray physicalIds = new JSONArray();

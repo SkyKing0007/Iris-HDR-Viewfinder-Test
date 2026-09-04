@@ -39,14 +39,74 @@ final class HdrGlView extends GLSurfaceView {
     }
 
     static final class SceneStats {
+        final long shortFrameNumber;
         final long longFrameNumber;
+        final double shortExposureProduct;
         final double longExposureProduct;
-        final float longMedianLinear;
+        final float shortP50Linear;
+        final float shortP95Linear;
+        final float shortP98Linear;
+        final float shortP99Linear;
+        final float shortNearClipFraction;
+        final float longP50Linear;
+        final float longP95Linear;
+        final float longP98Linear;
+        final float longNearClipFraction;
+        final float fusedP05Linear;
+        final float fusedP10Linear;
+        final float fusedP25Linear;
+        final float fusedP50Linear;
+        final float fusedP75Linear;
+        final float fusedP90Linear;
+        final float fusedP95Linear;
+        final float shadowLocalContrast;
+        final float midLocalContrast;
 
-        SceneStats(long longFrameNumber, double longExposureProduct, float longMedianLinear) {
+        SceneStats(
+                long shortFrameNumber,
+                long longFrameNumber,
+                double shortExposureProduct,
+                double longExposureProduct,
+                float shortP50Linear,
+                float shortP95Linear,
+                float shortP98Linear,
+                float shortP99Linear,
+                float shortNearClipFraction,
+                float longP50Linear,
+                float longP95Linear,
+                float longP98Linear,
+                float longNearClipFraction,
+                float fusedP05Linear,
+                float fusedP10Linear,
+                float fusedP25Linear,
+                float fusedP50Linear,
+                float fusedP75Linear,
+                float fusedP90Linear,
+                float fusedP95Linear,
+                float shadowLocalContrast,
+                float midLocalContrast) {
+            this.shortFrameNumber = shortFrameNumber;
             this.longFrameNumber = longFrameNumber;
+            this.shortExposureProduct = shortExposureProduct;
             this.longExposureProduct = longExposureProduct;
-            this.longMedianLinear = longMedianLinear;
+            this.shortP50Linear = shortP50Linear;
+            this.shortP95Linear = shortP95Linear;
+            this.shortP98Linear = shortP98Linear;
+            this.shortP99Linear = shortP99Linear;
+            this.shortNearClipFraction = shortNearClipFraction;
+            this.longP50Linear = longP50Linear;
+            this.longP95Linear = longP95Linear;
+            this.longP98Linear = longP98Linear;
+            this.longNearClipFraction = longNearClipFraction;
+            this.fusedP05Linear = fusedP05Linear;
+            this.fusedP10Linear = fusedP10Linear;
+            this.fusedP25Linear = fusedP25Linear;
+            this.fusedP50Linear = fusedP50Linear;
+            this.fusedP75Linear = fusedP75Linear;
+            this.fusedP90Linear = fusedP90Linear;
+            this.fusedP95Linear = fusedP95Linear;
+            this.shadowLocalContrast = shadowLocalContrast;
+            this.midLocalContrast = midLocalContrast;
         }
     }
 
@@ -115,18 +175,27 @@ final class HdrGlView extends GLSurfaceView {
         requestRender();
     }
 
+    void setDisplayEnhancement(float dehaze, float microContrast) {
+        renderer.displayDehaze = Math.max(0.0f, Math.min(1.0f, dehaze));
+        renderer.displayMicroContrast = Math.max(0.0f, Math.min(1.0f, microContrast));
+        requestRender();
+    }
+
     void fuseStillJpegs(
             byte[] shortJpeg,
             byte[] longJpeg,
             double exposureRatio,
             float brightnessEv,
             float gamma,
+            float dehaze,
+            float microContrast,
             StillFusionCallback callback) {
         if (callback == null) return;
         queueEvent(() -> {
             try {
                 byte[] fused = renderer.fuseStillJpegs(
-                        shortJpeg, longJpeg, exposureRatio, brightnessEv, gamma);
+                        shortJpeg, longJpeg, exposureRatio, brightnessEv, gamma,
+                        dehaze, microContrast);
                 callback.onComplete(fused, null);
             } catch (Throwable t) {
                 callback.onComplete(null, t);
@@ -182,6 +251,8 @@ final class HdrGlView extends GLSurfaceView {
         volatile Mode mode = Mode.HDR;
         volatile float displayBrightnessEv = 0.0f;
         volatile float displayGamma = 1.0f;
+        volatile float displayDehaze = 0.28f;
+        volatile float displayMicroContrast = 0.20f;
         volatile int rotationQuarterTurns = 0;
         volatile boolean producerAxisSwap;
         volatile long droppedFrames = 0;
@@ -199,6 +270,8 @@ final class HdrGlView extends GLSurfaceView {
         private int stagingLongTexture;
         private int statsTexture;
         private int framebuffer;
+        private final ByteBuffer shortStatsBuffer = ByteBuffer.allocateDirect(STATS_PIXELS * 4)
+                .order(ByteOrder.nativeOrder());
         private final ByteBuffer longStatsBuffer = ByteBuffer.allocateDirect(STATS_PIXELS * 4)
                 .order(ByteOrder.nativeOrder());
         private long lastStatsNs;
@@ -492,20 +565,18 @@ final class HdrGlView extends GLSurfaceView {
 
         private void maybePublishSceneStats() {
             SceneStatsListener listener = sceneStatsListener;
-            if (listener == null || !haveLong || lastLongMeta == null) return;
+            if (listener == null || !haveShort || !haveLong
+                    || lastShortMeta == null || lastLongMeta == null) return;
             long now = System.nanoTime();
             if (lastStatsNs != 0L && now - lastStatsNs < STATS_INTERVAL_NS) return;
             lastStatsNs = now;
 
-            readLongTextureStats(longTexture, longStatsBuffer);
-            float median = longMedianLinear(longStatsBuffer);
-            listener.onSceneStats(new SceneStats(
-                    lastLongMeta.frameNumber,
-                    lastLongMeta.exposureProduct(),
-                    median));
+            readTextureStats(shortTexture, shortStatsBuffer);
+            readTextureStats(longTexture, longStatsBuffer);
+            listener.onSceneStats(buildSceneStats(shortStatsBuffer, longStatsBuffer));
         }
 
-        private void readLongTextureStats(int sourceTexture, ByteBuffer target) {
+        private void readTextureStats(int sourceTexture, ByteBuffer target) {
             target.clear();
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
             GLES30.glFramebufferTexture2D(
@@ -523,19 +594,121 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
         }
 
-        private float longMedianLinear(ByteBuffer pixels) {
-            float[] lumas = new float[STATS_PIXELS];
+        private SceneStats buildSceneStats(ByteBuffer shortPixels, ByteBuffer longPixels) {
+            float[] shortLuma = new float[STATS_PIXELS];
+            float[] longLuma = new float[STATS_PIXELS];
+            float[] fusedLuma = new float[STATS_PIXELS];
+            int shortNearClip = 0;
+            int longNearClip = 0;
+            double ratio = Math.max(1.0,
+                    lastLongMeta.exposureProduct() / Math.max(1.0, lastShortMeta.exposureProduct()));
+            float bracketStops = (float) Math.max(1.0, Math.min(6.0, Math.log(ratio) / Math.log(2.0)));
+            float clipStart = Math.max(0.90f, Math.min(0.95f, 0.90f + 0.01f * (bracketStops - 1.0f)));
+
             for (int i = 0; i < STATS_PIXELS; i++) {
                 int o = i * 4;
-                float r = srgbToLinear((pixels.get(o) & 0xFF) / 255.0f);
-                float g = srgbToLinear((pixels.get(o + 1) & 0xFF) / 255.0f);
-                float b = srgbToLinear((pixels.get(o + 2) & 0xFF) / 255.0f);
-                lumas[i] = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                float sr = (shortPixels.get(o) & 0xFF) / 255.0f;
+                float sg = (shortPixels.get(o + 1) & 0xFF) / 255.0f;
+                float sb = (shortPixels.get(o + 2) & 0xFF) / 255.0f;
+                float lr = (longPixels.get(o) & 0xFF) / 255.0f;
+                float lg = (longPixels.get(o + 1) & 0xFF) / 255.0f;
+                float lb = (longPixels.get(o + 2) & 0xFF) / 255.0f;
+
+                float slr = srgbToLinear(sr);
+                float slg = srgbToLinear(sg);
+                float slb = srgbToLinear(sb);
+                float llr = srgbToLinear(lr);
+                float llg = srgbToLinear(lg);
+                float llb = srgbToLinear(lb);
+                shortLuma[i] = 0.2126f * slr + 0.7152f * slg + 0.0722f * slb;
+                longLuma[i] = 0.2126f * llr + 0.7152f * llg + 0.0722f * llb;
+                if (Math.max(sr, Math.max(sg, sb)) >= 0.985f) shortNearClip++;
+                if (Math.max(lr, Math.max(lg, lb)) >= 0.985f) longNearClip++;
+
+                float longPeak = Math.max(lr, Math.max(lg, lb));
+                float longScenePeak = Math.max(0.000001f, Math.max(llr, Math.max(llg, llb)));
+                float shortScenePeak = (float) ratio * Math.max(slr, Math.max(slg, slb));
+                float shortConfidence = smoothstep(0.35f, 0.65f, shortScenePeak / longScenePeak);
+                float highlightWeight = smoothstep(clipStart, 0.995f, longPeak) * shortConfidence;
+                float mergedR = lerp(llr, (float) ratio * slr, highlightWeight);
+                float mergedG = lerp(llg, (float) ratio * slg, highlightWeight);
+                float mergedB = lerp(llb, (float) ratio * slb, highlightWeight);
+                fusedLuma[i] = 0.2126f * mergedR + 0.7152f * mergedG + 0.0722f * mergedB;
             }
-            java.util.Arrays.sort(lumas);
-            int index = Math.max(0, Math.min(lumas.length - 1,
-                    Math.round(0.50f * (lumas.length - 1))));
-            return lumas[index];
+
+            float[] shortSorted = shortLuma.clone();
+            float[] longSorted = longLuma.clone();
+            float[] fusedSorted = fusedLuma.clone();
+            java.util.Arrays.sort(shortSorted);
+            java.util.Arrays.sort(longSorted);
+            java.util.Arrays.sort(fusedSorted);
+            return new SceneStats(
+                    lastShortMeta.frameNumber,
+                    lastLongMeta.frameNumber,
+                    lastShortMeta.exposureProduct(),
+                    lastLongMeta.exposureProduct(),
+                    percentileSorted(shortSorted, 0.50f),
+                    percentileSorted(shortSorted, 0.95f),
+                    percentileSorted(shortSorted, 0.98f),
+                    percentileSorted(shortSorted, 0.99f),
+                    shortNearClip / (float) STATS_PIXELS,
+                    percentileSorted(longSorted, 0.50f),
+                    percentileSorted(longSorted, 0.95f),
+                    percentileSorted(longSorted, 0.98f),
+                    longNearClip / (float) STATS_PIXELS,
+                    percentileSorted(fusedSorted, 0.05f),
+                    percentileSorted(fusedSorted, 0.10f),
+                    percentileSorted(fusedSorted, 0.25f),
+                    percentileSorted(fusedSorted, 0.50f),
+                    percentileSorted(fusedSorted, 0.75f),
+                    percentileSorted(fusedSorted, 0.90f),
+                    percentileSorted(fusedSorted, 0.95f),
+                    localContrastMedian(fusedLuma, 0.005f, 0.080f),
+                    localContrastMedian(fusedLuma, 0.030f, 0.350f));
+        }
+
+        private float localContrastMedian(float[] luma, float low, float high) {
+            float[] values = new float[STATS_PIXELS * 2];
+            int count = 0;
+            for (int y = 0; y < STATS_HEIGHT; y++) {
+                for (int x = 0; x < STATS_WIDTH; x++) {
+                    int i = y * STATS_WIDTH + x;
+                    if (x + 1 < STATS_WIDTH) {
+                        count = appendLocalContrast(values, count, luma[i], luma[i + 1], low, high);
+                    }
+                    if (y + 1 < STATS_HEIGHT) {
+                        count = appendLocalContrast(
+                                values, count, luma[i], luma[i + STATS_WIDTH], low, high);
+                    }
+                }
+            }
+            if (count == 0) return 0.0f;
+            java.util.Arrays.sort(values, 0, count);
+            return values[Math.max(0, Math.min(count - 1, Math.round(0.50f * (count - 1))))];
+        }
+
+        private static int appendLocalContrast(
+                float[] values, int count, float a, float b, float low, float high) {
+            float mean = 0.5f * (a + b);
+            if (mean < low || mean >= high) return count;
+            values[count] = Math.abs(a - b) / Math.max(mean, 0.01f);
+            return count + 1;
+        }
+
+        private static float percentileSorted(float[] sorted, float fraction) {
+            int index = Math.max(0, Math.min(sorted.length - 1,
+                    Math.round(fraction * (sorted.length - 1))));
+            return sorted[index];
+        }
+
+        private static float smoothstep(float edge0, float edge1, float value) {
+            if (edge1 <= edge0) return value >= edge1 ? 1.0f : 0.0f;
+            float t = Math.max(0.0f, Math.min(1.0f, (value - edge0) / (edge1 - edge0)));
+            return t * t * (3.0f - 2.0f * t);
+        }
+
+        private static float lerp(float a, float b, float t) {
+            return a + (b - a) * t;
         }
 
         private static float srgbToLinear(float value) {
@@ -577,6 +750,12 @@ final class HdrGlView extends GLSurfaceView {
                     GLES30.glGetUniformLocation(displayProgram, "displayGamma"),
                     displayGamma);
             GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "displayDehaze"),
+                    displayDehaze);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "displayMicroContrast"),
+                    displayMicroContrast);
+            GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillRegistrationConfidence"),
                     0.0f);
             GLES30.glUniform3f(
@@ -593,7 +772,9 @@ final class HdrGlView extends GLSurfaceView {
                 byte[] longJpeg,
                 double exposureRatio,
                 float brightnessEv,
-                float gamma) throws Exception {
+                float gamma,
+                float dehaze,
+                float microContrast) throws Exception {
             long startedNs = System.nanoTime();
             Bitmap shortBitmap = JpegFusion.decodeUpright(shortJpeg);
             Bitmap longBitmap = JpegFusion.decodeUpright(longJpeg);
@@ -640,8 +821,9 @@ final class HdrGlView extends GLSurfaceView {
             RuntimeLogger.event(
                     "GPU_STILL_FUSION",
                     String.format(java.util.Locale.US,
-                            "V2.9 GPU-only multipass start %dx%d ratio=%.3f scalar=%.3f brightness=%+.1fEV gamma=%.2f",
-                            width, height, exposureRatio, scalarGain, brightnessEv, gamma));
+                            "V2.12 GPU-only multipass start %dx%d ratio=%.3f scalar=%.3f brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
+                            width, height, exposureRatio, scalarGain, brightnessEv, gamma,
+                            dehaze, microContrast));
 
             int shortTexture = 0;
             int longTexture = 0;
@@ -676,17 +858,17 @@ final class HdrGlView extends GLSurfaceView {
                 renderStillPass(
                         evidenceTexture, analysisWidth, analysisHeight,
                         3, longTexture, shortTexture, longTexture,
-                        exposureRatio, brightnessEv, gamma,
+                        exposureRatio, brightnessEv, gamma, dehaze, microContrast,
                         registration.confidence, scalarGain);
                 renderStillPass(
                         supportTexture, analysisWidth, analysisHeight,
                         4, evidenceTexture, shortTexture, longTexture,
-                        exposureRatio, brightnessEv, gamma,
+                        exposureRatio, brightnessEv, gamma, dehaze, microContrast,
                         registration.confidence, scalarGain);
                 renderStillPass(
                         outputTexture, width, height,
                         5, supportTexture, shortTexture, longTexture,
-                        exposureRatio, brightnessEv, gamma,
+                        exposureRatio, brightnessEv, gamma, dehaze, microContrast,
                         registration.confidence, scalarGain);
 
                 ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4)
@@ -743,6 +925,8 @@ final class HdrGlView extends GLSurfaceView {
                 double exposureRatio,
                 float brightnessEv,
                 float gamma,
+                float dehaze,
+                float microContrast,
                 float registrationConfidence,
                 float scalarGain) {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
@@ -780,6 +964,12 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "displayGamma"),
                     Math.max(0.50f, Math.min(2.00f, gamma)));
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "displayDehaze"),
+                    Math.max(0.0f, Math.min(1.0f, dehaze)));
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(displayProgram, "displayMicroContrast"),
+                    Math.max(0.0f, Math.min(1.0f, microContrast)));
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillRegistrationConfidence"),
                     registrationConfidence);
