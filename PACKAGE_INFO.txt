@@ -1,39 +1,39 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.9 GPU-ONLY UNIVERSAL SOURCE-SUPPORTED FUSION PACKAGE INFO
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.10 VISUAL/EFFECTIVE CLIPPING + REAL FLICKER AUTHORITY PACKAGE INFO
 
 STATUS
 PREPARED / UPLOAD-READY, NOT BUILD-PROVEN.
 No source commit or push performed by ChatGPT.
-No backup created, per explicit user instruction.
+No backup created; this is a localized correction and exact rollback is carried by hashes/patch mechanics.
 
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 26
-Target versionName: 1.0-v1.4.11-v2.9
+Target versionCode: 27
+Target versionName: 1.0-v1.4.11-v2.10
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: 6fe30dc1a516edd17a5dce70f20c5f28ce620b11
-Tree: c86a12cb873f40c8c1d7af3ec62b630cefd7fca5
-GitHub Actions run: 33825853402 — SUCCESS
-Artifact ID: 9919936639
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.8
-Artifact digest: sha256:a27946f49e811ae99e2a0137b409ad8688f7e5bccc2f22870b012ba05e777c73
-V2.8 APK SHA-256: 510f3d6c37440ab4ff2fd86d5207e339811ccca92b29e4a4f66bad4aeae10780
-V2.8 source-candidate TAR SHA-256: 060b4a57bdbda7839d16f1bd52e619e44e587186a87b509b72117e8252371863
-V2.8 runtime manifest SHA-256: 8a09f550fd23b97d23b49af41b001b86b90125fdf034979cdb6ddf8fe27372ef
-V2.8 repository manifest SHA-256: efa7e8e219e453a95c9878f86d3d5648d9353b228724c395a145e64f983ac05b
-V2.8 regressions SHA-256: 3e00f2db3a165b57eb74ae83d1460faa2b10dc7d26dcb87ddd554448b6692d4e
+Commit: dcf49e339b3ecb89b032884b258fd2586e4b8b32
+Tree: 5b264cb7cc76f0f86b9c2a4a87e2cdb011f27451
+GitHub Actions run: 33834010078 — SUCCESS
+Artifact ID: 9922681173
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.9
+Artifact digest: sha256:de2be3e297690812527f291f537f7d12aa84b7675521adbbe45856fc5034d66c
+V2.9 APK SHA-256: 56d09bf8865891bfb7eb879b4bff330d2c7897ad69b752ee0082f5f438500996
+V2.9 source-candidate TAR SHA-256: bdbf8aadf32b1fe8ad39c733236a2c6402fd7e6919e498b7bc72b12ca70e0db2
+V2.9 runtime manifest SHA-256: d47cb8994e75cc345d88253071eff10aadcb055756d60d0b40fb76bc6d3ad251
+V2.9 repository manifest SHA-256: 9e48808787ecedcd7755941ff13f18965dbcfbfdeae16afb908e835a5a545300
+V2.9 regressions SHA-256: dff657f68922c98ff902d38befcaaa35a3642f87c819285f97b17f7f771e2429
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.8 workflow/build implementation and 15-step sequence.
+Exact successful V2.9 workflow/build implementation, inherited from successful V2.8, and its 15-step sequence.
 No compiler/build/patch/freeze stage is added, removed, reordered, simplified or substituted.
-The real GLSL, real Java compiler and full :app:assembleDebug commands remain exactly the V2.8 commands.
+The pinned glslangValidator, real Java compiler and full :app:assembleDebug commands remain exactly the successful V2.9 commands.
 
 INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 3
 - app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
 INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - .github/workflows/build.yml
@@ -48,45 +48,55 @@ CANDIDATE METADATA / DELIVERY CHANGES
 - app/build.gradle.kts
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-YES, NARROWLY. Authority/version/hash/allowlist/artifact names and permanent V2.9 regressions advance, while the successful V2.8 verification/build procedure, action versions, compiler commands and step order stay unchanged.
+YES, NARROWLY. Only authority/version/hash/allowlist/artifact/regression-validation payload advances for V2.10. Step order, action versions, compiler commands, deterministic patch mechanics, candidate freeze, build command and artifact sequence remain unchanged from successful V2.9/V2.8 mechanics.
 
-V2.9 RUNTIME DIGEST
-d47cb8994e75cc345d88253071eff10aadcb055756d60d0b40fb76bc6d3ad251
+V2.10 RUNTIME DIGEST
+43dc5cb682b478f9b701029c52404d0cb26c780caec8557c50805c033cd7bc78
 Runtime universe remains exactly 12 files; no runtime file is added or deleted.
 
-V2.9 UNIVERSAL SAVED-FUSION CORRECTION
-- Normal production FUSED_HDR is GPU-only. CaptureSetSaver no longer substitutes JpegFusion.fuse after a GPU failure.
-- JpegFusion.java remains byte-identical to successful V2.8; its proven decode/registration/alignment utilities remain available, but its independent CPU HDR output is not a production authority.
-- Existing successful V2.8 decode, forward/backward registration, SHORT-to-LONG alignment and appearance-calibration prelude in HdrGlView are byte-pinned unchanged.
-- The existing hdr_display.frag file is reused for all saved GPU passes; no new shader asset or shader-file universe is introduced.
-- Saved fusion is three GPU passes: conservative source evidence, isotropic/topology support, then final provenance composition.
-- Broad recovery requires genuine multi-channel LONG loss, valid non-clipped SHORT, scalar radiometric proof, static/source support and registration confidence.
-- Compact emitters/speculars use a stricter source-supported path so legitimate street lights/headlights/LEDs can recover without admitting random small ownership islands.
-- Nearby SHORT saturation vetoes broad/feather recovery to prevent cyan/colored rings around clipped bulbs.
-- Production recovery uses one scalar SHORT radiometric gain rather than independent R/G/B gain ownership.
-- Proven cores select one source exactly; only a conservative boundary may feather.
-- Recovered highlight display remains LONG-anchored while SHORT supplies supported local structure/color, preventing the prior near-white flattening and fused-only bright geometry.
-- Structural/temporal disagreement fails closed instead of mixing two different moments; the spinning-fan/shadow case in the supplied chandelier set is an explicit regression rationale.
-- Live mode=2 remains the successful V2.8 physical-ratio HDR path and is protected by regression checks.
+V2.10 REAL 50/60-HZ FLICKER AUTHORITY
+- User authority is explicit AUTO / 60Hz / 50Hz / OFF.
+- AUTO claims safety only when Camera2 explicitly reports 50Hz or 60Hz; NONE is AUTO UNSAFE(none), unknown/PWM is AUTO UNSAFE(unknown/PWM).
+- Explicit 60Hz uses integer 8,333,333ns integration cycles when sensor exposure/ISO limits allow; explicit 50Hz uses integer 10,000,000ns cycles.
+- BOTH SHORT and LONG are projected onto the safe integration lattice when safety is active; LONG ISO is adjusted preferentially to preserve target exposure energy while SHORT retains minimum-ISO preference.
+- Initial AUTO anchor and subsequent live AUTO solving use the same safe-period projection when a real frequency is authoritative.
+- If legal sensor exposure/ISO bounds cannot satisfy the requested exposure safely, V2.10 reports UNSAFE instead of silently claiming protection.
+- Existing 60-FPS exposure ceiling remains authoritative.
+- AUTO bootstrap/live metering convergence constants are intentionally unchanged; the reported settling delay did not justify unrelated retuning.
 
-REAL-PHOTO / ARTIFACT REPLAY BEFORE FINAL SOURCE FREEZE
-The universal rule was replayed against the retained outdoor cloud/window sets and the new chandelier/plant-shelf sets, including high-zoom artifact crops.
-- The prior fused-only cyan bulb rings, white plant outlines, orange/bright strips and geometric ownership islands are treated as unsupported-source failures, not scene-specific tuning targets.
-- Broad smooth clipped regions remain recoverable when radiometric/static/source evidence is coherent.
-- Compact real emitters remain eligible only through the stricter compact path.
-- Moving/dark transient structure in the chandelier fan/shadow case is rejected rather than painted into the recovered ceiling.
-- No scene coordinates, object classes, device-specific colors or chandelier/plant-specific thresholds are used by runtime code.
+V2.10 UNIVERSAL VISUAL/EFFECTIVE CLIPPING CORRECTION
+- V2.9 GPU-only production saved fusion and three-pass evidence/support/provenance architecture are preserved.
+- HdrGlView, CaptureSetSaver and JpegFusion remain byte-identical to successful V2.9; registration/alignment is not redesigned.
+- Hard clipping remains a valid recovery trigger when multi-channel LONG saturation and trustworthy SHORT evidence agree.
+- Effective/visual clipping is now also detected in bright LONG regions when aligned SHORT proves source-corresponding local dynamic-range/gradient recovery or coherent chroma that LONG flattened/neutralized.
+- Below hard clipping, a changed TV/LED/flicker phase cannot qualify from brightness/color difference alone: structural gradient correspondence or less-damaged LONG color topology must support SHORT evidence.
+- Saturated/invalid center SHORT still fails closed. Nearby SHORT saturation is contextual confidence rather than a one-pixel poison radius, so a saturated filament cannot automatically veto valid surrounding glass/metal/surface recovery.
+- Valid owned SHORT preserves complete source-supported RGB/chromaticity; V2.9's compact 15% chroma collapse and neutralSafety rejection are intentionally superseded.
+- Recovered highlight luma is sourced from the mapped SHORT response and remains gamut-bounded, preserving source-supported local brightness ranking/contrast rather than forcing different highlights toward one bright plateau.
+- Proven cores still select one source exactly; only conservative boundaries may feather. Temporal/structural/flicker uncertainty fails closed rather than creating a blended third image.
+- Live mode=2 remains byte-identical from the protected V2.9 shader remainder.
+
+SOURCE-EQUIVALENT / ADVERSARIAL PRE-FREEZE REGRESSIONS
+- Hard multi-channel clipping + valid radiometric SHORT remains recoverable.
+- Effective local-range loss with corresponding gradients remains recoverable.
+- Coherent SHORT chroma loss can count as visual clipping.
+- Healthy valid LONG stays LONG.
+- Changed TV/LED evidence with no gradient/color-topology correspondence fails closed.
+- One saturated nearby SHORT sample does not poison recovery; broad nearby saturation suppresses confidence.
+- Retained cloud/window/chandelier/plant/fan cases remain device visual regressions after build; no scene coordinates/object classes/device-specific colors are encoded in runtime logic.
 
 LOCAL VERIFICATION STATUS BEFORE ACTIONS
+Exact V2.9 artifact authority hash/manifests: PASS.
 Workflow/copy byte equality: PASS.
-V2.8 -> V2.9 normalized workflow step order: 15/15 identical.
-Action versions: unchanged.
+V2.9 -> V2.10 workflow step order/action/compiler command mechanics: intended unchanged; replayed before packaging.
 Workflow embedded-Python syntax: PASS.
-Full V2.9 packaged regression verifier: PASS.
 Complete GLSL/GLSL ES reserved-identifier scan: PASS on all four shaders.
-Pinned real glslangValidator for modified V2.9 shader: NOT RUN locally; GitHub Actions must run the exact V2.8 pinned compiler command.
-Real project Java compiler for modified V2.9 Java: NOT RUN locally; GitHub Actions must run :app:compileDebugJavaWithJavac.
-Full Android :app:assembleDebug for V2.9: NOT RUN locally; GitHub Actions remains authoritative.
+Packaged V2.10 regression verifier: PASS before packaging.
+Protected HdrGlView/CaptureSetSaver/JpegFusion byte identity: PASS.
+Protected live mode=2 shader remainder byte identity: PASS.
+Pinned real glslangValidator for modified V2.10 shader: NOT RUN locally; GitHub Actions must run the exact successful V2.9 pinned command.
+Real project Java compiler for modified V2.10 Java: NOT RUN locally; GitHub Actions must run :app:compileDebugJavaWithJavac.
+Full Android :app:assembleDebug for V2.10: NOT RUN locally; GitHub Actions remains authoritative.
 
 FINAL ACTIONS AUTHORITY
-Until V2.9 succeeds, final authority remains V2.8 commit 6fe30dc1a516edd17a5dce70f20c5f28ce620b11 / run 33825853402 / artifact 9919936639.
+Until V2.10 succeeds, final authority remains V2.9 commit dcf49e339b3ecb89b032884b258fd2586e4b8b32 / run 33834010078 / artifact 9922681173.

@@ -20,7 +20,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.9 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.10 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -50,7 +50,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.9 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.10 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -256,8 +256,8 @@ require('float shortOwnership = computeShortOwnership(' in fusion
         and 'float mr = lr + (sr - lr) * shortOwnership;' in fusion,
         "protected V2.8 JpegFusion reference implementation must retain its complete-RGB hard-core regression")
 require('mergedScene = mix(longScene, shortScene, highlightWeight);' in hdr_shader
-        and 'V2.9 saved fusion is GPU-only and deliberately multi-pass' in hdr_shader,
-        "V2.9 must separate GPU-only saved provenance from unchanged live physical-ratio merge")
+        and 'V2.10 saved fusion remains GPU-only and deliberately multi-pass' in hdr_shader,
+        "V2.10 must separate GPU-only saved provenance from unchanged live physical-ratio merge")
 require('brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
         and 'float tr = mr * brightnessGain;' in fusion
         and 'targetBodyY = bodyY + 0.45f * toe * highlightProtect' in fusion,
@@ -372,21 +372,41 @@ require('60 FPS CROP: ON' in main and '60 FPS CROP: OFF' in main,
 require('FOV_OVERRIDE' in camera and 'allowCropped60Fps' in camera,
         "cropped-60 override must be explicit and logged")
 
-# 019 / 029 - Flicker-aware clean AE anchor and manual pair preserve temporal integration.
-require('CaptureResult.STATISTICS_SCENE_FLICKER' in camera,
-        "Camera2 scene-flicker evidence missing")
-require('CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO' in camera,
-        "clean AE meter must request HAL automatic antibanding")
-require('STATISTICS_SCENE_FLICKER_50HZ' in camera and 'STATISTICS_SCENE_FLICKER_60HZ' in camera,
-        "50/60-Hz evidence labels must remain explicit")
-require('chooseAutoFlickerAlignedShortLocked' not in camera and 'autoTargetBracketEvLocked' not in camera,
-        "V1.4.8+ wide-aperture flicker-short solver must not survive fixed-3EV restore")
-require('autoShortExposureNs = autoLongExposureNs;' in camera,
-        "50/60-Hz and unknown/PWM must preserve V1.4.7 same-integration behavior")
-require('Proven V1.4.7 flicker-safe behavior' in camera,
-        "fixed-3EV flicker-safe ownership contract missing")
-require('sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE' in camera,
-        "no-flicker direct 8x desired-SHORT branch missing")
+# 019 / 020 / 044 - V2.10 real 50/60-Hz authority. AUTO is only safe when
+# Camera2 proves 50/60; explicit 50/60 applies integer mains cycles to BOTH
+# SHORT and LONG when sensor exposure/ISO bounds permit. OFF is explicit.
+for token in [
+    'FLICKER_MODE_AUTO = 0', 'FLICKER_MODE_50HZ = 1', 'FLICKER_MODE_60HZ = 2', 'FLICKER_MODE_OFF = 3',
+    'FLICKER_50_PERIOD_NS = 10_000_000L', 'FLICKER_60_PERIOD_NS = 8_333_333L',
+    'void setFlickerMode(int mode)', 'aeAntibandingModeLocked()', 'effectiveFlickerPeriodNsLocked()',
+    'solveFlickerSafeSettingForProductLocked(', 'solveMinimumIsoFlickerSettingLocked(',
+    'AUTO UNSAFE(none)', 'AUTO UNSAFE(unknown/PWM)'
+]:
+    require(token in camera, f"V2.10 flicker authority missing {token}")
+require('CaptureResult.STATISTICS_SCENE_FLICKER' in camera
+        and 'STATISTICS_SCENE_FLICKER_50HZ' in camera
+        and 'STATISTICS_SCENE_FLICKER_60HZ' in camera,
+        "Camera2 50/60-Hz evidence must remain explicit")
+require('CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ' in camera
+        and 'CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ' in camera
+        and 'CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF' in camera
+        and 'CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO' in camera,
+        "AUTO/50/60/OFF must map to real Camera2 antibanding requests")
+require('flickerMode == FLICKER_MODE_AUTO' in camera
+        and 'sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE' in camera,
+        "AUTO must distinguish Camera2 NONE from proven 50/60")
+require('safeLong = solveFlickerSafeSettingForProductLocked' in camera
+        and 'safeShort = solveMinimumIsoFlickerSettingLocked' in camera,
+        "safe AUTO/MANUAL pair must solve BOTH LONG and SHORT timing")
+require('Proven V1.4.7 flicker-safe behavior' not in camera,
+        "obsolete one-sided V1.4.7 flicker contract must be retired")
+require('STATE_FLICKER_MODE' in main and 'flickerButton.setOnClickListener' in main
+        and 'FLICKER AUTO:' in main and 'FLICKER 60Hz:' in main and 'FLICKER 50Hz:' in main and 'FLICKER OFF:' in main,
+        "V2.10 user-visible AUTO/60/50/OFF authority is incomplete")
+# Exposure convergence constants are intentionally frozen; flicker correction must not masquerade as metering retuning.
+require('AUTO_METER_MIN_FRAMES = 4' in camera and 'AUTO_METER_MAX_FRAMES = 12' in camera
+        and 'AUTO_METER_STABLE_FRAMES = 3' in camera and 'AUTO_METER_STABLE_EV = 0.18' in camera,
+        "V2.10 must not randomly retune bootstrap metering constants")
 
 # 023 - On-device DNG Orientation=9 regression: DNG must always receive explicit valid TIFF orientation.
 require('import android.media.ExifInterface;' in saver,
@@ -441,54 +461,41 @@ require('CaptureRequest.CONTROL_ZOOM_RATIO' not in camera
         and 'CaptureRequest.SCALER_CROP_REGION' not in camera,
         "FOV policy must not fake parity by digitally cropping or zooming requests")
 
-# 027 / 031 - MANUAL SAFE keeps flicker-compatible timing; ISO slider owns LONG only and SHORT uses min gain.
+# 027 / 031 - V2.10 MANUAL SAFE uses one explicit flicker authority for BOTH shutters.
 require('recomputeManualFlickerSafetyLocked' in camera,
         "MANUAL flicker-safe exposure owner missing")
 require('manualEffectiveShortExposureNs' in camera and 'manualEffectiveLongExposureNs' in camera,
         "requested and effective MANUAL shutters must remain separate")
 require('manualEffectiveShortIso = minIso;' in camera,
-        "MANUAL SHORT must use sensor minimum gain")
-require('manualEffectiveLongIso = manualIso;' in camera
-        and 'manualEffectiveLongIso = solveIsoForProduct' in camera,
-        "manual ISO slider must own LONG gain / preserved LONG exposure product")
-require('chooseManualFlickerSafeExposureLocked' in camera,
-        "50/60-Hz manual shutter solver missing")
-require('10_000_000L' in camera and '8_333_333L' in camera,
-        "50/60-Hz integration periods missing")
+        "MANUAL SHORT must preserve sensor-minimum-gain preference")
+require('solveFlickerSafeSettingForProductLocked' in camera and 'solveMinimumIsoFlickerSettingLocked' in camera,
+        "V2.10 50/60-Hz pair solvers missing")
 require('MANUAL_SAFE' in camera and 'HDR MANUAL SAFE' in main,
         "user-visible safe MANUAL ownership missing")
-require('longISO' in camera and 'Short=min' in main,
-        "LONG-only ISO ownership must be visible")
 require('MANUAL_FLICKER' in camera,
         "manual flicker decision must be logged")
-# V2.5 device regression: MANUAL SAFE may adjust LONG for flicker, but must never
-# collapse the user-selected SHORT shutter onto LONG or silently swap the controls.
-manual_recompute = camera[camera.index('private boolean recomputeManualFlickerSafetyLocked()'):camera.index('private long chooseManualFlickerSafeExposureLocked')]
+manual_recompute = camera[camera.index('private boolean recomputeManualFlickerSafetyLocked()'):camera.index('private int effectiveFlickerLocked()')]
 manual_setter = camera[camera.index('void setManualSettings'):camera.index('void onHdrSceneStats')]
-require('manualEffectiveShortExposureNs = shortExposureNs;' in manual_recompute,
-        "MANUAL SAFE must preserve the selected SHORT physical shutter")
-require('safeLongExposure = chooseManualFlickerSafeExposureLocked(longExposureNs, sceneFlicker);' in manual_recompute,
-        "flicker-safe solver must adjust LONG independently")
-require('manualEffectiveShortExposureNs = commonExposure;' not in manual_recompute
-        and 'manualEffectiveLongExposureNs = commonExposure;' not in manual_recompute,
-        "MANUAL SAFE must never collapse SHORT and LONG onto one common shutter")
+require('safeLong = solveFlickerSafeSettingForProductLocked' in manual_recompute
+        and 'safeShort = safeLong == null ? null : solveMinimumIsoFlickerSettingLocked' in manual_recompute,
+        "MANUAL SAFE must project both LONG and SHORT onto the authoritative mains lattice")
+require('manualEffectiveShortExposureNs = safeShort.exposureNs;' in manual_recompute
+        and 'manualEffectiveLongExposureNs = safeLong.exposureNs;' in manual_recompute,
+        "safe MANUAL pair must publish both solved integration windows")
+require('manualEffectiveLongIso = safeLong.iso;' in manual_recompute
+        and 'manualEffectiveShortIso = safeShort.iso;' in manual_recompute,
+        "safe MANUAL pair must publish ISO compensation with SHORT minimum-gain preference")
 require('if (shortExposureNs > longExposureNs)' in manual_setter
         and 'shortExposureNs = longExposureNs;' in manual_setter,
-        "SHORT crossing LONG must clamp SHORT at LONG")
+        "SHORT crossing LONG must still clamp SHORT at LONG")
 require('long tmp = shortExposureNs;' not in manual_setter,
         "manual controls must not silently swap SHORT and LONG")
-def manual_safe_period_snap(requested_long_ns, period_ns):
-    periods = max(1, round(requested_long_ns / period_ns))
-    return periods * period_ns
-manual_fixture_short = 1_000_000_000 / 240.0
-manual_fixture_long = 1_000_000_000 / 50.0
-manual_fixture_safe_long = manual_safe_period_snap(manual_fixture_long, 8_333_333.0)
-require(math.isclose(manual_fixture_short, 4_166_666.666666667, rel_tol=1e-9),
-        "1/240s manual SHORT fixture changed")
-require(math.isclose(manual_fixture_safe_long, 16_666_666.0, rel_tol=1e-6),
-        "60-Hz MANUAL SAFE LONG fixture must snap near 1/60s")
-require(not math.isclose(manual_fixture_short, manual_fixture_safe_long, rel_tol=0.01),
-        "exact device regression: requested 1/240s SHORT must not collapse onto flicker-safe LONG")
+def integer_cycle(exposure_ns, period_ns):
+    return abs(exposure_ns / period_ns - round(exposure_ns / period_ns)) < 2e-6
+require(integer_cycle(10_000_000.0, 10_000_000.0) and integer_cycle(8_333_333.0, 8_333_333.0),
+        "50/60-Hz base periods must be exact integration-lattice members")
+require(integer_cycle(20_000_000.0, 10_000_000.0) and integer_cycle(16_666_666.0, 8_333_333.0),
+        "multi-cycle LONG windows must remain mains-safe")
 
 # 028 - Production logger for device freezes/crashes without turning logging into a frame-rate owner.
 require('final class RuntimeLogger' in main,
@@ -602,13 +609,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.9 - Exact current pre-handoff authority pin regression.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.8' in workflow
-        and 'run-id: 33825853402' in workflow
-        and "authority='6fe30dc1a516edd17a5dce70f20c5f28ce620b11'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.8 Actions authority")
-require('run-id: 33813880497' not in workflow,
-        "V1.4.11 V2.9 must not use V2.7 as runtime authority after successful V2.8")
+# 038 / 042 / V2.10 - Exact successful V2.9 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.9' in workflow
+        and 'run-id: 33834010078' in workflow
+        and "authority='dcf49e339b3ecb89b032884b258fd2586e4b8b32'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.9 Actions authority")
+require("authority='6fe30dc1a516edd17a5dce70f20c5f28ce620b11'" not in workflow,
+        "V2.10 must not seed runtime from V2.8 after successful V2.9")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must be isolated to its experimental branch")
 
@@ -738,107 +745,117 @@ require('uniform float stillRegistrationConfidence;' in hdr_shader
         and 'uniform float stillShortScalarGain;' in hdr_shader
         and 'glUniform1f' in gl and 'stillRegistrationConfidence' in gl
         and 'stillShortScalarGain' in gl,
-        "V2.9 GPU saved path must receive registration confidence and one scalar SHORT radiometric gain")
-require('IRIS_V29_GPU_PROVENANCE_BEGIN' in hdr_shader
-        and 'stillScalarRadiometricRatio' in hdr_shader
-        and 'srgbToLinear(shortRgb) * stillShortScalarGain' in hdr_shader,
-        "V2.9 radiometric proof must use a common scalar gain and preserve SHORT RGB relationships")
-v29_block = hdr_shader[hdr_shader.index('// IRIS_V29_GPU_PROVENANCE_BEGIN'):
-                       hdr_shader.index('// IRIS_V29_GPU_PROVENANCE_END')]
-require('stillShortLinearGain' not in v29_block,
-        "independent per-channel appearance gain must not participate in V2.9 production ownership/recovery")
-require('broadSeedAt' in hdr_shader
-        and 'stillStaticConfidenceAt' in hdr_shader
-        and 'shortSaturationNearbyAt' in hdr_shader
-        and 'compactBaseSeedAt' in hdr_shader
-        and 'compactNeighborhoodSupportAt' in hdr_shader,
-        "V2.9 universal broad/compact/source-validity evidence functions are incomplete")
+        "V2.10 GPU saved path must retain registration confidence and one scalar SHORT radiometric gain")
+require('IRIS_V210_VISUAL_LOSS_BEGIN' in hdr_shader
+        and 'visualLossProofAt' in hdr_shader
+        and 'effectiveGradientCorrespondenceAt' in hdr_shader
+        and 'chromaTopologySupportAt' in hdr_shader
+        and 'shortSaturationContextAt' in hdr_shader,
+        "V2.10 visual/effective clipping evidence path is incomplete")
+v210_block = hdr_shader[hdr_shader.index('// IRIS_V210_VISUAL_LOSS_BEGIN'):
+                        hdr_shader.index('// IRIS_V210_VISUAL_LOSS_END')]
+require('stillShortLinearGain' not in v210_block,
+        "independent per-channel appearance gain must not participate in V2.10 production ownership/recovery")
+require('shortSaturationNearbyAt' not in hdr_shader
+        and 'neutralSafety' not in hdr_shader
+        and 'vec3 chroma = (shortRgb - vec3(shortEncodedY)) * 0.15;' not in hdr_shader
+        and 'recoveredCompactDisplay' not in hdr_shader,
+        "V2.10 must supersede binary nearby-saturation poison and compact near-neutral chroma")
+require('float hardLoss = smoothstep(0.985, 0.998, longSecond)' in hdr_shader
+        and 'float effectiveRegime = smoothstep(0.90, 0.975, longSecond) * longBright;' in hdr_shader
+        and 'max(rangeLoss, chromaLoss)' in hdr_shader,
+        "V2.10 must distinguish hard clipping from effective/visual clipping")
+require('rangeLoss' in hdr_shader and '* effectiveGradientCorrespondenceAt(sampleUv)' in hdr_shader
+        and 'chromaLoss' in hdr_shader and '* chromaTopologySupportAt(sampleUv)' in hdr_shader,
+        "below-hard-clipping recovery must require source-corresponding structure/color evidence")
+require('stillShortValidity(shortRgb)' in hdr_shader
+        and 'float centerShortValid = step(0.55, stillShortValidity(shortRgb));' in hdr_shader,
+        "saturated/invalid center SHORT must fail closed")
+require('shortSaturationContextAt(uv)' in hdr_shader
+        and '1.0 - smoothstep(0.30, 0.75, shortSaturationContextAt(uv))' in hdr_shader
+        and '1.0 - smoothstep(0.30, 0.75, centerEvidence.a)' in hdr_shader,
+        "nearby SHORT saturation must be contextual confidence rather than one-pixel poison")
 require('isotropic = min(isotropic' in hdr_shader
         and '2.0 * analysisTexel.x' in hdr_shader
         and '2.0 * analysisTexel.y' in hdr_shader
         and 'float broadCore = smoothstep(0.63, 0.69, isotropic)' in hdr_shader,
-        "broad recovery must require isotropic low-resolution support rather than fragmented pixel islands")
+        "broad recovery must retain isotropic topology support")
 require('float compactCore = step(0.65, compactSeed)' in hdr_shader
         and 'smoothstep(0.11, 0.16, compactSupport)' in hdr_shader
         and 'compactStructure' in hdr_shader,
-        "compact emitters must require strict local source support")
+        "compact emitters must retain strict source support")
 require('float core = max(broadCore, compactCore);' in hdr_shader
         and 'float shortOwnership = core > 0.5 ? 1.0 : partialOwnership;' in hdr_shader,
-        "proven V2.9 cores must select one source exactly; only the conservative boundary may feather")
-require('recoveredBroadDisplay' in hdr_shader
-        and 'recoveredCompactDisplay' in hdr_shader
-        and 'linearLuma(longDisplay) * exp2(detailStrength * detail)' in hdr_shader
-        and 'vec3 chroma = (shortRgb - vec3(shortEncodedY)) * 0.15;' in hdr_shader,
-        "recovered highlight presentation must preserve SHORT-supported detail while anchoring low-frequency brightness to LONG")
-require('displayLinear = mix(longDisplay, recovered, shortOwnership);' in hdr_shader
-        and 'applyDisplayGamma(displayLinear, displayGamma)' in hdr_shader,
-        "V2.9 final GPU composition must merge provenance in display-linear space before Gamma")
+        "proven cores must select one source exactly; only conservative boundary may feather")
+require('recoveredSourceDisplay' in hdr_shader
+        and 'gamutSafeScaleToLuma(shortLinear, targetY)' in hdr_shader
+        and 'displayLinear = mix(longDisplay, recovered, shortOwnership);' in hdr_shader,
+        "owned highlights must preserve complete source-supported SHORT RGB/chromaticity")
+require('brightnessGain, 1.00, 1.00);' in hdr_shader
+        and 'brightnessGain, 0.55, 1.00);' in hdr_shader
+        and 'brightnessGain, 0.85, 0.96);' not in hdr_shader
+        and 'brightnessGain, 1.00, 0.96);' not in hdr_shader,
+        "owned core highlights must preserve SHORT tonal ranking without an arbitrary 0.96 plateau; only boundary ownership may blend")
 require('evidenceTexture = createTexture2d();' in gl
         and 'supportTexture = createTexture2d();' in gl
         and 'int analysisWidth = Math.max(1, (width + 7) / 8);' in gl
         and 'int analysisHeight = Math.max(1, (height + 7) / 8);' in gl,
-        "V2.9 multipass evidence/support textures must be bounded 1/8-resolution allocations")
+        "V2.10 must reuse the proven bounded V2.9 multipass evidence/support allocations")
 require('private static float median3(float a, float b, float c)' in gl
         and 'float scalarGain = median3(appearanceGain.r, appearanceGain.g, appearanceGain.b);' in gl,
-        "V2.9 must collapse the proven overlap calibration to one scalar for production radiometric proof")
-require('GLES30.glUniform3f(' in gl
-        and '1.0f, 1.0f, 1.0f);' in gl
-        and 'GLES30.glUniform1f(' in gl
-        and 'stillShortScalarGain' in gl,
-        "per-channel saved gain uniform must be neutralized while scalar gain is supplied")
+        "scalar radiometric calibration must remain unchanged")
 require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
-        "V2.9 must reuse the exact V2.8 shader-file universe; no new still shader asset is allowed")
+        "V2.10 must reuse the exact V2.9 shader-file universe; no new still shader asset is allowed")
 require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java').read_bytes()).hexdigest()
         == '7f420d891ba89acd385f643b1aa337eecf8726fb660ebf8143744ee6ae829c0d',
-        "JpegFusion.java must remain byte-identical to successful V2.8 while production HDR authority moves to GPU")
-gl_reg_start = gl.index('            Bitmap shortBitmap = JpegFusion.decodeUpright(shortJpeg);')
-gl_reg_end_token = '                    JpegFusion.estimateAppearanceGain(shortBitmap, longBitmap, exposureRatio);'
-gl_reg_end = gl.index(gl_reg_end_token, gl_reg_start) + len(gl_reg_end_token)
-require(hashlib.sha256(gl[gl_reg_start:gl_reg_end].encode()).hexdigest()
-        == '25cb336e6cef0cb5b1fdfed5b88dd631eaa00232617cf757ba80382b14dfa06b',
-        "V2.9 must preserve the successful V2.8 decode/registration/alignment/gain-estimation prelude byte-for-byte")
-require('float srPerChannel = SRGB_TO_LINEAR[sr8] * appearanceGain.r;' in fusion
-        and 'float sgPerChannel = SRGB_TO_LINEAR[sg8] * appearanceGain.g;' in fusion
-        and 'float sbPerChannel = SRGB_TO_LINEAR[sb8] * appearanceGain.b;' in fusion
-        and 'float sr = srPerChannel + (srScalar - srPerChannel) * shortCoreOwnership;' in fusion
-        and 'float mr = lr + (sr - lr) * shortOwnership;' in fusion,
-        "CPU output must keep complete registered SHORT RGB and may change only its common core exposure scale")
+        "JpegFusion.java must remain byte-identical to successful V2.9/V2.8")
+require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java').read_bytes()).hexdigest()
+        == '7816f7627c2e0732b7875c9a22abc63d3ad14ee1cfb834cbb46287815fd592ca',
+        "HdrGlView.java must remain byte-identical to successful V2.9")
+require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java').read_bytes()).hexdigest()
+        == 'cc44224cac790d875e8e78bf2559eec0494c45b7d48051a71bba778d8581f48b',
+        "CaptureSetSaver.java must remain byte-identical to successful V2.9")
 require('liftShortProvenanceRgb' not in hdr_shader
-        and 'buildShortProvenanceLiftLut' not in fusion
-        and 'mergeStillLumaAndChroma' not in hdr_shader
-        and 'mergeStillLumaAndChroma' not in fusion,
-        "V2.6 power lift or old luma/chroma hybrid must not survive V2.7")
+        and 'mergeStillLumaAndChroma' not in hdr_shader,
+        "older power-lift/luma-chroma hybrid paths must remain retired")
 require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
-        "saved V2.7 may sample fixed scalar support only; no alternate neighborhood RGB fetch path")
+        "saved path may sample fixed scalar support only; no alternate neighborhood RGB fill")
 require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kts').read_text().lower(),
         "OpenCV must remain simulation-only and absent from runtime")
 
-# V2.9 universal saved-fusion evidence contract. These are source-domain decisions,
-# not scene-coordinate fixtures: valid LONG, clipped/weak SHORT, highly chromatic
-# broad candidates, and low registration confidence fail closed. Strong two-channel
-# loss with clean SHORT may seed coherent broad recovery.
-def v29_broad_seed(short_y, short_peak, short_floor, long_y, second_long, rr):
-    chroma = (short_peak - short_floor) / max(short_peak, 0.02)
-    color_safety = 1.0 - smoothstep_math(0.24, 0.40, chroma)
-    valid = smoothstep_math(0.07, 0.13, short_y) * (1.0 - smoothstep_math(0.94, 0.975, short_peak))
-    return (smoothstep_math(0.985, 0.998, second_long)
-            * smoothstep_math(0.70, 0.86, long_y)
-            * valid * smoothstep_math(1.12, 1.35, rr) * color_safety)
+# V2.10 source-equivalent detector regressions. They intentionally test concepts,
+# not scene coordinates: hard clip, effective range/chroma loss, valid-LONG,
+# changed-TV/LED disagreement, center SHORT clipping, and neighborhood saturation.
+def visual_loss_v210(long_second, long_y, ratio, short_range, long_range,
+                     grad_corr, short_chroma, long_chroma, chroma_topology):
+    hard = smoothstep_math(0.985, 0.998, long_second) * smoothstep_math(1.08, 1.30, ratio)
+    range_loss = (smoothstep_math(0.004, 0.020, short_range)
+                  * smoothstep_math(0.002, 0.020, short_range - 1.12 * long_range)
+                  * grad_corr)
+    chroma_loss = (smoothstep_math(0.08, 0.18, short_chroma)
+                   * smoothstep_math(0.025, 0.10, short_chroma - long_chroma)
+                   * chroma_topology)
+    effective = (smoothstep_math(0.90, 0.975, long_second)
+                 * smoothstep_math(0.72, 0.90, long_y)
+                 * max(range_loss, chroma_loss)
+                 * smoothstep_math(0.96, 1.06, ratio))
+    return max(hard, effective)
 
-require(v29_broad_seed(0.30, 0.50, 0.45, 0.80, 0.90, 2.0) < 0.001,
-        "V2.9 valid two-channel LONG must not seed broad SHORT recovery")
-require(v29_broad_seed(0.30, 0.98, 0.95, 0.99, 0.999, 2.0) < 0.001,
-        "V2.9 near-clipped SHORT must fail broad recovery")
-require(v29_broad_seed(0.30, 0.55, 0.20, 0.99, 0.999, 2.0) < 0.05,
-        "V2.9 highly chromatic thin/reflective candidates must not become broad regions")
-require(v29_broad_seed(0.30, 0.55, 0.50, 0.99, 0.999, 1.8) > 0.90,
-        "V2.9 strong clean two-channel loss must remain eligible before topology/static gates")
-require('smoothstep(0.58, 0.78, stillRegistrationConfidence)' in hdr_shader,
-        "V2.9 all saved ownership must retain the proven registration fail-closed gate")
-require('shortSaturationNearbyAt(uv)' in hdr_shader
-        and '(1.0 - step(0.5, clipNearby))' in hdr_shader,
-        "V2.9 broad/feather recovery must be vetoed near SHORT saturation to prevent colored rings")
-
+require(visual_loss_v210(0.999, 0.99, 1.45, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0) > 0.95,
+        "hard multi-channel clipping with valid radiometric SHORT must remain recoverable")
+require(visual_loss_v210(0.95, 0.86, 1.02, 0.040, 0.010, 1.0, 0.05, 0.04, 0.0) > 0.35,
+        "effective local-range loss with corresponding SHORT structure must be recoverable")
+require(visual_loss_v210(0.95, 0.86, 1.02, 0.010, 0.009, 0.0, 0.28, 0.08, 1.0) > 0.35,
+        "effective coherent chroma loss must count as visual clipping")
+require(visual_loss_v210(0.88, 0.85, 1.0, 0.04, 0.01, 1.0, 0.28, 0.08, 1.0) < 0.001,
+        "healthy valid LONG must stay LONG")
+require(visual_loss_v210(0.95, 0.86, 1.02, 0.04, 0.01, 0.0, 0.28, 0.08, 0.0) < 0.001,
+        "changed TV/LED frame without gradient/color topology correspondence must fail closed")
+def neighbor_safety_v210(saturated_neighbors):
+    context = saturated_neighbors / 8.0
+    return 1.0 - smoothstep_math(0.30, 0.75, context)
+require(neighbor_safety_v210(1) > 0.99 and neighbor_safety_v210(6) < 0.01,
+        "one saturated nearby SHORT pixel must not poison valid surroundings, but broad saturation must suppress")
 # Exact final scalar acceptance contract. Smooth clipped whites are valid SHORT
 # recovery targets when mapped SHORT proves missing radiance; healthy bright LONG,
 # one-channel clipping, clipped SHORT, and low registration confidence fail closed.
@@ -977,9 +994,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 26' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.9"' in Path('app/build.gradle.kts').read_text(),
-        "V2.9 version/build marker must be exact")
+require('versionCode = 27' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.10"' in Path('app/build.gradle.kts').read_text(),
+        "V2.10 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1083,4 +1100,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.9 REGRESSION PASS: exact successful V2.8 authority, unchanged live HDR/alignment/capture/DNG, GPU-only multipass saved fusion, scalar radiometric proof, isotropic broad support, strict compact emitters, temporal/source fail-closed, LONG-anchored recovered highlight tone, no CPU HDR substitution")
+print("V1.4.11 V2.10 REGRESSION PASS: exact successful V2.9 authority, V2.9 alignment/GPU-only routing protected, real AUTO/50/60/OFF flicker authority for both shutters, hard + visual/effective clipping, full source SHORT chroma, contextual saturation, temporal/source fail-closed")

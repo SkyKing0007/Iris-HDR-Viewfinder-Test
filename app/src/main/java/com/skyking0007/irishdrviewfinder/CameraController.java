@@ -105,6 +105,12 @@ final class CameraController {
     private static final int FOV_UNSAFE_CONFIRM_FRAMES = 3;
     private static final int FOV_DECISION_FRAMES = 60;
     private static final int FLICKER_UNKNOWN = -1;
+    static final int FLICKER_MODE_AUTO = 0;
+    static final int FLICKER_MODE_50HZ = 1;
+    static final int FLICKER_MODE_60HZ = 2;
+    static final int FLICKER_MODE_OFF = 3;
+    private static final long FLICKER_50_PERIOD_NS = 10_000_000L;
+    private static final long FLICKER_60_PERIOD_NS = 8_333_333L;
 
     private final Context context;
     private final CameraManager cameraManager;
@@ -154,6 +160,8 @@ final class CameraController {
     private int autoLongIso = 400;
     private int autoPostRawBoost = DEFAULT_POST_RAW_BOOST;
     private int sceneFlicker = FLICKER_UNKNOWN;
+    private int flickerMode = FLICKER_MODE_AUTO;
+    private boolean autoFlickerSafetySatisfied;
     private boolean autoMetering;
     private int autoMeterFrames;
     private int autoMeterStableFrames;
@@ -309,6 +317,33 @@ final class CameraController {
             if (previewMode != PreviewMode.NORMAL) {
                 if (enabled && !haveAeSample) startAutoMeteringLocked();
                 else applyPreviewRepeatingLocked();
+            }
+        });
+    }
+
+    void setFlickerMode(int mode) {
+        final int requested = clampFlickerMode(mode);
+        cameraHandler.post(() -> {
+            flickerMode = requested;
+            autoFlickerSafetySatisfied = false;
+            RuntimeLogger.event("FLICKER_MODE", flickerModeLabel(flickerMode));
+            if (characteristics == null) return;
+
+            if (autoHdrExposure) {
+                if (haveAeSample) {
+                    if (autoLiveLongProduct > 0.0) deriveAutoPairFromLiveProductLocked();
+                    else deriveAutoPairFromAnchorLocked();
+                }
+            } else {
+                recomputeManualFlickerSafetyLocked();
+                listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
+            }
+
+            if (previewMode != PreviewMode.NORMAL) {
+                if (autoHdrExposure && !haveAeSample) startAutoMeteringLocked();
+                else applyPreviewRepeatingLocked();
+            } else {
+                applyPreviewRepeatingLocked();
             }
         });
     }
@@ -650,7 +685,7 @@ final class CameraController {
                                 + "  long=" + exposureText(activeLongNs) + " ISO" + activeLongIso
                                 + (autoHdrExposure ? " boost=" + postRawBoost + "%"
                                         : String.format(Locale.US, "  bracket=%.1fEV", manualEffectiveBracketEv))
-                                + "  flicker=" + flickerLabel(sceneFlicker)
+                                + "  flicker=" + flickerStatusLocked()
                                 + "  target=" + targetPreviewFps + " sensor fps");
             }
         } catch (Throwable t) {
@@ -684,7 +719,7 @@ final class CameraController {
 
     private void configureAutoExposureRequest(CaptureRequest.Builder builder) {
         builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-        builder.set(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO);
+        builder.set(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, aeAntibandingModeLocked());
         builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
         builder.set(
@@ -798,10 +833,9 @@ final class CameraController {
                     }
                     Integer observedFlicker = result.get(CaptureResult.STATISTICS_SCENE_FLICKER);
                     if (!autoHdrExposure
+                            && flickerMode == FLICKER_MODE_AUTO
                             && previewMode != PreviewMode.NORMAL
                             && observedFlicker != null
-                            && (observedFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ
-                                    || observedFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ)
                             && observedFlicker != sceneFlicker) {
                         sceneFlicker = observedFlicker;
                         if (recomputeManualFlickerSafetyLocked()) {
@@ -830,7 +864,7 @@ final class CameraController {
                                         + " ISO=" + iso
                                         + " frameDuration=" + exposureText(frameDuration == null ? 0L : frameDuration)
                                         + " resultFps=" + String.format(Locale.US, "%.1f", captureResultFps)
-                                        + " flicker=" + flickerLabel(sceneFlicker)
+                                        + " flicker=" + flickerStatusLocked()
                                         + " target=" + targetPreviewFps
                                         + " crop=" + rectText(lastReportedCropRegion)
                                         + " physicalSensorCrop=" + rectText(lastPhysicalSensorCropRegion)
@@ -845,7 +879,7 @@ final class CameraController {
                                         + " ISO=" + iso
                                         + " frameDuration=" + exposureText(frameDuration == null ? 0L : frameDuration)
                                         + " resultFps=" + String.format(Locale.US, "%.1f", captureResultFps)
-                                        + " flicker=" + flickerLabel(sceneFlicker)
+                                        + " flicker=" + flickerStatusLocked()
                                         + " target=" + targetPreviewFps + " sensor fps");
                     }
                 }
@@ -878,7 +912,7 @@ final class CameraController {
                         + " boost=" + capturePostRawBoost + "%"
                         + String.format(Locale.US, " brightness=%+.1fEV gamma=%.2f",
                                 captureDisplayBrightnessEv, captureDisplayGamma)
-                        + " mode=" + (autoHdrExposure ? "AUTO" : manualSafetySummaryLocked()));
+                        + " mode=" + (autoHdrExposure ? "AUTO " + flickerStatusLocked() : manualSafetySummaryLocked()));
         listener.onStatus("Capturing matched SHORT/LONG RAW + JPEG set…");
         captureSaver = new CaptureSetSaver(
                 context,
@@ -1379,7 +1413,7 @@ final class CameraController {
         double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);
         listener.onAutoHdrSettings(
                 autoShortExposureNs, autoShortIso, autoLongExposureNs, autoLongIso,
-                flickerLabel(sceneFlicker), bracketEv);
+                flickerStatusLocked(), bracketEv);
         if (finishMeter || firstAnchor) {
             RuntimeLogger.event(
                     "AUTO_ANCHOR",
@@ -1388,7 +1422,7 @@ final class CameraController {
                             + " -> short=" + exposureText(autoShortExposureNs) + " ISO" + autoShortIso
                             + " long=" + exposureText(autoLongExposureNs) + " ISO" + autoLongIso
                             + String.format(Locale.US, " bracket=%.2fEV", bracketEv)
-                            + " flicker=" + flickerLabel(sceneFlicker));
+                            + " flicker=" + flickerStatusLocked());
         }
 
         if (finishMeter) {
@@ -1405,26 +1439,51 @@ final class CameraController {
         int minIso = isoRange.getLower();
         long longExposure = clampExposure(lastAeExposureNs);
         int longIso = clampIso(lastAeIso);
+        double targetLongProduct = Math.max(1.0, (double) longExposure * longIso);
 
         // Preserve the clean AE anchor while respecting a true 60-fps sensor cadence.
         if (targetPreviewFps >= 60 && longExposure > SIXTY_FPS_DURATION_NS) {
-            double sensorProduct = (double) longExposure * longIso;
             longExposure = clampExposure(SIXTY_FPS_DURATION_NS);
-            longIso = solveIsoForProduct(sensorProduct, longExposure);
+            longIso = solveIsoForProduct(targetLongProduct, longExposure);
         }
 
+        long period = effectiveFlickerPeriodNsLocked();
+        if (period > 0L) {
+            long maxAllowed = targetPreviewFps >= 60
+                    ? SIXTY_FPS_DURATION_NS : Math.max(manualFrameDurationNs, longExposure);
+            ExposureSetting safeLong = solveFlickerSafeSettingForProductLocked(
+                    targetLongProduct, longExposure, period, maxAllowed);
+            if (safeLong != null) {
+                ExposureSetting safeShort = solveMinimumIsoFlickerSettingLocked(
+                        Math.max(1.0, ((double) safeLong.exposureNs * safeLong.iso) / HDR_BRACKET_RATIO),
+                        Math.min(safeLong.exposureNs, longExposure),
+                        period,
+                        Math.min(maxAllowed, safeLong.exposureNs));
+                if (safeShort != null) {
+                    autoLongExposureNs = safeLong.exposureNs;
+                    autoLongIso = safeLong.iso;
+                    autoShortExposureNs = safeShort.exposureNs;
+                    autoShortIso = safeShort.iso;
+                    autoFlickerSafetySatisfied = true;
+                    return;
+                }
+            }
+        }
+
+        // AUTO without a proven 50/60-Hz authority remains best-effort and is
+        // explicitly reported unsafe rather than treating Camera2 NONE/UNKNOWN as
+        // proof that arbitrary integration windows cannot band.
+        autoFlickerSafetySatisfied = false;
         autoLongExposureNs = longExposure;
         autoLongIso = longIso;
         autoShortIso = minIso;
-        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
+        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE
+                || flickerMode == FLICKER_MODE_OFF) {
             double targetShortProduct = Math.max(1.0,
                     ((double) autoLongExposureNs * autoLongIso) / HDR_BRACKET_RATIO);
             long desiredShort = Math.round(targetShortProduct / Math.max(1, minIso));
             autoShortExposureNs = Math.min(autoLongExposureNs, clampExposure(desiredShort));
         } else {
-            // Proven V1.4.7 flicker-safe behavior: keep the exact LONG integration
-            // window and use sensor-minimum SHORT gain. The physical exposure-product
-            // separation remains whatever that safe combination provides.
             autoShortExposureNs = autoLongExposureNs;
         }
     }
@@ -1460,9 +1519,8 @@ final class CameraController {
         if (!sceneCut && lastAutoLiveUpdateNs != 0L
                 && now - lastAutoLiveUpdateNs < AUTO_LIVE_UPDATE_MIN_NS) return;
 
-        // V2.3 is derived only from V2.2's live-stat ownership. Small changes retain
-        // V2.2's smooth 0.30-EV step, while a real dark<->bright scene cut applies
-        // the measured correction immediately on the first fresh LONG statistic.
+        // V2.10 preserves the proven V2.2/V2.3 convergence constants. Flicker-safe
+        // quantization changes only the final shutter/ISO realization of that product.
         double maxStep = sceneCut ? AUTO_LIVE_SCENE_CUT_MAX_STEP_EV : AUTO_LIVE_MAX_STEP_EV;
         double stepEv = Math.max(-maxStep, Math.min(maxStep, errorEv));
         autoLiveLongProduct = Math.max(1.0, autoLiveLongProduct * Math.pow(2.0, stepEv));
@@ -1481,13 +1539,13 @@ final class CameraController {
         RuntimeLogger.event(
                 "AUTO_LIVE_ADAPT",
                 String.format(Locale.US,
-                        "median=%.4f target=%.4f err=%+.2fEV step=%+.2fEV sceneCut=%s short=%s ISO%d long=%s ISO%d bracket=%.2fEV",
+                        "median=%.4f target=%.4f err=%+.2fEV step=%+.2fEV sceneCut=%s short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
                         stats.longMedianLinear, autoLiveTargetMedianLinear, errorEv, stepEv, sceneCut,
                         exposureText(autoShortExposureNs), autoShortIso,
-                        exposureText(autoLongExposureNs), autoLongIso, bracketEv));
+                        exposureText(autoLongExposureNs), autoLongIso, bracketEv, flickerStatusLocked()));
         listener.onAutoHdrSettings(
                 autoShortExposureNs, autoShortIso, autoLongExposureNs, autoLongIso,
-                flickerLabel(sceneFlicker), bracketEv);
+                flickerStatusLocked(), bracketEv);
         applyPreviewRepeatingLocked();
     }
 
@@ -1500,9 +1558,28 @@ final class CameraController {
         autoLongExposureNs = longSetting.exposureNs;
         autoLongIso = longSetting.iso;
 
+        long period = effectiveFlickerPeriodNsLocked();
+        if (period > 0L && isFlickerSafeExposure(autoLongExposureNs, period)) {
+            long maxAllowed = targetPreviewFps >= 60
+                    ? SIXTY_FPS_DURATION_NS : Math.max(manualFrameDurationNs, autoLongExposureNs);
+            ExposureSetting safeShort = solveMinimumIsoFlickerSettingLocked(
+                    Math.max(1.0, ((double) autoLongExposureNs * autoLongIso) / HDR_BRACKET_RATIO),
+                    Math.min(autoLongExposureNs, lastAeExposureNs),
+                    period,
+                    Math.min(maxAllowed, autoLongExposureNs));
+            if (safeShort != null) {
+                autoShortExposureNs = safeShort.exposureNs;
+                autoShortIso = safeShort.iso;
+                autoFlickerSafetySatisfied = true;
+                return;
+            }
+        }
+
+        autoFlickerSafetySatisfied = false;
         int minIso = sensorMinIsoLocked();
         autoShortIso = minIso;
-        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) {
+        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE
+                || flickerMode == FLICKER_MODE_OFF) {
             double targetShortProduct = Math.max(1.0,
                     ((double) autoLongExposureNs * autoLongIso) / HDR_BRACKET_RATIO);
             long desiredShort = Math.round(targetShortProduct / Math.max(1, minIso));
@@ -1518,24 +1595,79 @@ final class CameraController {
         long maxAllowed = targetPreviewFps >= 60
                 ? SIXTY_FPS_DURATION_NS
                 : Math.max(manualFrameDurationNs, preferred);
+        long period = effectiveFlickerPeriodNsLocked();
+        if (period > 0L) {
+            ExposureSetting safe = solveFlickerSafeSettingForProductLocked(
+                    targetProduct, preferred, period, maxAllowed);
+            if (safe != null) return safe;
+        }
+
         double gain = targetProduct / Math.max(1.0, preferredProduct);
         long desired = clampExposure(Math.round(preferred * gain));
         desired = Math.min(desired, maxAllowed);
-
-        long period = 0L;
-        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ) {
-            period = 10_000_000L;
-        } else if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) {
-            period = 8_333_333L;
-        }
-        if (period > 0L && desired >= period) {
-            long periods = Math.max(1L, Math.round(desired / (double) period));
-            desired = Math.min(maxAllowed, clampExposure(periods * period));
-        } else if (sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE
-                && period == 0L && gain >= 1.0) {
-            desired = Math.min(maxAllowed, preferred);
-        }
         return new ExposureSetting(desired, solveIsoForProduct(targetProduct, desired));
+    }
+
+    private ExposureSetting solveFlickerSafeSettingForProductLocked(
+            double targetProduct, long preferredExposureNs, long periodNs, long maxAllowedNs) {
+        if (periodNs <= 0L || characteristics == null) return null;
+        Range<Long> exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+        Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+        if (exposureRange == null || isoRange == null) return null;
+
+        long lower = Math.max(exposureRange.getLower(), periodNs);
+        long upper = Math.min(exposureRange.getUpper(), maxAllowedNs);
+        long firstPeriods = Math.max(1L, (lower + periodNs - 1L) / periodNs);
+        long lastPeriods = upper / periodNs;
+        if (lastPeriods < firstPeriods) return null;
+
+        ExposureSetting best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        long preferred = Math.max(periodNs, Math.min(upper, preferredExposureNs));
+        for (long periods = firstPeriods; periods <= lastPeriods; periods++) {
+            long exposure = periods * periodNs;
+            double idealIso = targetProduct / Math.max(1.0, exposure);
+            if (idealIso < isoRange.getLower() - 0.5 || idealIso > isoRange.getUpper() + 0.5) continue;
+            int iso = Math.max(isoRange.getLower(), Math.min(isoRange.getUpper(), (int) Math.round(idealIso)));
+            double achieved = Math.max(1.0, (double) exposure * iso);
+            double productErrorEv = Math.abs(Math.log(achieved / Math.max(1.0, targetProduct)) / Math.log(2.0));
+            double shutterErrorEv = Math.abs(Math.log(exposure / (double) preferred) / Math.log(2.0));
+            double score = productErrorEv + 0.01 * shutterErrorEv;
+            if (score < bestScore) {
+                bestScore = score;
+                best = new ExposureSetting(exposure, iso);
+            }
+        }
+        return best;
+    }
+
+    private ExposureSetting solveMinimumIsoFlickerSettingLocked(
+            double targetProduct, long preferredExposureNs, long periodNs, long maxAllowedNs) {
+        if (periodNs <= 0L || characteristics == null) return null;
+        Range<Long> exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+        if (exposureRange == null) return null;
+        int minIso = sensorMinIsoLocked();
+        long lower = Math.max(exposureRange.getLower(), periodNs);
+        long upper = Math.min(exposureRange.getUpper(), maxAllowedNs);
+        long firstPeriods = Math.max(1L, (lower + periodNs - 1L) / periodNs);
+        long lastPeriods = upper / periodNs;
+        if (lastPeriods < firstPeriods) return null;
+
+        long bestExposure = -1L;
+        double bestScore = Double.POSITIVE_INFINITY;
+        long preferred = Math.max(periodNs, Math.min(upper, preferredExposureNs));
+        for (long periods = firstPeriods; periods <= lastPeriods; periods++) {
+            long exposure = periods * periodNs;
+            double achieved = Math.max(1.0, (double) exposure * minIso);
+            double productErrorEv = Math.abs(Math.log(achieved / Math.max(1.0, targetProduct)) / Math.log(2.0));
+            double shutterErrorEv = Math.abs(Math.log(exposure / (double) preferred) / Math.log(2.0));
+            double score = productErrorEv + 0.01 * shutterErrorEv;
+            if (score < bestScore) {
+                bestScore = score;
+                bestExposure = exposure;
+            }
+        }
+        return bestExposure < 0L ? null : new ExposureSetting(bestExposure, minIso);
     }
 
     private static final class ExposureSetting {
@@ -1566,35 +1698,48 @@ final class CameraController {
 
         int minIso = sensorMinIsoLocked();
         double targetLongProduct = Math.max(1.0, (double) longExposureNs * manualIso);
-        boolean safeTiming = sceneFlicker != CaptureResult.STATISTICS_SCENE_FLICKER_NONE;
-        // V2.5: flicker safety must never collapse the user-selected SHORT shutter
-        // onto LONG. SHORT remains the exact requested physical integration and
-        // sensor-minimum ISO. Only LONG may snap to a flicker-safe integration, with
-        // LONG ISO compensating to preserve the requested LONG exposure product.
-        manualEffectiveShortExposureNs = shortExposureNs;
-        manualEffectiveShortIso = minIso;
-        if (!safeTiming) {
+        long period = effectiveFlickerPeriodNsLocked();
+        manualFlickerSafetyApplied = false;
+
+        if (period > 0L) {
+            long maxLongAllowed = targetPreviewFps >= 60
+                    ? SIXTY_FPS_DURATION_NS : Math.max(manualFrameDurationNs, longExposureNs);
+            ExposureSetting safeLong = solveFlickerSafeSettingForProductLocked(
+                    targetLongProduct, longExposureNs, period, maxLongAllowed);
+            ExposureSetting safeShort = safeLong == null ? null : solveMinimumIsoFlickerSettingLocked(
+                    Math.max(1.0, (double) shortExposureNs * minIso),
+                    shortExposureNs,
+                    period,
+                    Math.min(maxLongAllowed, safeLong.exposureNs));
+            if (safeLong != null && safeShort != null) {
+                manualEffectiveLongExposureNs = safeLong.exposureNs;
+                manualEffectiveLongIso = safeLong.iso;
+                manualEffectiveShortExposureNs = safeShort.exposureNs;
+                manualEffectiveShortIso = safeShort.iso;
+                manualFlickerSafetyApplied = true;
+            } else {
+                // No legal integer-cycle pair can preserve LONG appearance in the
+                // sensor ISO/exposure bounds. Keep requested exposure instead of
+                // silently overexposing and report FLICKER UNSAFE.
+                manualEffectiveShortExposureNs = shortExposureNs;
+                manualEffectiveShortIso = minIso;
+                manualEffectiveLongExposureNs = longExposureNs;
+                manualEffectiveLongIso = manualIso;
+            }
+        } else {
+            manualEffectiveShortExposureNs = shortExposureNs;
+            manualEffectiveShortIso = minIso;
             manualEffectiveLongExposureNs = longExposureNs;
             manualEffectiveLongIso = manualIso;
-            manualFlickerSafetyApplied = false;
-        } else {
-            long safeLongExposure = chooseManualFlickerSafeExposureLocked(longExposureNs, sceneFlicker);
-            manualEffectiveLongExposureNs = safeLongExposure;
-            manualEffectiveLongIso = solveIsoForProduct(targetLongProduct, safeLongExposure);
-            manualFlickerSafetyApplied = true;
         }
 
-        if (targetPreviewFps >= 60) {
+        if (targetPreviewFps >= 60 && !manualFlickerSafetyApplied) {
             long cappedShort = Math.min(manualEffectiveShortExposureNs, SIXTY_FPS_DURATION_NS);
             long cappedLong = Math.min(manualEffectiveLongExposureNs, SIXTY_FPS_DURATION_NS);
-            if (cappedShort != manualEffectiveShortExposureNs || cappedLong != manualEffectiveLongExposureNs) {
-                manualFlickerSafetyApplied = true;
-            }
             manualEffectiveShortExposureNs = clampExposure(cappedShort);
             manualEffectiveLongExposureNs = clampExposure(cappedLong);
             manualEffectiveShortIso = minIso;
-            manualEffectiveLongIso = solveIsoForProduct(
-                    targetLongProduct, manualEffectiveLongExposureNs);
+            manualEffectiveLongIso = solveIsoForProduct(targetLongProduct, manualEffectiveLongExposureNs);
         }
 
         double longProduct = Math.max(
@@ -1610,25 +1755,35 @@ final class CameraController {
                 || oldSafety != manualFlickerSafetyApplied;
     }
 
-    private long chooseManualFlickerSafeExposureLocked(long requestedLongNs, int flicker) {
-        long requested = clampExposure(requestedLongNs);
-        long maxAllowed = targetPreviewFps >= 60
-                ? SIXTY_FPS_DURATION_NS : Math.max(manualFrameDurationNs, requested);
-        requested = Math.min(requested, maxAllowed);
-        long period = 0L;
-        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ) {
-            period = 10_000_000L;
-        } else if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) {
-            period = 8_333_333L;
-        }
-        if (period == 0L) {
-            return clampExposure(requested);
-        }
+    private int effectiveFlickerLocked() {
+        if (flickerMode == FLICKER_MODE_50HZ) return CaptureResult.STATISTICS_SCENE_FLICKER_50HZ;
+        if (flickerMode == FLICKER_MODE_60HZ) return CaptureResult.STATISTICS_SCENE_FLICKER_60HZ;
+        if (flickerMode == FLICKER_MODE_OFF) return CaptureResult.STATISTICS_SCENE_FLICKER_NONE;
+        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ
+                || sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) return sceneFlicker;
+        return FLICKER_UNKNOWN;
+    }
 
-        long maxPeriods = Math.max(1L, maxAllowed / period);
-        long desiredPeriods = Math.max(1L, Math.round(requested / (double) period));
-        long periods = Math.min(maxPeriods, desiredPeriods);
-        return clampExposure(periods * period);
+    private long effectiveFlickerPeriodNsLocked() {
+        int flicker = effectiveFlickerLocked();
+        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ) return FLICKER_50_PERIOD_NS;
+        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) return FLICKER_60_PERIOD_NS;
+        return 0L;
+    }
+
+    private int aeAntibandingModeLocked() {
+        if (flickerMode == FLICKER_MODE_50HZ) return CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ;
+        if (flickerMode == FLICKER_MODE_60HZ) return CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ;
+        if (flickerMode == FLICKER_MODE_OFF) return CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF;
+        return CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO;
+    }
+
+    private static int clampFlickerMode(int mode) {
+        return mode >= FLICKER_MODE_AUTO && mode <= FLICKER_MODE_OFF ? mode : FLICKER_MODE_AUTO;
+    }
+
+    private static boolean isFlickerSafeExposure(long exposureNs, long periodNs) {
+        return periodNs > 0L && exposureNs >= periodNs && exposureNs % periodNs == 0L;
     }
 
     private int sensorMinIsoLocked() {
@@ -1644,7 +1799,7 @@ final class CameraController {
                 + " actual=" + exposureText(manualEffectiveShortExposureNs) + " ISO" + manualEffectiveShortIso
                 + "/" + exposureText(manualEffectiveLongExposureNs) + " ISO" + manualEffectiveLongIso
                 + String.format(Locale.US, " %.1fEV", manualEffectiveBracketEv)
-                + " flicker=" + flickerLabel(sceneFlicker);
+                + " flicker=" + flickerStatusLocked();
     }
 
     private long activeShortExposureNs() {
@@ -1663,11 +1818,27 @@ final class CameraController {
         return autoHdrExposure ? autoLongIso : manualEffectiveLongIso;
     }
 
-    private static String flickerLabel(int flicker) {
-        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ) return "50Hz";
-        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) return "60Hz";
-        if (flicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) return "none";
-        return "unknown/PWM-safe";
+    private String flickerStatusLocked() {
+        if (flickerMode == FLICKER_MODE_OFF) return "OFF";
+        int effective = effectiveFlickerLocked();
+        boolean safe = autoHdrExposure ? autoFlickerSafetySatisfied : manualFlickerSafetyApplied;
+        if (effective == CaptureResult.STATISTICS_SCENE_FLICKER_50HZ) {
+            return (flickerMode == FLICKER_MODE_AUTO ? "AUTO 50Hz " : "50Hz ")
+                    + (safe ? "SAFE" : "UNSAFE");
+        }
+        if (effective == CaptureResult.STATISTICS_SCENE_FLICKER_60HZ) {
+            return (flickerMode == FLICKER_MODE_AUTO ? "AUTO 60Hz " : "60Hz ")
+                    + (safe ? "SAFE" : "UNSAFE");
+        }
+        if (sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE) return "AUTO UNSAFE(none)";
+        return "AUTO UNSAFE(unknown/PWM)";
+    }
+
+    private static String flickerModeLabel(int mode) {
+        if (mode == FLICKER_MODE_50HZ) return "50Hz";
+        if (mode == FLICKER_MODE_60HZ) return "60Hz";
+        if (mode == FLICKER_MODE_OFF) return "OFF";
+        return "AUTO";
     }
 
     private long clampExposure(long value) {

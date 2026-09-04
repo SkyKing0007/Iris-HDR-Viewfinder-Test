@@ -57,6 +57,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private static final String STATE_ISO_INDEX = "isoIndex";
     private static final String STATE_AUTO_HDR = "autoHdr";
     private static final String STATE_ALLOW_CROPPED_60 = "allowCropped60";
+    private static final String STATE_FLICKER_MODE = "flickerMode";
     private static final String STATE_DISPLAY_BRIGHTNESS_EV = "displayBrightnessEv";
     private static final String STATE_DISPLAY_GAMMA = "displayGamma";
     private static final float DISPLAY_BRIGHTNESS_MIN_EV = -16.0f;
@@ -104,6 +105,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private Button captureButton;
     private Button autoButton;
     private Button fpsButton;
+    private Button flickerButton;
     private final List<CameraController.CameraDescriptor> cameras = new ArrayList<>();
     private boolean updatingControls;
     private String selectedCameraId;
@@ -112,6 +114,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private volatile int longIndex = 9;
     private volatile int isoIndex = 2;
     private volatile boolean autoHdrEnabled = true;
+    private int flickerMode = CameraController.FLICKER_MODE_AUTO;
     private volatile boolean allowCropped60Fps;
     private volatile float displayBrightnessEv;
     private volatile float displayGamma = 1.0f;
@@ -155,6 +158,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         controller.setDisplayBrightnessEv(displayBrightnessEv);
         controller.setDisplayGamma(displayGamma);
         controller.setAllowCropped60Fps(allowCropped60Fps);
+        controller.setFlickerMode(flickerMode);
         controller.setAutoHdrExposure(autoHdrEnabled);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -172,6 +176,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         longIndex = clampIndex(state.getInt(STATE_LONG_INDEX, longIndex), EXPOSURES_NS.length);
         isoIndex = clampIndex(state.getInt(STATE_ISO_INDEX, isoIndex), ISO_VALUES.length);
         autoHdrEnabled = state.getBoolean(STATE_AUTO_HDR, autoHdrEnabled);
+        flickerMode = state.getInt(STATE_FLICKER_MODE, flickerMode);
         allowCropped60Fps = state.getBoolean(STATE_ALLOW_CROPPED_60, allowCropped60Fps);
         displayBrightnessEv = Math.max(DISPLAY_BRIGHTNESS_MIN_EV,
                 Math.min(DISPLAY_BRIGHTNESS_MAX_EV, state.getFloat(STATE_DISPLAY_BRIGHTNESS_EV, displayBrightnessEv)));
@@ -188,6 +193,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         outState.putInt(STATE_LONG_INDEX, longIndex);
         outState.putInt(STATE_ISO_INDEX, isoIndex);
         outState.putBoolean(STATE_AUTO_HDR, autoHdrEnabled);
+        outState.putInt(STATE_FLICKER_MODE, flickerMode);
         outState.putBoolean(STATE_ALLOW_CROPPED_60, allowCropped60Fps);
         outState.putFloat(STATE_DISPLAY_BRIGHTNESS_EV, displayBrightnessEv);
         outState.putFloat(STATE_DISPLAY_GAMMA, displayGamma);
@@ -240,6 +246,9 @@ public final class MainActivity extends Activity implements CameraController.Lis
         fpsButton = new Button(this);
         refreshFpsButton();
 
+        flickerButton = new Button(this);
+        refreshFlickerButton();
+
         captureButton = new Button(this);
         captureButton.setText("CAPTURE HDR SET");
 
@@ -274,6 +283,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         compactControl(modeSpinner);
         compactControl(autoButton);
         compactControl(fpsButton);
+        compactControl(flickerButton);
         compactControl(captureButton);
         compactControl(shortBar);
         compactControl(longBar);
@@ -381,6 +391,30 @@ public final class MainActivity extends Activity implements CameraController.Lis
         });
 
 
+        flickerButton.setOnClickListener(v -> {
+            if (flickerMode == CameraController.FLICKER_MODE_AUTO) {
+                flickerMode = CameraController.FLICKER_MODE_60HZ;
+            } else if (flickerMode == CameraController.FLICKER_MODE_60HZ) {
+                flickerMode = CameraController.FLICKER_MODE_50HZ;
+            } else if (flickerMode == CameraController.FLICKER_MODE_50HZ) {
+                flickerMode = CameraController.FLICKER_MODE_OFF;
+            } else {
+                flickerMode = CameraController.FLICKER_MODE_AUTO;
+            }
+            refreshFlickerButton();
+            if (controller != null) controller.setFlickerMode(flickerMode);
+            Toast.makeText(
+                    this,
+                    flickerMode == CameraController.FLICKER_MODE_AUTO
+                            ? "FLICKER AUTO: 50/60-Hz safety is claimed only when Camera2 proves the frequency; NONE/unknown is shown UNSAFE"
+                            : flickerMode == CameraController.FLICKER_MODE_60HZ
+                                    ? "FLICKER 60Hz: SHORT and LONG use integer 1/120-s cycles when sensor exposure/ISO bounds allow"
+                                    : flickerMode == CameraController.FLICKER_MODE_50HZ
+                                            ? "FLICKER 50Hz: SHORT and LONG use integer 1/100-s cycles when sensor exposure/ISO bounds allow"
+                                            : "FLICKER OFF: no 50/60-Hz integration-window enforcement",
+                    Toast.LENGTH_LONG).show();
+        });
+
         fpsButton.setOnClickListener(v -> {
             allowCropped60Fps = !allowCropped60Fps;
             refreshFpsButton();
@@ -409,6 +443,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         panel.addView(modeRow, matchWrap());
 
         LinearLayout fpsCaptureRow = makeHorizontalRow();
+        fpsCaptureRow.addView(flickerButton, weighted(1f));
         fpsCaptureRow.addView(fpsButton, weighted(1f));
         fpsCaptureRow.addView(captureButton, weighted(1f));
         panel.addView(fpsCaptureRow, matchWrap());
@@ -424,6 +459,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         row1.addView(cameraSpinner, weighted(2f));
         row1.addView(modeSpinner, weighted(1f));
         row1.addView(autoButton, weighted(1f));
+        row1.addView(flickerButton, weighted(1.15f));
         row1.addView(fpsButton, weighted(1f));
         row1.addView(captureButton, weighted(1.2f));
         panel.addView(row1, matchWrap());
@@ -576,6 +612,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         controller.setDisplayGamma(displayGamma);
         controller.setJpegOrientationDegrees(jpegOrientation);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
+        controller.setFlickerMode(flickerMode);
         controller.setAutoHdrExposure(autoHdrEnabled);
         controller.setManualSettings(
                 EXPOSURES_NS[shortIndex],
@@ -591,6 +628,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
                         + " | target=" + targetPreviewFps + " fps"
                         + " | AE fps=" + (aeFpsRange == null ? "auto" : aeFpsRange)
                         + " | cadence=" + (allowCropped60Fps ? "60fps crop requested" : "FOV-safe fixed 30fps")
+                        + " | flickerMode=" + flickerModeText()
                         + " | sRGB tonemap=" + (srgbTonemap ? "contrast-curve" : "HAL default")
                         + " | sync latency=" + (syncLatency == null ? "?" : syncLatency)
                         + " | files -> Downloads/IrisHDRViewfinder"
@@ -690,6 +728,18 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private void refreshAutoButton() {
         if (autoButton == null) return;
         autoButton.setText(autoHdrEnabled ? "HDR AUTO: ON" : "HDR MANUAL SAFE");
+    }
+
+    private void refreshFlickerButton() {
+        if (flickerButton == null) return;
+        flickerButton.setText("FLICKER " + flickerModeText());
+    }
+
+    private String flickerModeText() {
+        if (flickerMode == CameraController.FLICKER_MODE_50HZ) return "50Hz";
+        if (flickerMode == CameraController.FLICKER_MODE_60HZ) return "60Hz";
+        if (flickerMode == CameraController.FLICKER_MODE_OFF) return "OFF";
+        return "AUTO";
     }
 
     private void refreshFpsButton() {
