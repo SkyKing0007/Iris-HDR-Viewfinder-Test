@@ -21,7 +21,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.18 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.19 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -51,7 +51,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.18 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.19 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -602,13 +602,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.18 - Exact successful V2.17 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.17' in workflow
-        and 'run-id: 33942346596' in workflow
-        and "authority='e946baa2b8213d48263cdc0fdc1ed1436b5fdae2'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.17 Actions authority")
-require("authority='ce514f3fd6d1b75092c4e3bb2fa395dadb359950'" not in workflow,
-        "V2.18 must not seed runtime from V2.16 after successful V2.17")
+# 038 / 042 / V2.19 - Exact successful V2.18 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.18' in workflow
+        and 'run-id: 33945509036' in workflow
+        and "authority='f70e85bc3ca8a5ce0fcf0e0c4634ec786e141d73'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.18 Actions authority")
+require("authority='e946baa2b8213d48263cdc0fdc1ed1436b5fdae2'" not in workflow,
+        "V2.19 must not seed runtime from V2.17 after successful V2.18")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -713,9 +713,119 @@ require(camera.count('manualEffectiveShortExposureNs, manualEffectiveLongExposur
 require('Short ACTUAL ' in main and 'Long ACTUAL ' in main,
         "MANUAL UI must label effective shutter values as actual")
 
-# V2.18 exact MANUAL/AUTO device regression from the supplied shelf scene.
-# Saved-JPEG linear statistics are used only as a deterministic behavioral calibration:
-# AUTO remains scene-derived and is not a fixed 4x/-2.4/1.55 preset.
+# V2.19 is post-fusion presentation-only inside CameraController. The successful
+# V2.18 physical AUTO exposure controller must remain byte-exact.
+physical_stats_slice = camera[camera.index('    private void processHdrSceneStatsLocked('):
+                              camera.index('    private void deriveAutoPairFromSceneTargetsLocked()')]
+physical_pair_slice = camera[camera.index('    private void deriveAutoPairFromSceneTargetsLocked()'):
+                             camera.index('    private void updateAdaptivePresentationLocked(')]
+physical_anchor_slice = camera[camera.index('    private void deriveAutoPairFromAnchorLocked()'):
+                               camera.index('    private void processHdrSceneStatsLocked(')]
+require(hashlib.sha256(physical_stats_slice.encode()).hexdigest() ==
+        'aefcfea728217485c9d39764aba520dc3b3b29f8460c4beb6060927c05845d0c',
+        "successful V2.18 scene-stat physical exposure controller changed")
+require(hashlib.sha256(physical_pair_slice.encode()).hexdigest() ==
+        '7794c401735797af9edd2edb2468d76b9bc4de0d86946d9c0c9a8d2e9d2b040b',
+        "successful V2.18 scene-target pair solver changed")
+require(hashlib.sha256(physical_anchor_slice.encode()).hexdigest() ==
+        '306add9a9eed6e80d14555c24c8a37f35b93a79f4af7cf6d7d0e939cec6e9e7d',
+        "successful V2.18 clean-AE anchor solver changed")
+
+# V2.19 exact post-fusion exposure regression from the supplied V2.18/Photon pairs.
+# The physical bracket remains V2.18-owned. V2.19 solves only the final scene key.
+def body_tone_v219(y):
+    if y <= 0.000001:
+        return y
+    toe = smoothstep_math(0.015, 0.090, y)
+    protect = 1.0 - smoothstep_math(0.45, 0.68, y)
+    return y + 0.45 * toe * protect * y * (1.0 - max(0.0, min(1.0, y)))
+
+def hdr_fit_v219(y, ratio):
+    bracket_stops = max(1.0, min(6.0, math.log(max(ratio, 1.0001), 2.0)))
+    if y <= 0.70:
+        return y
+    white_anchor = max(0.68, min(0.82, 0.82 - 0.04 * (bracket_stops - 1.0)))
+    display_ceiling = max(0.84, min(0.96, white_anchor + 0.14))
+    if y <= 1.0:
+        t = max(0.0, min(1.0, (y - 0.70) / 0.30))
+        return 0.70 + (white_anchor - 0.70) * t
+    headroom = max(math.log(max(ratio, 1.0001), 2.0), 0.0001)
+    t = max(0.0, min(1.0, math.log(max(y, 0.000001), 2.0) / headroom))
+    return white_anchor + (display_ceiling - white_anchor) * t
+
+def predict_presented_v219(scene_y, brightness_ev, gamma, ratio):
+    y = max(0.0, scene_y) * (2.0 ** brightness_ev)
+    y = body_tone_v219(y)
+    y = hdr_fit_v219(y, ratio)
+    return max(0.0, min(1.0, y)) ** (1.0 / max(0.50, min(2.00, gamma)))
+
+def targets_v219(fused_p50, fused_p90, long_p98, long_clip):
+    contrast_stops = math.log(max(0.001, fused_p90) / max(0.001, fused_p50), 2.0)
+    contrast_pressure = smoothstep_math(1.20, 2.60, contrast_stops)
+    base_median = 0.18 * (2.0 ** (-0.45 * max(0.0, contrast_stops - 1.0)))
+    base_median = max(0.105, min(0.18, base_median))
+    specular_pressure = max(
+        smoothstep_math(0.50, 0.85, long_p98),
+        smoothstep_math(0.003, 0.015, long_clip))
+    specular_pressure *= 1.0 - 0.75 * contrast_pressure
+    target_median = max(0.10, min(0.18, base_median * (1.0 - 0.25 * specular_pressure)))
+    target_contrast = max(1.0, min(2.0, contrast_stops))
+    target_p90 = max(0.26, min(0.42, target_median * (2.0 ** target_contrast)))
+    return target_median, target_p90
+
+def solve_presentation_v219(fused_p50, fused_p90, long_p98, long_clip, ratio=4.0):
+    target_median, target_p90 = targets_v219(fused_p50, fused_p90, long_p98, long_clip)
+    best = None
+    brightness = -4.0
+    while brightness <= 1.0001:
+        gamma = 0.80
+        while gamma <= 2.0001:
+            predicted_median = predict_presented_v219(fused_p50, brightness, gamma, ratio)
+            predicted_p90 = predict_presented_v219(fused_p90, brightness, gamma, ratio)
+            median_error = math.log(max(0.0001, predicted_median) / max(0.0001, target_median), 2.0)
+            p90_error = math.log(max(0.0001, predicted_p90) / max(0.0001, target_p90), 2.0)
+            score = (1.20 * median_error * median_error + p90_error * p90_error
+                     + 0.01 * brightness * brightness + 0.01 * (gamma - 1.20) * (gamma - 1.20))
+            if best is None or score < best[0]:
+                best = (score, brightness, gamma, predicted_median, predicted_p90)
+            gamma += 0.05
+        brightness += 0.10
+    return target_median, target_p90, best
+
+# Exact V2.18 shelf final was ~2.27 EV dark at median and ~2.33 EV dark at P90
+# versus the supplied Photon reference. Recovered pre-presentation fused statistics
+# from that exact JPEG must solve to a Photon-like key, not the V2.18 -2.4 EV key.
+shelf_target50, shelf_target90, shelf_solution = solve_presentation_v219(
+    0.01972576, 0.12988126, 0.3373257, 0.0007289, 4.0)
+require(0.100 <= shelf_target50 <= 0.110 and 0.410 <= shelf_target90 <= 0.420,
+        "V2.19 shelf scene-key targets moved away from supplied Photon reference")
+require(0.40 <= shelf_solution[1] <= 0.70 and 1.50 <= shelf_solution[2] <= 1.65,
+        "V2.19 shelf solver must replace V2.18 negative exposure with a bright Photon-like key")
+require(abs(math.log(shelf_solution[3] / 0.10583283, 2.0)) < 0.08
+        and abs(math.log(shelf_solution[4] / 0.39880091, 2.0)) < 0.12,
+        "V2.19 shelf predicted P50/P90 no longer track supplied Photon reference")
+
+# Exact V2.18 chandelier was ~2.65 EV dark at median and ~2.74 EV dark at P90.
+# A specular-heavy scene must brighten the body while keeping bulb pressure lower.
+ch_target50, ch_target90, ch_solution = solve_presentation_v219(
+    0.05279177, 0.10876445, 0.80, 0.020, 4.0)
+require(0.125 <= ch_target50 <= 0.140 and 0.265 <= ch_target90 <= 0.285,
+        "V2.19 chandelier specular scene-key targets changed")
+require(0.80 <= ch_solution[1] <= 1.01 and 0.90 <= ch_solution[2] <= 1.05,
+        "V2.19 chandelier solver must brighten the body without flattening bulbs")
+require(abs(math.log(ch_solution[3] / 0.13369069, 2.0)) < 0.08
+        and abs(math.log(ch_solution[4] / 0.26844543, 2.0)) < 0.10,
+        "V2.19 chandelier predicted P50/P90 no longer track supplied Photon reference")
+
+# Ordinary lower-contrast scenes remain brighter, matching the supplied Photon kitchen
+# reference rather than inheriting the dark high-contrast shelf key.
+k_target50, k_target90, k_solution = solve_presentation_v219(0.080, 0.180, 0.35, 0.001, 4.0)
+require(0.165 <= k_target50 <= 0.180 and 0.375 <= k_target90 <= 0.410,
+        "ordinary-scene V2.19 key must remain kitchen-bright")
+require(k_solution[1] > 0.50 and k_solution[3] > 0.16 and k_solution[4] > 0.36,
+        "ordinary V2.19 scenes must use preserved HDR headroom instead of remaining dim")
+
+# V2.18 physical exposure behavior remains mandatory.
 def desired_ratio_v218(p50, p90, p98, long_p95, long_p98, long_clip, current_ratio):
     ratio_body = math.sqrt((0.015 / max(0.00025, p50)) * (0.10 / max(0.00025, p90)))
     ratio_headroom = 0.65 / max(0.002, p98)
@@ -727,35 +837,16 @@ def desired_ratio_v218(p50, p90, p98, long_p95, long_p98, long_clip, current_rat
         ratio_long_body = min(ratio_long_body, current_ratio * max(0.25, min(1.0, clip_scale)))
     return max(4.0, min(64.0, ratio_body, ratio_headroom, ratio_long_body))
 
-def presentation_v218(fused_p50, fused_p90, fused_p95):
-    pressure = smoothstep_math(0.35, 0.75, fused_p95)
-    target_p90 = 0.024 + (0.020 - 0.024) * pressure
-    brightness = max(-4.0, min(1.0, math.log(target_p90 / max(0.004, fused_p90), 2.0)))
-    bright_median = fused_p50 * (2.0 ** brightness)
-    contrast_stops = math.log(max(0.001, fused_p90) / max(0.001, fused_p50), 2.0)
-    t = smoothstep_math(2.0, 4.0, contrast_stops)
-    target_median = 0.029 + (0.023 - 0.029) * t
-    if 0.0005 < bright_median < 0.98 and target_median < 0.98:
-        gamma = max(0.50, min(2.00, math.log(bright_median) / math.log(target_median)))
-    else:
-        gamma = 1.0
-    return brightness, gamma
-
 manual_ratio = desired_ratio_v218(0.0030643, 0.0306402, 0.0822136,
                                   0.2051309, 0.3373257, 0.0007289, 4.0)
 bad_auto_ratio = desired_ratio_v218(0.0031255, 0.0306025, 0.0828143,
                                     0.9559018, 1.0, 0.0705973, 20.56)
-manual_brightness, manual_gamma = presentation_v218(0.0193274, 0.1224013, 0.2051309)
 require(math.isclose(manual_ratio, 4.0, abs_tol=0.01),
-        "clean supplied MANUAL scene must remain a 4x / 2EV AUTO operating point")
+        "V2.18 clean shelf physical bracket must remain 4x / 2EV")
 require(math.isclose(bad_auto_ratio, 4.0, abs_tol=0.01),
-        "bad supplied V2.17 AUTO scene must be driven back from ~20.6x toward 4x")
-require(-2.45 <= manual_brightness <= -2.25 and 1.50 <= manual_gamma <= 1.60,
-        "AUTO presentation must reproduce the clean MANUAL strategy near -2.4EV / gamma1.55")
+        "V2.18 bad 20.6x AUTO physical regression must remain fixed")
 require(desired_ratio_v218(0.00025, 0.00025, 0.003, 0.010, 0.010, 0.0, 4.0) >= 64.0,
         "genuinely dark feasible scenes must retain the 64x / 6EV AUTO ceiling")
-require(desired_ratio_v218(0.20, 0.70, 0.85, 0.90, 0.95, 0.10, 4.0) >= 4.0,
-        "HDR AUTO must never collapse below the 4x minimum")
 
 # Presentation remains adaptive, but a failed physical bracket is restrained rather
 # than disguised with strong brightness/gamma/dehaze/microcontrast.
@@ -779,16 +870,24 @@ require(math.isclose(live_step(+0.50), +0.30) and math.isclose(live_step(-0.50),
 require(math.isclose(live_step(+0.05), 0.0) and math.isclose(live_step(-0.05), 0.0),
         "small scene-stat jitter must remain inside exposure hysteresis")
 
-# Presentation controller ownership and capture freeze. V2.18 uses the same
-# Brightness/Gamma mathematical domain as MANUAL and the supplied MANUAL strategy.
+# Presentation controller ownership and capture freeze. V2.19 retains the same
+# MANUAL domains but AUTO now closes the loop on predicted final P50/P90.
 require('private void updateAdaptivePresentationLocked(' in camera
         and 'AUTO_PRESENT_BRIGHTNESS_MIN_EV = -4.00f' in camera
         and 'AUTO_PRESENT_BRIGHTNESS_MAX_EV = 1.00f' in camera
         and 'AUTO_PRESENT_GAMMA_MIN = 0.50f' in camera
         and 'AUTO_PRESENT_GAMMA_MAX = 2.00f' in camera
-        and 'float targetP90 = lerpFloat(0.024f, 0.020f, highlightPressure);' in camera
-        and '0.029f, 0.023f' in camera,
-        "V2.18 MANUAL-calibrated AUTO Brightness/Gamma solver missing")
+        and 'float contrastPressure = smoothstepFloat(1.20f, 2.60f, contrastStops);' in camera
+        and 'float targetMedian = clampFloat(' in camera
+        and 'float targetP90 = clampFloat(' in camera
+        and 'predictAutoPresentedLuma' in camera
+        and 'log2RatioFloat' in camera,
+        "V2.19 Photon-normalized AUTO scene-key solver missing")
+require('float targetP90 = lerpFloat(0.024f, 0.020f, highlightPressure);' not in camera
+        and '0.029f, 0.023f' not in camera,
+        "V2.18 dark MANUAL-calibrated final-render targets survived")
+require('displayDehaze, 0.0f' in camera and 'displayMicroContrast, 0.0f' in camera,
+        "AUTO must neutralize the second mode-6 global darkening exponent")
 require('if (automatic) {' in camera[camera.index('private void updateAdaptivePresentationLocked'):camera.index('private void publishPresentationLocked')],
         "AUTO-only Brightness/Gamma authority boundary missing")
 manual_pres = camera[camera.index('private void updateAdaptivePresentationLocked'):camera.index('private void publishPresentationLocked')]
@@ -1045,6 +1144,9 @@ require(hashlib.sha256(fusion.encode()).hexdigest() ==
 require(hashlib.sha256(saver.encode()).hexdigest() ==
         '60cfa6d09db46d2af8fc1917e5ebf1e3c580102e1b07fe6bfea8e683c8372248',
         "successful V2.17 CaptureSetSaver bytes changed")
+require(hashlib.sha256(main.encode()).hexdigest() ==
+        'b142084c33bb2482ad60113bb66653b9c3efeff55c9bdcdd84082d3345a4be3b',
+        "successful V2.18 MainActivity bytes changed")
 
 # V2.17 permanent visual/source regressions include the exact V2.16 device failure:
 # valid SHORT highlight pieces may not be dropped by a per-pixel re-proof inside one
@@ -1130,9 +1232,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 35' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.18"' in Path('app/build.gradle.kts').read_text(),
-        "V2.18 version/build marker must be exact")
+require('versionCode = 36' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.19"' in Path('app/build.gradle.kts').read_text(),
+        "V2.19 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1240,4 +1342,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.18 REGRESSION PASS: exact successful V2.17 authority, MANUAL-calibrated AUTO converges clean shelf toward 4x/-2.35EV/gamma1.55, 64x dark capability preserved, MANUAL exposes actual flicker-safe values, successful V2.17 LONG-truth fusion bytes protected")
+print("V1.4.11 V2.19 REGRESSION PASS: exact successful V2.18 authority, physical 4x-64x AUTO/flicker/fusion preserved, Photon-normalized final P50/P90 scene key fixes V2.18 ~2.3-2.8EV underexposure, AUTO second-pass darkening neutralized")

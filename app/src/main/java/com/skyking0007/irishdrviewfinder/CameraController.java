@@ -1772,32 +1772,63 @@ final class CameraController {
                 / Math.max(1.0, stats.shortExposureProduct);
         boolean collapsedBracket = physicalRatio < 2.0;
         if (automatic) {
-            // V2.18 presentation is calibrated to the supplied clean MANUAL result:
-            // protect the upper body with negative display EV first, then recover
-            // midtones with gamma instead of physically overexposing LONG. For the
-            // reference shelf scene this converges near -2.4 EV / gamma 1.55, but
-            // both values remain continuously scene-derived rather than hard-coded.
-            float highlightPressure = smoothstepFloat(0.35f, 0.75f, stats.fusedP95Linear);
-            float targetP90 = lerpFloat(0.024f, 0.020f, highlightPressure);
-            targetBrightness = clampFloat(
-                    (float) (Math.log(targetP90 / Math.max(0.004f, stats.fusedP90Linear)) / Math.log(2.0)),
-                    AUTO_PRESENT_BRIGHTNESS_MIN_EV,
-                    AUTO_PRESENT_BRIGHTNESS_MAX_EV);
-
-            float brightMedian = stats.fusedP50Linear * (float) Math.pow(2.0, targetBrightness);
+            // V2.19 Photon-normalized scene key: V2.18 correctly protected the
+            // physical LONG body, but then rendered the already-fused scene roughly
+            // 2.3-2.8 EV too dark. Keep capture/fusion untouched and solve the final
+            // display key from the fused scene itself. High body contrast lowers the
+            // median while retaining bright upper mids; isolated specular pressure
+            // lowers both median and P90 so bulbs stay photographic rather than forcing
+            // the whole image dark. The resulting targets match the supplied Photon
+            // shelf/chandelier/kitchen references without being fixed scene presets.
             float contrastStops = (float) (Math.log(
                     Math.max(0.001f, stats.fusedP90Linear)
                             / Math.max(0.001f, stats.fusedP50Linear)) / Math.log(2.0));
-            float targetMedian = lerpFloat(
-                    0.029f, 0.023f, smoothstepFloat(2.0f, 4.0f, contrastStops));
-            if (brightMedian > 0.0005f && brightMedian < 0.98f && targetMedian < 0.98f) {
-                targetGamma = clampFloat(
-                        (float) (Math.log(brightMedian) / Math.log(targetMedian)),
-                        AUTO_PRESENT_GAMMA_MIN,
-                        AUTO_PRESENT_GAMMA_MAX);
-            } else {
-                targetGamma = 1.0f;
+            float contrastPressure = smoothstepFloat(1.20f, 2.60f, contrastStops);
+            float baseMedian = 0.18f * (float) Math.pow(
+                    2.0, -0.45 * Math.max(0.0f, contrastStops - 1.0f));
+            baseMedian = clampFloat(baseMedian, 0.105f, 0.18f);
+            float specularPressure = Math.max(
+                    smoothstepFloat(0.50f, 0.85f, stats.longP98Linear),
+                    smoothstepFloat(0.003f, 0.015f, stats.longNearClipFraction));
+            specularPressure *= 1.0f - 0.75f * contrastPressure;
+            float targetMedian = clampFloat(
+                    baseMedian * (1.0f - 0.25f * specularPressure), 0.10f, 0.18f);
+            float targetContrastStops = clampFloat(contrastStops, 1.0f, 2.0f);
+            float targetP90 = clampFloat(
+                    targetMedian * (float) Math.pow(2.0, targetContrastStops),
+                    0.26f, 0.42f);
+
+            float bestScore = Float.POSITIVE_INFINITY;
+            float bestBrightness = 0.0f;
+            float bestGamma = 1.0f;
+            for (float candidateBrightness = AUTO_PRESENT_BRIGHTNESS_MIN_EV;
+                    candidateBrightness <= AUTO_PRESENT_BRIGHTNESS_MAX_EV + 0.001f;
+                    candidateBrightness += 0.10f) {
+                for (float candidateGamma = 0.80f;
+                        candidateGamma <= AUTO_PRESENT_GAMMA_MAX + 0.001f;
+                        candidateGamma += 0.05f) {
+                    float predictedMedian = predictAutoPresentedLuma(
+                            stats.fusedP50Linear, candidateBrightness, candidateGamma, physicalRatio);
+                    float predictedP90 = predictAutoPresentedLuma(
+                            stats.fusedP90Linear, candidateBrightness, candidateGamma, physicalRatio);
+                    float medianError = log2RatioFloat(predictedMedian, targetMedian);
+                    float p90Error = log2RatioFloat(predictedP90, targetP90);
+                    float score = 1.20f * medianError * medianError
+                            + p90Error * p90Error
+                            + 0.01f * candidateBrightness * candidateBrightness
+                            + 0.01f * (candidateGamma - 1.20f) * (candidateGamma - 1.20f);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        bestBrightness = candidateBrightness;
+                        bestGamma = candidateGamma;
+                    }
+                }
             }
+            targetBrightness = clampFloat(
+                    bestBrightness, AUTO_PRESENT_BRIGHTNESS_MIN_EV, AUTO_PRESENT_BRIGHTNESS_MAX_EV);
+            targetGamma = clampFloat(
+                    bestGamma, AUTO_PRESENT_GAMMA_MIN, AUTO_PRESENT_GAMMA_MAX);
+
             if (collapsedBracket) {
                 // A failed physical bracket may not be disguised with aggressive tone.
                 targetBrightness = Math.min(targetBrightness, 0.15f);
@@ -1810,33 +1841,41 @@ final class CameraController {
             displayGamma = stepToward(
                     displayGamma, targetGamma,
                     immediate ? 2.0f : AUTO_PRESENT_GAMMA_STEP);
-        }
 
-        float shadowDeficit = 1.0f - smoothstepFloat(
-                0.18f, 0.34f, stats.shadowLocalContrast);
-        float midDeficit = 1.0f - smoothstepFloat(
-                0.20f, 0.36f, stats.midLocalContrast);
-        float shadowSpreadStops = (float) (Math.log(
-                Math.max(0.001f, stats.fusedP50Linear)
-                        / Math.max(0.001f, stats.fusedP10Linear)) / Math.log(2.0));
-        float compressedShadows = 1.0f - smoothstepFloat(2.5f, 4.2f, shadowSpreadStops);
-        float sliderLift = 0.55f * smoothstepFloat(1.05f, 1.55f, displayGamma)
-                + 0.45f * smoothstepFloat(0.05f, 0.70f, displayBrightnessEv);
-        float targetDehaze = clampFloat(
-                0.24f + 0.24f * shadowDeficit + 0.12f * midDeficit
-                        + 0.10f * compressedShadows + 0.10f * sliderLift,
-                0.12f, 0.68f);
-        if (collapsedBracket) targetDehaze = Math.min(targetDehaze, 0.30f);
-        float usefulShadowSignal = smoothstepFloat(0.006f, 0.030f, stats.fusedP25Linear);
-        float targetMicro = clampFloat(
-                0.18f + 0.16f * midDeficit + 0.09f * shadowDeficit * usefulShadowSignal
-                        + 0.07f * sliderLift,
-                0.10f, 0.48f);
-        if (collapsedBracket) targetMicro = Math.min(targetMicro, 0.22f);
-        displayDehaze = stepToward(
-                displayDehaze, targetDehaze, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
-        displayMicroContrast = stepToward(
-                displayMicroContrast, targetMicro, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
+            // V2.18's mode-6 Dehaze/Micro pass is a global exponent (>1), so in AUTO
+            // it darkens the already normalized JPEG a second time. Keep it exactly
+            // neutral in AUTO. MANUAL retains the existing adaptive clarity behavior.
+            displayDehaze = stepToward(
+                    displayDehaze, 0.0f, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
+            displayMicroContrast = stepToward(
+                    displayMicroContrast, 0.0f, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
+        } else {
+            float shadowDeficit = 1.0f - smoothstepFloat(
+                    0.18f, 0.34f, stats.shadowLocalContrast);
+            float midDeficit = 1.0f - smoothstepFloat(
+                    0.20f, 0.36f, stats.midLocalContrast);
+            float shadowSpreadStops = (float) (Math.log(
+                    Math.max(0.001f, stats.fusedP50Linear)
+                            / Math.max(0.001f, stats.fusedP10Linear)) / Math.log(2.0));
+            float compressedShadows = 1.0f - smoothstepFloat(2.5f, 4.2f, shadowSpreadStops);
+            float sliderLift = 0.55f * smoothstepFloat(1.05f, 1.55f, displayGamma)
+                    + 0.45f * smoothstepFloat(0.05f, 0.70f, displayBrightnessEv);
+            float targetDehaze = clampFloat(
+                    0.24f + 0.24f * shadowDeficit + 0.12f * midDeficit
+                            + 0.10f * compressedShadows + 0.10f * sliderLift,
+                    0.12f, 0.68f);
+            if (collapsedBracket) targetDehaze = Math.min(targetDehaze, 0.30f);
+            float usefulShadowSignal = smoothstepFloat(0.006f, 0.030f, stats.fusedP25Linear);
+            float targetMicro = clampFloat(
+                    0.18f + 0.16f * midDeficit + 0.09f * shadowDeficit * usefulShadowSignal
+                            + 0.07f * sliderLift,
+                    0.10f, 0.48f);
+            if (collapsedBracket) targetMicro = Math.min(targetMicro, 0.22f);
+            displayDehaze = stepToward(
+                    displayDehaze, targetDehaze, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
+            displayMicroContrast = stepToward(
+                    displayMicroContrast, targetMicro, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
+        }
 
         boolean changed = Math.abs(displayBrightnessEv - oldBrightness) >= 0.005f
                 || Math.abs(displayGamma - oldGamma) >= 0.005f
@@ -1863,6 +1902,44 @@ final class CameraController {
         }
         listener.onPresentationSettings(
                 displayBrightnessEv, displayGamma, displayDehaze, displayMicroContrast, automatic);
+    }
+
+    private static float predictAutoPresentedLuma(
+            float sceneLuma, float brightnessEv, float gamma, double physicalRatio) {
+        float y = Math.max(0.0f, sceneLuma) * (float) Math.pow(2.0, brightnessEv);
+        if (y <= 0.000001f) return y;
+
+        float toe = smoothstepFloat(0.015f, 0.090f, y);
+        float highlightProtect = 1.0f - smoothstepFloat(0.45f, 0.68f, y);
+        y = y + 0.45f * toe * highlightProtect * y
+                * (1.0f - clampFloat(y, 0.0f, 1.0f));
+
+        float ratio = clampFloat((float) physicalRatio, 1.0f, 65536.0f);
+        float bracketStops = clampFloat(
+                (float) (Math.log(Math.max(ratio, 1.0001f)) / Math.log(2.0)), 1.0f, 6.0f);
+        if (y > 0.70f) {
+            float whiteAnchor = clampFloat(0.82f - 0.04f * (bracketStops - 1.0f), 0.68f, 0.82f);
+            float displayCeiling = clampFloat(whiteAnchor + 0.14f, 0.84f, 0.96f);
+            if (y <= 1.0f) {
+                float t = clampFloat((y - 0.70f) / 0.30f, 0.0f, 1.0f);
+                y = lerpFloat(0.70f, whiteAnchor, t);
+            } else {
+                float headroomLog2 = Math.max(
+                        (float) (Math.log(Math.max(ratio, 1.0001f)) / Math.log(2.0)), 0.0001f);
+                float t = clampFloat(
+                        (float) (Math.log(Math.max(y, 0.000001f)) / Math.log(2.0)) / headroomLog2,
+                        0.0f, 1.0f);
+                y = lerpFloat(whiteAnchor, displayCeiling, t);
+            }
+        }
+
+        float safeGamma = clampFloat(gamma, AUTO_PRESENT_GAMMA_MIN, AUTO_PRESENT_GAMMA_MAX);
+        return (float) Math.pow(clampFloat(y, 0.0f, 1.0f), 1.0f / safeGamma);
+    }
+
+    private static float log2RatioFloat(float value, float target) {
+        return (float) (Math.log(
+                Math.max(0.0001f, value) / Math.max(0.0001f, target)) / Math.log(2.0));
     }
 
     private static float clampFloat(float value, float low, float high) {

@@ -1,12 +1,12 @@
-V1.4.11 V2.18 — VSCODE.DEV UPLOAD
+V1.4.11 V2.19 — VSCODE.DEV UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: e946baa2b8213d48263cdc0fdc1ed1436b5fdae2 (successful V2.17)
+Required direct parent / runtime authority: f70e85bc3ca8a5ce0fcf0e0c4634ec786e141d73 (successful V2.18)
 
-1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.17 parent before uploading.
+1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.18 parent before uploading.
 2. Upload/replace ALL files from this ZIP at repository root, preserving paths.
 3. Do not add extra files or folders.
-4. Source Control must show exactly 10 changed tracked files relative to V2.17:
+4. Source Control must show exactly 9 changed tracked files relative to V2.18:
    .github/workflows/build.yml
    BUILD_WORKFLOW_COPY.yml
    PACKAGE_INFO.txt
@@ -15,12 +15,11 @@ Required direct parent / runtime authority: e946baa2b8213d48263cdc0fdc1ed1436b5f
    VSCODE_DEV_UPLOAD.txt
    app/build.gradle.kts
    app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-   app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
    scripts/verify_orientation.py
 5. Commit once and push once.
 
 Suggested commit message:
-V1.4.11 V2.18 MANUAL-calibrated AUTO HDR normalization
+V1.4.11 V2.19 Photon-normalized post-fusion exposure
 
 Do not commit the ZIP itself.
 Do not alter dev/main.

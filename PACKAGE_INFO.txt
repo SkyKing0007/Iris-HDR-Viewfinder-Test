@@ -1,4 +1,4 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.18 MANUAL-CALIBRATED AUTO HDR NORMALIZATION PACKAGE INFO
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.19 PHOTON-NORMALIZED POST-FUSION EXPOSURE PACKAGE INFO
 
 STATUS
 PREPARED / UPLOAD-READY only after packaged proof completes; NOT BUILD-PROVEN until GitHub Actions succeeds.
@@ -7,52 +7,53 @@ No backup branch requested or created.
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 35
-Target versionName: 1.0-v1.4.11-v2.18
+Target versionCode: 36
+Target versionName: 1.0-v1.4.11-v2.19
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: e946baa2b8213d48263cdc0fdc1ed1436b5fdae2
-Tree: 286039f89f5bf6089cde1a1e57d147b10efb00f9
-GitHub Actions run: 33942346596 — SUCCESS
-Artifact ID: 9962252229
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.17
-Artifact ZIP digest: sha256:68fad6bbc30b1accb40d2eac787f3e70aaf416a6d23f2d60f06f62f61ecfdaf6
-V2.17 APK SHA-256: a92dad7f1e3b138eadb6b4efd81e9357e8860296f9eec13bf426881f12180dcf
-V2.17 source-candidate TAR SHA-256: 50bba0878fb5ce941646ae04b89c65d943e1714c7704b9a7995b8257c002e351
-V2.17 runtime manifest SHA-256: 941c2e8696f4b579a8f295ad89fb3f66825868a95fc4891a4ae2a1b5ba166ae6
-V2.17 repository manifest SHA-256: 719d3c062c75a62df439ac4bd2b168e1233640651f5e456e9f87372fc03970c0
-V2.17 regressions SHA-256: 279c3ff4e8b5837aa37f61e30ed4603ca400f739f275524bbaa5121481243759
+Commit: f70e85bc3ca8a5ce0fcf0e0c4634ec786e141d73
+Tree: 365a94f9146a7182ab4e3e7000d87b5dee6c54ed
+GitHub Actions run: 33945509036 — SUCCESS
+Artifact ID: 9963206632
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.18
+Artifact ZIP digest: sha256:a5c0c203cc15b8e7c7d5cea277ab0b8fc86cc05771bf2209dbc191c971a9b65f
+V2.18 APK SHA-256: 6c6e50c8a4b6e018f24830a7a8d1799c436a218541756fe95c6b5613adeab615
+V2.18 source-candidate TAR SHA-256: 6aeb356ed9bc081e4d5b19a53de8c14badfd39b224e0a96a8016c4d568fc39e8
+V2.18 runtime manifest SHA-256: 48e4aa0a6feaee9b5f70d4ed7f9d810b3fcd29ef5d0dc65a99fa6d41c5078bb3
+V2.18 repository manifest SHA-256: f717d2f446fa34e1b2ad5931ea676a7c9bb5461940988f04b315f9262b736c64
+V2.18 regressions SHA-256: f2f2e4bc11db367c4c77ce62af0173b4b97d8a9b44314977cc7ff1e6944f6f98
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.17/V2.16 workflow/build implementation inherited unchanged. Step order, action versions, pinned real glslang commands, real Java compiler, full :app:assembleDebug, deterministic patch proof, candidate freeze, exactly-one-APK proof and artifact export remain unchanged.
+Exact successful V2.18/V2.17 procedure inherited unchanged. Step order, action versions, authority reconstruction, allowlist proof, deterministic full-index patch proof, pinned real glslang commands, real Java compiler, PRE-BUILD SAFETY proof, full :app:assembleDebug, post-build invariance, exactly-one-APK proof and artifact export remain unchanged.
 
-PRIMARY V2.18 DESIGN EVIDENCE
-The supplied V2.17 MANUAL/AUTO shelf pair proves MANUAL fusion is clean while AUTO overdrives LONG. MANUAL actual pair is ~4x / 2 EV; AUTO reaches ~20.6x / 4.36 EV in the same scene. Saved-JPEG analysis gives MANUAL LONG approximately P95=0.205/P98=0.337/near-clip=0.00073, versus AUTO LONG approximately P95=0.956/P98=1.0/near-clip=0.071. V2.18 therefore changes AUTO exposure/presentation ownership, not V2.17 fusion.
+PRIMARY V2.19 DESIGN EVIDENCE
+Three supplied V2.18 AUTO FUSED JPEGs were compared against three Photon Camera references. Iris final linear luminance was approximately 2.27-2.83 EV darker at median and 2.33-2.74 EV darker at P90, while V2.18 left essentially no near-white output. V2.18 correctly protected physical LONG exposure but then rendered the already-fused scene too dark. Therefore V2.19 changes post-fusion AUTO presentation only; physical SHORT/LONG exposure, V2.17 LONG-truth fusion, registration, DNG and flicker behavior remain frozen.
 
-STRICT V2.18 AUTO CONTRACT
-- V2.17 LONG-truth fusion bytes are unchanged.
-- AUTO bracket remains scene-driven and bounded 4x..64x.
-- MANUAL-calibrated SHORT body targets request a much darker intact LONG body in highlight-heavy scenes.
-- LONG P95/P98/near-clip feedback can only reduce excessive LONG body exposure; it cannot collapse below the 4x HDR floor.
-- Dark-signal floor is low enough that 64x remains reachable when feasible.
-- Reference MANUAL sample evaluates to 4x, about -2.35 EV brightness and gamma 1.55.
-- Reference bad AUTO sample is driven back toward 4x instead of ~20.6x.
-- AUTO presentation protects highlights with negative EV, then restores body/midtones with gamma.
-- AUTO brightness can reach -4 EV and gamma uses 0.50..2.00.
+STRICT V2.19 AUTO PRESENTATION CONTRACT
+- V2.18 physical AUTO exposure controller remains byte-exact; shelf stays near 4x / 2 EV instead of returning to ~20.6x.
+- V2.17/V2.18 fusion shader and HdrGlView/JpegFusion/CaptureSetSaver/MainActivity bytes are unchanged.
+- AUTO solves final displayed scene key from fused P50/P90 plus LONG specular pressure rather than targeting the V2.18 dark pre-presentation P90=0.020..0.024.
+- High body contrast lowers target median while preserving bright upper mids; isolated specular pressure lowers both median and P90.
+- Supplied shelf calibration predicts approximately P50=0.107/P90=0.428 versus Photon 0.106/0.399.
+- Supplied chandelier calibration predicts approximately P50=0.134/P90=0.276 versus Photon 0.134/0.268.
+- Ordinary lower-contrast scenes retain a brighter kitchen-like key around P50~0.17-0.18 / P90~0.38-0.40.
+- AUTO mode-6 Dehaze/Micro are neutralized because that saved pass is a second global exponent (>1) that otherwise darkens the normalized JPEG again.
+- MANUAL retains the existing user Brightness/Gamma and adaptive Dehaze/Micro behavior.
+- AUTO Brightness/Gamma remain within the existing -4..+1 EV / 0.50..2.00 domains and are frozen at shutter.
 
-MANUAL / FLICKER CONTRACT
-- Physical 50/60-Hz solver math is unchanged.
-- SHORT and LONG remain independent captures; SHORT effective exposure never exceeds LONG.
-- Long ISO/shutter still cannot re-solve SHORT.
-- MANUAL callbacks now expose effective safe shutter/ISO to the UI so controls snap to realizable values instead of hiding remapping.
-- MANUAL remains available for user adjustment.
+CAPTURE / HDR / FLICKER CONTRACT — UNCHANGED FROM SUCCESSFUL V2.18
+- AUTO physical bracket remains scene-driven 4x..64x with full 6-EV capability when feasible.
+- SHORT and LONG remain independent captures and SHORT effective exposure never exceeds LONG.
+- Long ISO/shutter cannot re-solve SHORT.
+- Physical 50/60-Hz safety math and truthful effective MANUAL slider reporting remain unchanged.
+- LONG remains immutable saved body/geometry; aligned SHORT owns only coherent LONG-information-loss regions.
+- No fractional LONG/SHORT high-frequency RGB mix and no synthetic radiance fill.
 
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 2
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 1
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 
-PROTECTED RUNTIME — EXACTLY 10
+PROTECTED RUNTIME — EXACTLY 11
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/fullscreen.vert
@@ -62,6 +63,7 @@ PROTECTED RUNTIME — EXACTLY 10
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
 
 INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
@@ -70,16 +72,16 @@ INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-YES, PAYLOAD/REGRESSION CONTRACT ONLY. Authority/version/hash/allowlist/artifact payloads advance to V2.18. Successful V2.17 compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, deterministic patch replay, freeze and one-APK proof remain unchanged.
+YES, PAYLOAD/REGRESSION CONTRACT ONLY. Authority/version/hash/allowlist/artifact payloads advance to V2.19. Successful V2.18 compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, deterministic patch replay, freeze and one-APK proof remain unchanged.
 
-V2.18 RUNTIME DIGEST
-48e4aa0a6feaee9b5f70d4ed7f9d810b3fcd29ef5d0dc65a99fa6d41c5078bb3
+V2.19 RUNTIME DIGEST
+e9c9effd529ee23a44a207c59083f51b5d19483d880fc9231d1ceff1699a2dfa
 Runtime universe remains exactly 12 files.
 
 COMPILER STATUS BEFORE ACTIONS
-Unchanged GLSL hash/inheritance proof: PASS against successful V2.17.
+Unchanged GLSL hash/inheritance proof: PASS against successful V2.18.
 REAL project Java compiler: NOT RUN locally.
 FULL :app:assembleDebug: NOT RUN locally.
 
 FINAL ACTIONS AUTHORITY
-Until V2.18 succeeds, final authority remains V2.17 commit e946baa2b8213d48263cdc0fdc1ed1436b5fdae2 / run 33942346596 / artifact 9962252229.
+Until V2.19 succeeds, final authority remains V2.18 commit f70e85bc3ca8a5ce0fcf0e0c4634ec786e141d73 / run 33945509036 / artifact 9963206632.
