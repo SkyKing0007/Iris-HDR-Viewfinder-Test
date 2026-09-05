@@ -24,6 +24,7 @@ import android.view.Gravity;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -56,10 +57,15 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private static final String STATE_ISO_INDEX = "isoIndex";
     private static final String STATE_AUTO_HDR = "autoHdr";
     private static final String STATE_ALLOW_CROPPED_60 = "allowCropped60";
+    private static final String STATE_FLICKER_MODE = "flickerMode";
     private static final String STATE_DISPLAY_BRIGHTNESS_EV = "displayBrightnessEv";
+    private static final String STATE_DISPLAY_GAMMA = "displayGamma";
     private static final float DISPLAY_BRIGHTNESS_MIN_EV = -16.0f;
     private static final float DISPLAY_BRIGHTNESS_MAX_EV = 1.0f;
     private static final int DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10;
+    private static final float DISPLAY_GAMMA_MIN = 0.50f;
+    private static final float DISPLAY_GAMMA_MAX = 2.00f;
+    private static final int DISPLAY_GAMMA_STEPS_PER_UNIT = 20;
     private static final long[] EXPOSURES_NS = {
             1_000_000_000L / 8000,
             1_000_000_000L / 4000,
@@ -88,15 +94,18 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private TextView longLabel;
     private TextView isoLabel;
     private TextView brightnessLabel;
+    private TextView gammaLabel;
     private Spinner cameraSpinner;
     private Spinner modeSpinner;
     private SeekBar shortBar;
     private SeekBar longBar;
     private SeekBar isoBar;
     private SeekBar brightnessBar;
+    private SeekBar gammaBar;
     private Button captureButton;
     private Button autoButton;
     private Button fpsButton;
+    private Button flickerButton;
     private final List<CameraController.CameraDescriptor> cameras = new ArrayList<>();
     private boolean updatingControls;
     private String selectedCameraId;
@@ -105,8 +114,10 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private volatile int longIndex = 9;
     private volatile int isoIndex = 2;
     private volatile boolean autoHdrEnabled = true;
+    private int flickerMode = CameraController.FLICKER_MODE_AUTO;
     private volatile boolean allowCropped60Fps;
     private volatile float displayBrightnessEv;
+    private volatile float displayGamma = 1.0f;
     private final Handler heartbeatHandler = new Handler(Looper.getMainLooper());
     private boolean heartbeatScheduled;
     private final Runnable heartbeatRunnable = new Runnable() {
@@ -141,8 +152,14 @@ public final class MainActivity extends Activity implements CameraController.Lis
         controller = new CameraController(this, this);
         glView.setInputSurfaceListener(controller::setPreviewSurface);
         glView.setSceneStatsListener(controller::onHdrSceneStats);
+        controller.setStillFusionView(glView);
+        glView.setDisplayBrightnessEv(displayBrightnessEv);
+        glView.setDisplayGamma(displayGamma);
+        glView.setDisplayEnhancement(0.28f, 0.20f);
         controller.setDisplayBrightnessEv(displayBrightnessEv);
+        controller.setDisplayGamma(displayGamma);
         controller.setAllowCropped60Fps(allowCropped60Fps);
+        controller.setFlickerMode(flickerMode);
         controller.setAutoHdrExposure(autoHdrEnabled);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
         if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -160,9 +177,12 @@ public final class MainActivity extends Activity implements CameraController.Lis
         longIndex = clampIndex(state.getInt(STATE_LONG_INDEX, longIndex), EXPOSURES_NS.length);
         isoIndex = clampIndex(state.getInt(STATE_ISO_INDEX, isoIndex), ISO_VALUES.length);
         autoHdrEnabled = state.getBoolean(STATE_AUTO_HDR, autoHdrEnabled);
+        flickerMode = state.getInt(STATE_FLICKER_MODE, flickerMode);
         allowCropped60Fps = state.getBoolean(STATE_ALLOW_CROPPED_60, allowCropped60Fps);
         displayBrightnessEv = Math.max(DISPLAY_BRIGHTNESS_MIN_EV,
                 Math.min(DISPLAY_BRIGHTNESS_MAX_EV, state.getFloat(STATE_DISPLAY_BRIGHTNESS_EV, displayBrightnessEv)));
+        displayGamma = Math.max(DISPLAY_GAMMA_MIN,
+                Math.min(DISPLAY_GAMMA_MAX, state.getFloat(STATE_DISPLAY_GAMMA, displayGamma)));
     }
 
     @Override
@@ -174,8 +194,10 @@ public final class MainActivity extends Activity implements CameraController.Lis
         outState.putInt(STATE_LONG_INDEX, longIndex);
         outState.putInt(STATE_ISO_INDEX, isoIndex);
         outState.putBoolean(STATE_AUTO_HDR, autoHdrEnabled);
+        outState.putInt(STATE_FLICKER_MODE, flickerMode);
         outState.putBoolean(STATE_ALLOW_CROPPED_60, allowCropped60Fps);
         outState.putFloat(STATE_DISPLAY_BRIGHTNESS_EV, displayBrightnessEv);
+        outState.putFloat(STATE_DISPLAY_GAMMA, displayGamma);
     }
 
     private void buildUi() {
@@ -194,22 +216,10 @@ public final class MainActivity extends Activity implements CameraController.Lis
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        final int panelHorizontalPadding = dp(6);
-        final int panelTopPadding = dp(2);
-        final int panelBottomPadding = dp(5);
-        panel.setPadding(panelHorizontalPadding, panelTopPadding, panelHorizontalPadding, panelBottomPadding);
+        panel.setPadding(dp(8), dp(6), dp(8), dp(6));
         panel.setBackgroundColor(0xCC000000);
-        root.setOnApplyWindowInsetsListener((view, insets) -> {
-            int navigationBottom = Math.max(0, insets.getSystemWindowInsetBottom());
-            panel.setPadding(
-                    panelHorizontalPadding,
-                    panelTopPadding,
-                    panelHorizontalPadding,
-                    panelBottomPadding + navigationBottom);
-            return insets;
-        });
 
-        statusText = textView("Waiting for camera permission…", portrait ? 10 : 11);
+        statusText = textView("Waiting for camera permission…", portrait ? 12 : 13);
         statusText.setSingleLine(true);
         statusText.setEllipsize(TextUtils.TruncateAt.END);
         statusText.setIncludeFontPadding(false);
@@ -221,10 +231,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
 
         cameraSpinner = new Spinner(this);
         cameraSpinner.setBackgroundColor(0xCCEEEEEE);
-        cameraSpinner.setMinimumHeight(dp(36));
 
         modeSpinner = new Spinner(this);
-        modeSpinner.setMinimumHeight(dp(36));
         ArrayAdapter<String> modes = new ArrayAdapter<>(
                 this,
                 android.R.layout.simple_spinner_item,
@@ -234,37 +242,55 @@ public final class MainActivity extends Activity implements CameraController.Lis
         modeSpinner.setSelection(modeIndex, false);
 
         autoButton = new Button(this);
-        compactButton(autoButton);
         refreshAutoButton();
 
         fpsButton = new Button(this);
-        compactButton(fpsButton);
         refreshFpsButton();
 
+        flickerButton = new Button(this);
+        refreshFlickerButton();
+
         captureButton = new Button(this);
-        compactButton(captureButton);
         captureButton.setText("CAPTURE HDR SET");
 
-        shortLabel = textView("Short " + CameraController.exposureText(EXPOSURES_NS[shortIndex]), 11);
+        shortLabel = textView("Short " + CameraController.exposureText(EXPOSURES_NS[shortIndex]), 12);
         shortBar = new SeekBar(this);
         shortBar.setMax(EXPOSURES_NS.length - 1);
         shortBar.setProgress(shortIndex);
 
-        longLabel = textView("Long " + CameraController.exposureText(EXPOSURES_NS[longIndex]), 11);
+        longLabel = textView("Long " + CameraController.exposureText(EXPOSURES_NS[longIndex]), 12);
         longBar = new SeekBar(this);
         longBar.setMax(EXPOSURES_NS.length - 1);
         longBar.setProgress(longIndex);
 
-        isoLabel = textView("Long ISO " + ISO_VALUES[isoIndex] + "  Short=min", 11);
+        isoLabel = textView("Long ISO " + ISO_VALUES[isoIndex] + "  Short=min", 12);
         isoBar = new SeekBar(this);
         isoBar.setMax(ISO_VALUES.length - 1);
         isoBar.setProgress(isoIndex);
 
-        brightnessLabel = textView(brightnessLabelText(displayBrightnessEv), 11);
+        brightnessLabel = textView(brightnessLabelText(displayBrightnessEv), 12);
         brightnessBar = new SeekBar(this);
         brightnessBar.setMax(Math.round((DISPLAY_BRIGHTNESS_MAX_EV - DISPLAY_BRIGHTNESS_MIN_EV)
                 * DISPLAY_BRIGHTNESS_STEPS_PER_EV));
         brightnessBar.setProgress(brightnessProgressForEv(displayBrightnessEv));
+
+        gammaLabel = textView(gammaLabelText(displayGamma), 12);
+        gammaBar = new SeekBar(this);
+        gammaBar.setMax(Math.round((DISPLAY_GAMMA_MAX - DISPLAY_GAMMA_MIN)
+                * DISPLAY_GAMMA_STEPS_PER_UNIT));
+        gammaBar.setProgress(gammaProgressForValue(displayGamma));
+
+        compactControl(cameraSpinner);
+        compactControl(modeSpinner);
+        compactControl(autoButton);
+        compactControl(fpsButton);
+        compactControl(flickerButton);
+        compactControl(captureButton);
+        compactControl(shortBar);
+        compactControl(longBar);
+        compactControl(isoBar);
+        compactControl(brightnessBar);
+        compactControl(gammaBar);
 
         if (portrait) {
             buildPortraitControls(panel, autoButton, fpsButton);
@@ -276,7 +302,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
-        root.requestApplyInsets();
+        applySafeSystemBarInsets(root, panel);
         setManualControlsEnabled(!autoHdrEnabled);
 
         modeSpinner.setOnItemSelectedListener(new SimpleItemSelectedListener(position -> {
@@ -323,7 +349,21 @@ public final class MainActivity extends Activity implements CameraController.Lis
                 if (!fromUser || updatingControls) return;
                 displayBrightnessEv = brightnessEvForProgress(progress);
                 brightnessLabel.setText(brightnessLabelText(displayBrightnessEv));
+                glView.setDisplayBrightnessEv(displayBrightnessEv);
                 if (controller != null) controller.setDisplayBrightnessEv(displayBrightnessEv);
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        gammaBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (!fromUser || updatingControls) return;
+                displayGamma = gammaValueForProgress(progress);
+                gammaLabel.setText(gammaLabelText(displayGamma));
+                glView.setDisplayGamma(displayGamma);
+                if (controller != null) controller.setDisplayGamma(displayGamma);
             }
 
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
@@ -346,11 +386,35 @@ public final class MainActivity extends Activity implements CameraController.Lis
             Toast.makeText(
                     this,
                     autoHdrEnabled
-                            ? "AUTO HDR continuously adapts LONG appearance while SHORT adds only needed highlight headroom"
-                            : "MANUAL SAFE: you own LONG and the immediate SHORT exposure; safety may add headroom only when needed",
+                            ? "AUTO HDR uses MANUAL-calibrated LONG protection + automatic presentation; manual sliders are locked"
+                            : "MANUAL SAFE: sliders are user controls and snap to the actual flicker-safe values when required",
                     Toast.LENGTH_SHORT).show();
         });
 
+
+        flickerButton.setOnClickListener(v -> {
+            if (flickerMode == CameraController.FLICKER_MODE_AUTO) {
+                flickerMode = CameraController.FLICKER_MODE_60HZ;
+            } else if (flickerMode == CameraController.FLICKER_MODE_60HZ) {
+                flickerMode = CameraController.FLICKER_MODE_50HZ;
+            } else if (flickerMode == CameraController.FLICKER_MODE_50HZ) {
+                flickerMode = CameraController.FLICKER_MODE_OFF;
+            } else {
+                flickerMode = CameraController.FLICKER_MODE_AUTO;
+            }
+            refreshFlickerButton();
+            if (controller != null) controller.setFlickerMode(flickerMode);
+            Toast.makeText(
+                    this,
+                    flickerMode == CameraController.FLICKER_MODE_AUTO
+                            ? "FLICKER AUTO: 50/60-Hz safety is claimed only when Camera2 proves the frequency; NONE/unknown is shown UNSAFE"
+                            : flickerMode == CameraController.FLICKER_MODE_60HZ
+                                    ? "FLICKER 60Hz: SHORT and LONG use integer 1/120-s cycles when sensor exposure/ISO bounds allow"
+                                    : flickerMode == CameraController.FLICKER_MODE_50HZ
+                                            ? "FLICKER 50Hz: SHORT and LONG use integer 1/100-s cycles when sensor exposure/ISO bounds allow"
+                                            : "FLICKER OFF: no 50/60-Hz integration-window enforcement",
+                    Toast.LENGTH_LONG).show();
+        });
 
         fpsButton.setOnClickListener(v -> {
             allowCropped60Fps = !allowCropped60Fps;
@@ -366,9 +430,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
 
         captureButton.setOnClickListener(v -> {
             if (controller == null) return;
-            HdrGlView.PublishedPairSnapshot publishedPair = glView.snapshotPublishedPair();
             captureButton.setEnabled(false);
-            controller.captureHdrSet(publishedPair);
+            controller.captureHdrSet();
         });
     }
 
@@ -381,6 +444,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         panel.addView(modeRow, matchWrap());
 
         LinearLayout fpsCaptureRow = makeHorizontalRow();
+        fpsCaptureRow.addView(flickerButton, weighted(1f));
         fpsCaptureRow.addView(fpsButton, weighted(1f));
         fpsCaptureRow.addView(captureButton, weighted(1f));
         panel.addView(fpsCaptureRow, matchWrap());
@@ -388,6 +452,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         panel.addView(makeSliderRow(longLabel, longBar), matchWrap());
         panel.addView(makeSliderRow(isoLabel, isoBar), matchWrap());
         panel.addView(makeSliderRow(brightnessLabel, brightnessBar), matchWrap());
+        panel.addView(makeSliderRow(gammaLabel, gammaBar), matchWrap());
     }
 
     private void buildLandscapeControls(LinearLayout panel, Button autoButton, Button fpsButton) {
@@ -395,6 +460,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         row1.addView(cameraSpinner, weighted(2f));
         row1.addView(modeSpinner, weighted(1f));
         row1.addView(autoButton, weighted(1f));
+        row1.addView(flickerButton, weighted(1.15f));
         row1.addView(fpsButton, weighted(1f));
         row1.addView(captureButton, weighted(1.2f));
         panel.addView(row1, matchWrap());
@@ -407,15 +473,19 @@ public final class MainActivity extends Activity implements CameraController.Lis
         row2.addView(isoLabel, weighted(0.5f));
         row2.addView(isoBar, weighted(1f));
         panel.addView(row2, matchWrap());
-        panel.addView(makeSliderRow(brightnessLabel, brightnessBar), matchWrap());
+
+        LinearLayout toneRow = makeHorizontalRow();
+        toneRow.addView(brightnessLabel, weighted(0.7f));
+        toneRow.addView(brightnessBar, weighted(1.3f));
+        toneRow.addView(gammaLabel, weighted(0.7f));
+        toneRow.addView(gammaBar, weighted(1.3f));
+        panel.addView(toneRow, matchWrap());
     }
 
     private LinearLayout makeSliderRow(TextView label, SeekBar bar) {
         LinearLayout row = makeHorizontalRow();
-        row.setMinimumHeight(dp(34));
-        bar.setPadding(0, 0, 0, 0);
-        row.addView(label, weighted(0.34f));
-        row.addView(bar, weighted(0.66f));
+        row.addView(label, weighted(0.35f));
+        row.addView(bar, weighted(0.65f));
         return row;
     }
 
@@ -537,9 +607,14 @@ public final class MainActivity extends Activity implements CameraController.Lis
         int previewRelation = (sensorOrientation - displayDegrees + 360) % 360;
         int jpegOrientation = (sensorOrientation - displayDegrees + 360) % 360;
         glView.setProducerOwnedOrientationDegrees(previewRelation);
+        glView.setDisplayBrightnessEv(displayBrightnessEv);
+        glView.setDisplayGamma(displayGamma);
+        glView.setDisplayEnhancement(0.28f, 0.20f);
         controller.setDisplayBrightnessEv(displayBrightnessEv);
+        controller.setDisplayGamma(displayGamma);
         controller.setJpegOrientationDegrees(jpegOrientation);
         controller.setPreviewMode(previewModeForIndex(modeIndex));
+        controller.setFlickerMode(flickerMode);
         controller.setAutoHdrExposure(autoHdrEnabled);
         controller.setManualSettings(
                 EXPOSURES_NS[shortIndex],
@@ -555,6 +630,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
                         + " | target=" + targetPreviewFps + " fps"
                         + " | AE fps=" + (aeFpsRange == null ? "auto" : aeFpsRange)
                         + " | cadence=" + (allowCropped60Fps ? "60fps crop requested" : "FOV-safe fixed 30fps")
+                        + " | flickerMode=" + flickerModeText()
                         + " | sRGB tonemap=" + (srgbTonemap ? "contrast-curve" : "HAL default")
                         + " | sync latency=" + (syncLatency == null ? "?" : syncLatency)
                         + " | files -> Downloads/IrisHDRViewfinder"
@@ -573,8 +649,11 @@ public final class MainActivity extends Activity implements CameraController.Lis
             shortBar.setProgress(shortIndex);
             longBar.setProgress(longIndex);
             isoBar.setProgress(isoIndex);
-            shortLabel.setText("Short " + CameraController.exposureText(shortExposureNs));
-            longLabel.setText("Long " + CameraController.exposureText(longExposureNs));
+            // V2.18 callback values are the actual realizable MANUAL settings after
+            // 50/60-Hz safety. The bars therefore snap to what Camera2 will receive
+            // instead of displaying a faster SHORT request that was silently remapped.
+            shortLabel.setText("Short ACTUAL " + CameraController.exposureText(shortExposureNs));
+            longLabel.setText("Long ACTUAL " + CameraController.exposureText(longExposureNs));
             isoLabel.setText("Long ISO " + iso + "  Short=min  MANUAL");
             updatingControls = false;
             if (!autoHdrEnabled) setManualControlsEnabled(true);
@@ -605,6 +684,39 @@ public final class MainActivity extends Activity implements CameraController.Lis
     }
 
     @Override
+    public void onPresentationSettings(
+            float brightnessEv,
+            float gamma,
+            float dehaze,
+            float microContrast,
+            boolean automatic) {
+        runOnUiThread(() -> {
+            updatingControls = true;
+            displayBrightnessEv = brightnessEv;
+            displayGamma = gamma;
+            brightnessBar.setProgress(brightnessProgressForEv(displayBrightnessEv));
+            gammaBar.setProgress(gammaProgressForValue(displayGamma));
+            brightnessLabel.setText(String.format(
+                    Locale.US,
+                    automatic ? "Brightness AUTO %+.1f EV  Dehaze %.0f%%"
+                            : "Brightness %+.1f EV  Dehaze auto %.0f%%",
+                    displayBrightnessEv,
+                    100.0f * dehaze));
+            gammaLabel.setText(String.format(
+                    Locale.US,
+                    automatic ? "Gamma AUTO %.2f  Micro %.0f%%"
+                            : "Gamma %.2f  Micro auto %.0f%%",
+                    displayGamma,
+                    100.0f * microContrast));
+            glView.setDisplayBrightnessEv(displayBrightnessEv);
+            glView.setDisplayGamma(displayGamma);
+            glView.setDisplayEnhancement(dehaze, microContrast);
+            updatingControls = false;
+            setManualControlsEnabled(!autoHdrEnabled);
+        });
+    }
+
+    @Override
     public void onCaptureFinished(String captureId, boolean success, String message) {
         RuntimeLogger.event(success ? "CAPTURE_UI_DONE" : "CAPTURE_UI_FAIL", captureId + " " + message);
         runOnUiThread(() -> {
@@ -631,6 +743,20 @@ public final class MainActivity extends Activity implements CameraController.Lis
         return String.format(Locale.US, "Brightness %+.1f EV", ev);
     }
 
+    private static int gammaProgressForValue(float gamma) {
+        float clamped = Math.max(DISPLAY_GAMMA_MIN, Math.min(DISPLAY_GAMMA_MAX, gamma));
+        return Math.round((clamped - DISPLAY_GAMMA_MIN) * DISPLAY_GAMMA_STEPS_PER_UNIT);
+    }
+
+    private static float gammaValueForProgress(int progress) {
+        float gamma = DISPLAY_GAMMA_MIN + progress / (float) DISPLAY_GAMMA_STEPS_PER_UNIT;
+        return Math.max(DISPLAY_GAMMA_MIN, Math.min(DISPLAY_GAMMA_MAX, gamma));
+    }
+
+    private static String gammaLabelText(float gamma) {
+        return String.format(Locale.US, "Gamma %.2f", gamma);
+    }
+
     private void scheduleHeartbeat() {
         if (heartbeatScheduled) return;
         heartbeatScheduled = true;
@@ -642,6 +768,18 @@ public final class MainActivity extends Activity implements CameraController.Lis
         autoButton.setText(autoHdrEnabled ? "HDR AUTO: ON" : "HDR MANUAL SAFE");
     }
 
+    private void refreshFlickerButton() {
+        if (flickerButton == null) return;
+        flickerButton.setText("FLICKER " + flickerModeText());
+    }
+
+    private String flickerModeText() {
+        if (flickerMode == CameraController.FLICKER_MODE_50HZ) return "50Hz";
+        if (flickerMode == CameraController.FLICKER_MODE_60HZ) return "60Hz";
+        if (flickerMode == CameraController.FLICKER_MODE_OFF) return "OFF";
+        return "AUTO";
+    }
+
     private void refreshFpsButton() {
         if (fpsButton == null) return;
         fpsButton.setText(allowCropped60Fps ? "60 FPS CROP: ON" : "60 FPS CROP: OFF");
@@ -651,20 +789,14 @@ public final class MainActivity extends Activity implements CameraController.Lis
         if (shortBar != null) shortBar.setEnabled(enabled);
         if (longBar != null) longBar.setEnabled(enabled);
         if (isoBar != null) isoBar.setEnabled(enabled);
-        // Brightness is an exposure-intent control in both AUTO HDR and MANUAL SAFE.
-        if (brightnessBar != null) {
-            brightnessBar.setEnabled(true);
-            brightnessBar.setAlpha(1.0f);
-        }
-        if (!enabled) {
-            if (shortBar != null) shortBar.setAlpha(0.45f);
-            if (longBar != null) longBar.setAlpha(0.45f);
-            if (isoBar != null) isoBar.setAlpha(0.45f);
-        } else {
-            if (shortBar != null) shortBar.setAlpha(1.0f);
-            if (longBar != null) longBar.setAlpha(1.0f);
-            if (isoBar != null) isoBar.setAlpha(1.0f);
-        }
+        if (brightnessBar != null) brightnessBar.setEnabled(enabled);
+        if (gammaBar != null) gammaBar.setEnabled(enabled);
+        float alpha = enabled ? 1.0f : 0.55f;
+        if (shortBar != null) shortBar.setAlpha(alpha);
+        if (longBar != null) longBar.setAlpha(alpha);
+        if (isoBar != null) isoBar.setAlpha(alpha);
+        if (brightnessBar != null) brightnessBar.setAlpha(alpha);
+        if (gammaBar != null) gammaBar.setAlpha(alpha);
     }
 
     private static HdrGlView.Mode glModeForIndex(int index) {
@@ -716,13 +848,6 @@ public final class MainActivity extends Activity implements CameraController.Lis
         return 0;
     }
 
-    private void compactButton(Button button) {
-        button.setTextSize(12);
-        button.setMinHeight(dp(38));
-        button.setMinimumHeight(dp(38));
-        button.setPadding(dp(4), 0, dp(4), 0);
-    }
-
     private TextView textView(String text, int sp) {
         TextView view = new TextView(this);
         view.setText(text);
@@ -731,6 +856,46 @@ public final class MainActivity extends Activity implements CameraController.Lis
         view.setGravity(Gravity.CENTER_VERTICAL);
         view.setPadding(dp(4), dp(2), dp(4), dp(2));
         return view;
+    }
+
+    private void compactControl(View view) {
+        int minHeight = dp(36);
+        view.setMinimumHeight(minHeight);
+        if (view instanceof Button) {
+            Button button = (Button) view;
+            button.setMinHeight(minHeight);
+            button.setMinimumWidth(0);
+            button.setPadding(dp(6), 0, dp(6), 0);
+        }
+    }
+
+    private void applySafeSystemBarInsets(LinearLayout root, LinearLayout panel) {
+        final int panelLeft = dp(8);
+        final int panelTop = dp(6);
+        final int panelRight = dp(8);
+        final int panelBottom = dp(6);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int left;
+            int top;
+            int right;
+            int bottom;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars());
+                left = bars.left;
+                top = bars.top;
+                right = bars.right;
+                bottom = bars.bottom;
+            } else {
+                left = insets.getSystemWindowInsetLeft();
+                top = insets.getSystemWindowInsetTop();
+                right = insets.getSystemWindowInsetRight();
+                bottom = insets.getSystemWindowInsetBottom();
+            }
+            root.setPadding(left, top, right, 0);
+            panel.setPadding(panelLeft, panelTop, panelRight, panelBottom + bottom);
+            return insets;
+        });
+        root.post(root::requestApplyInsets);
     }
 
     private LinearLayout makeHorizontalRow() {

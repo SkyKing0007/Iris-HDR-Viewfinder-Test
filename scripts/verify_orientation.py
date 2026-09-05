@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import math
 import hashlib
+import math
+import os
+import re
+import textwrap
 
 ROOT = Path(__file__).resolve().parents[1]
 manifest = (ROOT / "app/src/main/AndroidManifest.xml").read_text()
@@ -9,20 +12,47 @@ main = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity
 camera = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java").read_text()
 gl = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java").read_text()
 fusion = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java").read_text()
-raw_fusion = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java").read_text()
 saver = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java").read_text()
 frame_meta = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java").read_text()
 hdr_shader = (ROOT / "app/src/main/assets/shaders/hdr_display.frag").read_text()
-raw_fusion_shader = (ROOT / "app/src/main/assets/shaders/raw_hdr_fusion.frag").read_text()
-raw_demosaic_shader = (ROOT / "app/src/main/assets/shaders/raw_hdr_demosaic.frag").read_text()
-flicker_shader = (ROOT / "app/src/main/assets/shaders/flicker_field.frag").read_text()
 oes_shader = (ROOT / "app/src/main/assets/shaders/oes_to_rgb.frag").read_text()
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.5.4 V1.2 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.20 REGRESSION FAIL: " + message)
+
+
+def verify_workflow_embedded_python():
+    for workflow_name in (".github/workflows/build.yml", "BUILD_WORKFLOW_COPY.yml"):
+        text = (ROOT / workflow_name).read_text()
+        lines = text.splitlines()
+        block_count = 0
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if "python3" in line and "<<'PY'" in line:
+                start = i + 1
+                end = start
+                while end < len(lines) and lines[end].strip() != "PY":
+                    end += 1
+                require(end < len(lines), f"unterminated Python heredoc in {workflow_name} at line {i + 1}")
+                code = textwrap.dedent("\n".join(lines[start:end])) + "\n"
+                try:
+                    compile(code, f"{workflow_name}:heredoc:{block_count + 1}", "exec")
+                except SyntaxError as exc:
+                    require(False, f"embedded Python syntax failure in {workflow_name} block {block_count + 1}: {exc}")
+                block_count += 1
+                i = end
+            i += 1
+        require(block_count == 4, f"expected 4 embedded Python heredocs in {workflow_name}, found {block_count}")
+
+
+verify_workflow_embedded_python()
+if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
+    print("V1.4.11 V2.20 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    raise SystemExit(0)
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -98,12 +128,11 @@ require('setFitScaleUniform(displayProgram, "splitFitScale"' in gl,
 
 # 007 - JPEG still orientation remains proven and separate from live preview.
 require(camera.count('CaptureRequest.JPEG_ORIENTATION, jpegOrientationDegrees') == 2,
-        "SHORT/LONG reference JPEG requests must share device-relative orientation")
+        "SHORT/LONG JPEG requests must share device-relative orientation")
 require('int jpegOrientation = (sensorOrientation - displayDegrees + 360) % 360;' in main,
         "JPEG orientation convention changed")
-require('Bitmap upright = rotateBitmap(displaySize, captureOrientationDegrees);' in raw_fusion
-        and 'RAW HDR orientation must be multiple of 90' in raw_fusion,
-        "RAW-fused JPEG must use the same explicit device-relative orientation")
+require('ExifInterface.TAG_ORIENTATION' in fusion,
+        "fused JPEG must normalize EXIF-only HAL orientation")
 
 # 009 - Direct GPU live path; no per-frame Java YUV repacking.
 require(not (ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/YuvFrame.java').exists(),
@@ -167,376 +196,82 @@ require('TONEMAP_AVAILABLE_TONE_MAP_MODES' in camera and 'TONEMAP_MAX_CURVE_POIN
 require('TONEMAP_MODE_PRESET_CURVE' not in camera and 'TONEMAP_PRESET_CURVE_SRGB' not in camera,
         "retired PRESET_CURVE sRGB path returned")
 
-# 012 / 029 / 037 / 043 / 044 / 050 / 052 - V1.4.16 exposure ownership.
-# Clean AE is bootstrap-only. Once it establishes one natural scene reference, the live
-# SHORT/LONG pair never yields to periodic AE; displayed-pair statistics continuously
-# adjust LONG appearance and independently choose only as much SHORT headroom as needed.
-require('AUTO_BRACKET_DEFAULT_EV = 3.0' in camera
-        and 'AUTO_BRACKET_MAX_EV = 7.0' in camera
-        and 'MANUAL_BRACKET_MAX_EV = 6.0' in camera,
-        "adaptive AUTO/MANUAL bracket limits missing")
-require('LONG_CLIP_TRIGGER_FRACTION = 0.005' in camera
-        and 'AUTO_SHORT_CLIP_TARGET = 0.0025' in camera
-        and 'MANUAL_SHORT_CLIP_TARGET = 0.0015' in camera,
-        "95%-HDR meaningful-clipping budget missing")
-require('shortExposureNs = ONE_SECOND_NS / 480' in camera
-        and 'longExposureNs = ONE_SECOND_NS / 60' in camera,
-        "manual defaults changed unexpectedly")
+# 012 / 029 / 037 / 043 - Absolute AUTO brightness remains clean-AE owned.
+# V1.4.11 V2 preserves the proven V1.4.11/V1.4.7 8x (~3 EV) AUTO bracket;
+# aperture-derived widening from V1.4.8+ must not survive this controlled experiment.
+require('HDR_BRACKET_RATIO = 8.0' in camera,
+        "fixed V1.4.7 8x AUTO bracket missing")
+require('AUTO_MAX_BRACKET_EV' not in camera and 'autoTargetBracketEvLocked' not in camera
+        and 'AUTO_APERTURE_REFERENCE_F' not in camera,
+        "rejected adaptive 3-4.25 EV AUTO bracket survived")
+require('shortExposureNs = ONE_SECOND_NS / 480' in camera,
+        "manual default short exposure must remain 1/480s")
+require('longExposureNs = ONE_SECOND_NS / 60' in camera,
+        "manual default long exposure must remain 1/60s")
 require('AUTO_METER_MIN_FRAMES' in camera and 'buildMeterPreviewRequest' in camera,
-        "initial clean AE bootstrap missing")
-require('AUTO_REMETER_INTERVAL_MS' not in camera and 'autoRemeterRunnable' not in camera
-        and 'scheduleAutoRemeterLocked' not in camera,
-        "periodic AE takeover must remain removed after bootstrap")
-bootstrap = camera[camera.index('private void startAutoMeteringLocked()'):camera.index('private void processAutoMeterResultLocked')]
-require('if (haveAeSample) {' in bootstrap and 'Bootstrap only' in bootstrap,
-        "bootstrap meter must refuse to replace an already-live HDR pair")
-require(camera.count('buildMeterPreviewRequest(), previewCaptureCallback') == 1,
-        "clean AE repeating request may exist only for initial bootstrap")
-require('autoSceneBaseLongProduct' in camera and 'autoAdaptiveBodyTargetLinear' in camera,
-        "continuous adaptive LONG scene-body state missing")
-require('deriveAdaptiveAutoPairLocked' in camera and 'adaptBracketEvLocked' in camera,
-        "adaptive LONG/SHORT exposure solver missing")
-require('Math.pow(2.0, clampBrightnessEv(displayBrightnessEv))' in camera,
-        "Brightness must bias LONG appearance target")
-require('achievedLongProduct / Math.pow(2.0, autoAdaptiveBracketEv)' in camera,
-        "AUTO SHORT must be independently derived from adaptive highlight headroom")
-require('baseShortProduct * requestedGain' not in camera
-        and 'baseLongProduct * achievedPairGain' not in camera,
-        "V1.4.14 whole-pair Brightness coupling must remain removed")
-require('manualShortFragile = stats.shortDarkFraction > 0.94f' in camera
-        and 'overlapErrorEv > 0.50f' in camera and '!stats.shortTemporalReliable' in camera,
-        "MANUAL SHORT quality/overlap/temporal guard missing")
-require('longRecoveryCells' in gl and 'shortRecoveryPeak' in gl
-        and 'shortRecoveryNearClipFraction' in gl and 'shortRecoverySignalFraction' in gl
-        and 'shortRecoveryUsableFraction' in gl and 'shortRowModulationEv' in gl
-        and 'shortRowCorrectionConfidence' in gl and 'shortPairChromaTrust' in gl,
-        "localized LONG-damage / information-gain / flicker evidence missing")
-require('AUTO_SHORT_RECOVERY_MIN_SIGNAL_FRACTION = 0.50' in camera
-        and 'AUTO_SHORT_INFO_GAIN_MIN = 0.08' in camera
-        and 'AUTO_SHORT_PROBE_STEP_EV = 1.0' in camera
-        and 'AUTO_SHORT_PROBE_CONFIRM_SAMPLES = 2' in camera
-        and 'AUTO_SHORT_FLICKER_MODULATION_EV = 0.12' in camera
-        and 'AUTO_SHORT_FLICKER_MIN_CONFIDENCE = 0.65' in camera,
-        "information-gain AUTO SHORT search contract missing")
-require('robustSceneBodyMid' in camera and 'adaptiveSceneBodyTargetLocked' in camera,
-        "adaptive LONG scene-body meter missing")
-require('longP25Linear' in camera and 'longP35Linear' in camera
-        and 'longP25Linear' in gl and 'longP35Linear' in gl and 'longP98Linear' in gl,
-        "P25/P35/P50 body plus highlight-tail evidence must reach the appearance controller")
-require('AUTO_BODY_TARGET_NORMAL_LINEAR = 0.070' in camera
-        and 'AUTO_BODY_TARGET_HDR_LINEAR = 0.115' in camera
-        and 'AUTO_BODY_TARGET_MIN_LINEAR = 0.040' in camera
-        and 'AUTO_BODY_TARGET_MAX_LINEAR = 0.135' in camera,
-        "adaptive LONG scene-body target range missing")
-require('stats.longExposureProduct * target / Math.max(bodyMid, 0.0005)' in camera,
-        "scene key must be estimated from our measured LONG body and known exposure product")
-scene_target = camera[camera.index('private double adaptiveSceneBodyTargetLocked'):camera.index('private static double smoothstepDouble')]
-require('lastAeExposureNs' not in scene_target and 'lastAeIso' not in scene_target,
-        "bootstrap system AE must have no continuing vote in LONG reality target")
-require('AUTO_BODY_MAX_STEP_EV = 0.18' in camera and 'AUTO_BODY_CONFIRM_SAMPLES = 2' in camera,
-        "LONG adaptation must remain smooth and require consecutive scene-body evidence")
-require(camera.count('bodyRaiseEvidence = 0;') >= 8
-        and camera.count('bodyLowerEvidence = 0;') >= 8,
-        "LONG scene-body evidence must reset across camera/FPS/re-anchor transitions")
-require('BRACKET_CONFIRM_UP_SAMPLES = 2' in camera
-        and 'BRACKET_CONFIRM_DOWN_SAMPLES = 3' in camera,
-        "adaptive bracket hysteresis evidence counters missing")
-require('autoFastShortRecovery' in camera
-        and 'autoShortProbePending' in camera
-        and 'autoShortSearchExhausted' in camera
-        and 'SHORT_GAIN_TEST' in camera
-        and 'FAST_SHORT_ACCEPT' in camera
-        and 'FAST_SHORT_REJECT' in camera,
-        "AUTO SHORT must use probe/accept/reject information-gain state")
-require('minimumShortProduct = Math.max(' in camera
-        and 'candidate < fastestAllowed' in camera
-        and 'AUTO_BRACKET_MAX_EV = 7.0' in camera,
-        "achieved fast-SHORT bracket must be hard bounded after flicker subdivision quantization")
-require('stats.shortRecoveryNearClipCells > 0' in camera
-        and 'shortRecoveryNearClipFraction > 0.20f' not in camera[camera.index('private double adaptAutoShortHeadroomEvLocked'):camera.index('private void deriveAdaptiveAutoPairLocked')],
-        "small LONG-damaged emitters must be eligible for one information-gain probe without a full-frame fraction gate")
+        "clean AE anchor phase missing")
+require('commitAutoAnchorFromResultLocked' in camera and 'deriveAutoPairFromAnchorLocked' in camera,
+        "clean AE result must own absolute AUTO exposure")
+require('targetShortProduct' in camera and '/ HDR_BRACKET_RATIO' in camera,
+        "AUTO SHORT target must derive from anchored LONG product and fixed 8x ratio")
+require('autoShortIso = minIso;' in camera,
+        "AUTO SHORT must use the camera minimum sensor gain")
 require('double bracketEv = Math.log(longProduct / shortProduct) / Math.log(2.0);' in camera,
-        "actual adaptive bracket must remain reported")
+        "AUTO HDR must report actual EV after sensor/flicker clamping")
 
-# 013 / 030 / 036 / 039 / 046 / 053 / 077 / 078 / 079 / 084 / 085 / V1.5.0 -
-# Live processed-pair reconstruction remains proven, while still ownership moves to the
-# physical RAW_SENSOR pair. The two paths converge only after reconstruction through one GTM.
-require('0.04045' in hdr_shader and '12.92' in hdr_shader
-        and '0.0031308' in hdr_shader and '2.4' in hdr_shader,
-        "shared HDR shader must retain piecewise sRGB conversion")
-require('uniform vec4 shortPhotoScaleA;' in hdr_shader
-        and 'uniform float shortPhotoScaleB;' in hdr_shader
-        and 'uniform vec2 fusionTexelStep;' in hdr_shader,
-        "live scene-learned response/multiscale uniforms missing")
-require('uniform vec2 reliabilityUvScale;' in hdr_shader
-        and 'uniform vec2 reliabilityUvOffset;' in hdr_shader,
-        "live reliability-coordinate transform missing")
-require('uniform float shortCalibration;' not in hdr_shader
-        and 'shortPhotoScaleForLuma' in hdr_shader
-        and 'calibratedShortScene' in hdr_shader,
-        "visible live fusion must use learned multi-knot response, never retired scalar calibration")
-require('PHOTO_KNOT_COUNT = 5' in gl
-        and 'PHOTO_LUMA_KNOTS = {0.020f, 0.060f, 0.150f, 0.350f, 0.700f}' in gl
-        and 'PHOTO_COMMIT_STABLE_SAMPLES = 3' in gl
-        and 'PHOTO_COMMIT_STABLE_EV = 0.045f' in gl
-        and 'shortPhotoTargetScale' in gl
-        and 'shortPhotoCandidateScale' in gl
-        and 'advanceVisiblePhotoCurve' in gl
-        and 'previousShortRawLuma' in gl
-        and 'shortOnlyModulated' in gl,
-        "live five-knot learner must reject SHORT-only modulation and require stable target evidence")
-require('PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.65f' in gl
-        and 'PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND' not in gl
-        and 'PHOTO_SHORT_ONLY_MODULATION_EV = 0.12f' in gl
-        and 'PHOTO_LONG_STABLE_EV = 0.08f' in gl,
-        "pair-rate visible radiance stabilization bounds missing")
-require('uniform sampler2D shortReliabilityTex;' in hdr_shader
-        and 'shortReliabilityTexture' in gl and 'GL_RG8' in gl,
-        "local two-channel SHORT reliability map missing")
-require('shortLumaReliability' in gl and 'shortChromaReliability' in gl
-        and 'LUMA_RELIABILITY_INITIAL = 224' in gl
-        and 'CHROMA_RELIABILITY_INITIAL = 128' in gl
-        and 'LUMA_RELIABILITY_RELEASE = 64' in gl
-        and 'CHROMA_RELIABILITY_RELEASE = 96' in gl,
-        "graded local luminance/chroma temporal confidence missing")
-require('shortLumaStableCounts' not in gl and 'shortChromaStableCounts' not in gl,
-        "V1.4.17 binary 0/255 local trust state returned")
-require('snapshotShortReliabilityMap()' in gl and 'latestShortReliabilitySnapshot' in gl,
-        "live reliability snapshot owner missing")
-require('unstableFraction <= 0.25f' in gl and 'shortTemporalReliable' in gl,
-        "widespread SHORT instability must still guard exposure/bracket adaptation")
-require('longHighlightShoulder' in hdr_shader and 'longClippedCore' in hdr_shader
-        and 'fusionSample' in hdr_shader and 'multiscaleHighlightRecovery' in hdr_shader,
-        "live LONG-base full-core/edge-guided highlight compositor missing")
-require('float corePermission = smoothstep(0.25, 0.55, shortUsable);' in hdr_shader
-        and 'float hardCorePermission = smoothstep(0.20, 0.50, shortPhysicalUsable);' in hdr_shader
-        and 'coreMask = max(clippedCore * corePermission, hardClippedCore * hardCorePermission);' in hdr_shader
-        and 'if (hardClippedCore >= 1.0 && shortPhysicalUsable >= 0.50) coreMask = 1.0;' in hdr_shader,
-        "live physically clipped core must use complete current SHORT detail authority without LONG leakage")
-require('temporalTrust' not in hdr_shader,
-        "200-ms reliability history must never gate visible luma or chroma fusion")
-require('uniform sampler2D flickerFieldTex;' in hdr_shader
-        and 'uniform int flickerGuardRequired;' in hdr_shader
-        and 'fieldLumaTrust' in hdr_shader and 'fieldChromaTrust' in hdr_shader
-        and 'colorTrust = clamp(' in hdr_shader
-        and 'fieldChromaTrust * rgbSafe * overlapAgreement' in hdr_shader,
-        "current-pair local flicker field must own phase-sensitive live SHORT luma/chroma safety")
-require('vec3 neutralAtShortLuma = vec3(shortSceneLuma);' in hdr_shader
-        and 'vec3 trustedShort = mix(neutralAtShortLuma, shortScene, colorTrust);' in hdr_shader
-        and 'longChromaticityAtShortLuma' not in hdr_shader
-        and 'validChannelAgreement' in hdr_shader,
-        "live damaged highlights must be SHORT-or-neutral and never recycle LONG chromaticity")
-require('guideEdgeWeight' in hdr_shader and 'addFusionNeighbor' in hdr_shader
-        and 'damageSupport' in hdr_shader
-        and 'float shortGuideAuthority = max(' in hdr_shader
-        and 'guideLuma = mix(longSceneLuma, shortSceneLuma, shortGuideAuthority);' in hdr_shader
-        and 'float blurredMask = min(damageSupport' in hdr_shader
-        and 'float ownershipMask = clamp(max(coreMask, blurredMask), 0.0, 1.0);' in hdr_shader
-        and hdr_shader.count('mix(longCenter, shortCenter, ownershipMask)') == 1
-        and 'vec3 fusedRadiance = mix(longCenter, shortCenter, ownershipMask);' in hdr_shader
-        and 'return clamp(fusedRadiance, min(longCenter, shortCenter), max(longCenter, shortCenter));' in hdr_shader,
-        "live source ownership must occur exactly once in bounded scene-linear radiance")
-require('vec3 lowBand = mix(longLow, shortLow, coarseMask);' not in hdr_shader
-        and 'vec3 detailBand = mix(longCenter - longLow, shortCenter - shortLow, fineMask);' not in hdr_shader,
-        "V1.4.20 mismatched coarse/fine Laplacian source ownership returned")
-require('recoverOnlyLostChannels' not in hdr_shader
-        and 'mix(longScene, shortScene, highlightWeight)' not in hdr_shader
-        and 'mix(longScene, mappedShort, recoveryMask)' not in hdr_shader,
-        "retired broad/per-channel/direct live source-switch fusion returned")
-
-# V1.5.1 one shared, global, bracket-independent display mapping. No LTM.
-require('vec3 globalToneMap(vec3 sceneLinear)' in hdr_shader
-        and 'const float knee = 0.70;' in hdr_shader
-        and 'const float displayAtSceneOne = 0.80;' in hdr_shader
-        and 'const float maxSceneRadiance = 256.0;' in hdr_shader
-        and 'mappedPeak = clamp(mappedPeak, knee, displayCeiling);' in hdr_shader,
-        "shared fixed stop-domain global tone map missing")
-require('if (mode == 3)' in hdr_shader
-        and 'vec3 displayLinear = globalToneMap(texture(normalTex, vUv).rgb);' in hdr_shader
-        and 'vec3 displayLinear = globalToneMap(fusedLinear);' in hdr_shader,
-        "RAW still and live HDR must literally share globalToneMap")
-require('displayBrightnessEv' not in hdr_shader and 'brightnessGain' not in hdr_shader
-        and 'displayBrightnessEv' not in raw_fusion and 'brightnessGain' not in raw_fusion,
-        "Brightness must remain entirely outside RAW fusion/GTM")
-require('localTone' not in raw_fusion and 'localTone' not in raw_fusion_shader
-        and 'bilateral' not in raw_fusion and 'bilateral' not in raw_fusion_shader,
-        "RAW still front end must remain GTM-only with no local tone mapping")
-require('65_536.0' in raw_fusion and '65_536.0' in saver and '65_536.0' in gl,
-        "exposure ratio bounds must remain consistent live/save/RAW metadata")
-
-# V1.5.1 WYSIWYG authority is the exact SHORT/LONG generation currently published.
-require('static final class PublishedPairSnapshot' in gl
-        and 'PublishedPairSnapshot snapshotPublishedPair()' in gl
-        and 'publishedPairSnapshot = new PublishedPairSnapshot(lastShortMeta, lastLongMeta);' in gl
-        and 'publishedPairSnapshot = null;' in gl,
-        "exact displayed-pair snapshot ownership missing")
-require('HdrGlView.PublishedPairSnapshot publishedPair = glView.snapshotPublishedPair();' in main
-        and 'controller.captureHdrSet(publishedPair);' in main,
-        "shutter must capture the exact pair published by the viewfinder")
-require('void captureHdrSet(HdrGlView.PublishedPairSnapshot publishedPair)' in camera
-        and 'publishedPair.shortMeta.exposureGeneration' in camera
-        and '!= publishedPair.longMeta.exposureGeneration' in camera
-        and 'captureShortExposureNs = publishedPair.shortMeta.exposureTimeNs;' in camera
-        and 'captureLongExposureNs = publishedPair.longMeta.exposureTimeNs;' in camera,
-        "still exposure must freeze the exact displayed generation, not a newer controller target")
-require('final boolean provisionalShortProbe;' in frame_meta
-        and 'publishedPair.longMeta.provisionalShortProbe' in camera
-        and 'HDR SHORT probe is still being validated' in camera,
-        "unaccepted AUTO SHORT probes must fail closed at shutter")
-require('final String activePhysicalId;' in frame_meta
-        and 'final Rect physicalSensorCropRegion;' in frame_meta
-        and 'captureExpectedPhysicalId = publishedPair.longMeta.activePhysicalId;' in camera
-        and 'captureViewfinderSensorCrop = publishedPair.longMeta.physicalSensorCropRegion' in camera
-        and 'Cannot prove 60fps viewfinder crop for WYSIWYG still' in camera,
-        "published physical lens/crop must be frozen into WYSIWYG still capture")
-require('final RggbChannelVector colorGains;' in frame_meta
-        and 'final ColorSpaceTransform colorTransform;' in frame_meta
-        and 'captureColorGains = publishedPair.longMeta.colorGains;' in camera
-        and 'captureColorTransform = publishedPair.longMeta.colorTransform;' in camera,
-        "displayed LONG WB/color state must be the single still color owner")
-require('CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON' in camera
-        and 'CaptureRequest.CONTROL_AWB_MODE_OFF' in camera
-        and 'CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX' in camera,
-        "still requests must freeze color and request physical RAW lens-shading evidence")
-
-# V1.5.1 inherited sole saved-HDR authority: immutable matched RAW_SENSOR pair, no HAL-JPEG fallback.
-require('RawHdrFusion.RawBuffer raw = RawHdrFusion.copyRaw(image);' in saver
-        and 'finally {' in saver and 'image.close();' in saver,
-        "RAW ImageReader buffers must be copied immediately and Camera2 Images closed")
-require('RawHdrFusion.fuse(' in saver
-        and 'authority=RAW_SENSOR' in saver
-        and 'HAL JPEGs are reference outputs only' in saver
-        and 'JpegFusion.' not in saver,
-        "FUSED_HDR.jpg must have exactly one RAW_SENSOR authority and no JPEG-fusion fallback")
-require('localToneMapping", false' in saver and 'jpegFusionFallback", false' in saver,
-        "saved metadata must declare GTM-only RAW fusion and no JPEG fallback")
-require('POST_RAW_SENSITIVITY_BOOST is intentionally excluded' in raw_fusion
-        and 'CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST' not in raw_fusion,
-        "post-RAW boost must never enter physical RAW exposure normalization")
-require('SHORT/LONG active physical sensor mismatch' in raw_fusion
-        and 'Displayed/still physical sensor mismatch' in raw_fusion
-        and 'manager.getCameraCharacteristics(activePhysical)' in raw_fusion
-        and 'SHORT/LONG CFA mismatch' in raw_fusion,
-        "RAW fusion must fail closed on physical-sensor/CFA authority mismatch")
-require('CaptureResult.SENSOR_DYNAMIC_BLACK_LEVEL' in raw_fusion
-        and 'CameraCharacteristics.SENSOR_BLACK_LEVEL_PATTERN' in raw_fusion
-        and 'CaptureResult.SENSOR_DYNAMIC_WHITE_LEVEL' in raw_fusion
-        and 'CameraCharacteristics.SENSOR_INFO_WHITE_LEVEL' in raw_fusion,
-        "RAW black/white physical normalization is incomplete")
-require('CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP' in raw_fusion
-        and 'RAW lens shading map missing' in raw_fusion
-        and 'shortShadingTex' in raw_fusion_shader and 'longShadingTex' in raw_fusion_shader
-        and 'shadingUv(sensorPos)' in raw_fusion_shader,
-        "per-exposure CFA-aware lens-shading correction missing")
-require('FLOW_WIDTH = 64' in raw_fusion and 'FLOW_HEIGHT = 48' in raw_fusion
-        and 'PHOTO_FIELD_HEIGHT = 64' in raw_fusion
-        and 'PhotometricField.estimate' in raw_fusion
-        and 'rowPhotometric(qCenter.y + flowState.g)' in raw_fusion_shader,
-        "continuous flow plus SHORT-source-row photometric/PWM correction missing")
-require('sampleShortSamePhase' in raw_fusion_shader
-        and '(sourcePos - vec2(offset)) * 0.5' in raw_fusion_shader
-        and 'ivec2 qOrigin = quadOrigin(globalPos);' in raw_fusion_shader
-        and 'float longHighlightNeed = smoothstep(0.70, 0.92, longPeak);' in raw_fusion_shader
-        and 'float hardLongClip = smoothstep(0.985, 0.997, longPeak);' in raw_fusion_shader
-        and 'quadShortSupportAndCorrespondence' in raw_fusion_shader
-        and 'float localFlowEvidence = clamp(flowState.a, 0.0, 1.0);' in raw_fusion_shader
-        and 'inheritedBoundaryGate' in raw_fusion_shader
-        and 'float hardShortTakeover = hardLongClip * hardShortAvailable;' in raw_fusion_shader,
-        "V1.5.3 quad-coherent SHORT highlight authority / clipped-LONG takeover missing")
-require('raw_hdr_fusion.frag' in raw_fusion and 'raw_hdr_demosaic.frag' in raw_fusion
-        and 'hdr_display.frag' in raw_fusion
-        and 'GLES30.GL_FRAMEBUFFER_COMPLETE' in raw_fusion
-        and 'GLES30.GL_HALF_FLOAT' in raw_fusion
-        and 'TILE_ROWS = 512' in raw_fusion,
-        "bounded offscreen GLES3 RAW fusion/demosaic/shared-GTM pipeline missing")
-require('whiteBalanceGains' in raw_demosaic_shader
-        and 'float fetchTrust(ivec2 globalPos)' in raw_demosaic_shader
-        and 'trustedOpponentPair' in raw_demosaic_shader
-        and 'smoothstep(0.70, 0.95, highOrderTrust)' in raw_demosaic_shader
-        and 'vec3 balancedCameraRgb = vec3(r, g, b);' in raw_demosaic_shader
-        and 'coherentHighlightColorRisk(p)' in raw_demosaic_shader
-        and 'balancedCameraRgb = mix(balancedCameraRgb, neutralCameraRgb, colorRisk);' in raw_demosaic_shader
-        and 'dot(colorRow0, balancedCameraRgb)' in raw_demosaic_shader
-        and 'outColor = vec4(max(linearSrgb, vec3(0.0)), 1.0);' in raw_demosaic_shader,
-        "RAW must preserve exact trusted detail while preventing untrusted CFA sites from steering opponent chroma")
-require('outFusionState = vec4(' in raw_fusion_shader
-        and 'PROVENANCE_NORMAL_MEASURED = 0.0' in raw_fusion_shader
-        and 'PROVENANCE_CENSORED_UNKNOWN_CHROMA = 1.0' in raw_fusion_shader
-        and 'PROVENANCE_SHORT_VALIDATED = 2.0' in raw_fusion_shader
-        and 'float colorProvenance = PROVENANCE_NORMAL_MEASURED;' in raw_fusion_shader
-        and 'longPhysicalClipRisk' in raw_fusion_shader
-        and 'allocateRgba16f(fusedCfaTexture' in raw_fusion,
-        "fused CFA RGBA16F must carry exact semantic highlight provenance through demosaic")
-require('float fetchProvenance(ivec2 globalPos)' in raw_demosaic_shader
-        and 'abs(provenance - 1.0) < 0.25 ? 0.0 : 1.0' in raw_demosaic_shader,
-        "demosaic must decode CENSORED_UNKNOWN_CHROMA as zero color authority and never interpolate semantic meaning")
-require('quadColorRisk' in raw_demosaic_shader
-        and 'quadMinPhysicalTrust' in raw_demosaic_shader
-        and 'minPhysicalTrust' in raw_demosaic_shader
-        and 'maxPhysicalClipRisk' in raw_demosaic_shader
-        and '0.85 * neighborPermission' in raw_demosaic_shader
-        and 'quadColorRisk(q + ivec2(2 * qx, 2 * qy))' in raw_demosaic_shader,
-        "V1.5.1 Bayer-quad color trust/coherence regression missing or weakened by V1.5.4 V1.1 neighbor gating")
-require('mirrorParityCoord' in raw_demosaic_shader
-        and 'mirrorParityPoint' in raw_demosaic_shader,
-        "V1.5.1 CFA-parity-safe true-photo boundary regression missing")
-require('EGL14.eglTerminate(' not in raw_fusion and 'EGL14.eglReleaseThread();' in raw_fusion,
-        "RAW still worker must never terminate process EGL display owned by live GLSurfaceView")
-
-# Permanent shared-GTM/ownership regressions. V1.5.3 intentionally extends the
-# fixed scene ceiling from 6 EV to 8 EV because AUTO can capture a 7-EV SHORT.
-def v153_shared_gtm_peak(value):
-    knee=0.70; scene_one=0.80; max_scene=256.0; ceiling=0.9995
-    if value <= knee: return max(value, 0.0)
-    if value <= 1.0:
-        t=max(0.0,min(1.0,(value-knee)/(1.0-knee)))
-        smooth_t=t*t*(3.0-2.0*t)
-        mapped=knee+(scene_one-knee)*smooth_t
-    else:
-        stop=max(0.0,min(1.0,math.log(value,2)/math.log(max_scene,2)))
-        mapped=scene_one+(ceiling-scene_one)*stop
-    return max(knee,min(ceiling,mapped))
-values=[i/1000.0 for i in range(256001)]
-mapped=[v153_shared_gtm_peak(v) for v in values]
-require(all(mapped[i+1] + 1e-9 >= mapped[i] for i in range(len(mapped)-1)),
-        "V1.5.3 shared GTM must remain monotonic")
-require(all(abs(v153_shared_gtm_peak(v)-v) < 1e-9 for v in [0.0,0.05,0.20,0.50,0.70]),
-        "V1.5.3 GTM must preserve naturally exposed LONG body through knee")
-require(abs(v153_shared_gtm_peak(1.0)-0.80) < 1e-9,
-        "V1.5.3 GTM must reserve display headroom above scene-linear 1.0")
-stop_values=[v153_shared_gtm_peak(v) for v in [1.0,2.0,4.0,8.0,16.0,32.0,64.0,128.0,256.0]]
-stop_steps=[stop_values[i+1]-stop_values[i] for i in range(len(stop_values)-1)]
-require(min(stop_steps) >= 0.024 and max(stop_steps)-min(stop_steps) <= 0.002,
-        f"V1.5.3 GTM must preserve approximately uniform per-stop highlight separation through 8 EV: {stop_steps}")
-for radiance in [0.1,0.7,1.0,2.0,4.0,8.0,16.0,64.0,128.0,192.0]:
-    reference=v153_shared_gtm_peak(radiance)
-    for bracket_ev in range(2,8):
-        require(abs(v153_shared_gtm_peak(radiance)-reference) < 1e-12,
-                f"same radiance changed appearance at {bracket_ev} EV bracket")
-
-# V1.5.4 V1.2 semantic provenance contract. Confidence may select one terminal
-# state at fusion, but downstream color authority is exact: NORMAL and SHORT are
-# measured color; CENSORED retains brightness only and contributes zero chroma.
-PROV_NORMAL=0
-PROV_CENSORED=1
-PROV_SHORT=2
-def semantic_color_trust(state):
-    return 0.0 if state == PROV_CENSORED else 1.0
-require(semantic_color_trust(PROV_NORMAL) == 1.0,
-        "NORMAL_MEASURED must remain real color")
-require(semantic_color_trust(PROV_SHORT) == 1.0,
-        "SHORT_VALIDATED must remain real color")
-require(semantic_color_trust(PROV_CENSORED) == 0.0,
-        "CENSORED_UNKNOWN_CHROMA must have zero downstream color authority")
-
-def quad_color_risk(max_clip_risk, min_physical_trust):
-    return max_clip_risk*(1.0-min_physical_trust)
-require(quad_color_risk(0.0,0.0) == 0.0,
-        "bright-but-physically-unclipped color must never be neutralized")
-require(quad_color_risk(1.0,1.0) == 0.0,
-        "fully NORMAL/SHORT-proven clipped color must remain unchanged")
-require(quad_color_risk(1.0,0.0) == 1.0,
-        "physically clipped color with censored CFA evidence must fail closed to neutral")
+# 013 / 030 / 036 / 043 / V2.15 - Piecewise sRGB/HDR presentation remains,
+# but active fusion semantics are intentionally superseded: SHORT is the only RGB/
+# spatial owner and LONG may affect saved output only through one smooth scalar field.
+for text, owner in ((hdr_shader, 'shared live/GPU shader'), (fusion, 'CPU utility fusion')):
+    require('0.04045' in text and '12.92' in text and '0.0031308' in text and '2.4' in text,
+            f"{owner} must use the piecewise sRGB transfer function")
+require('if (mode == 3)' in hdr_shader and 'if (mode == 4)' in hdr_shader
+        and 'if (mode == 5)' in hdr_shader and 'if (mode == 6)' in hdr_shader,
+        "saved GPU fusion must retain the proven four-pass topology")
+require('vec3 mergedScene = shortScene;' in hdr_shader
+        and 'mix(longScene, shortScene' not in hdr_shader,
+        "live HDR must preserve SHORT RGB and must not blend LONG/SHORT RGB")
+require('float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));' in hdr_shader
+        and 'applyPhotographicBodyTone(mergedScene * brightnessGain)' in hdr_shader
+        and 'adaptiveHdrToneMap(bodyToned, ratio, bracketStops)' in hdr_shader,
+        "Brightness must remain post-fusion and feed the global body tone before HDR fitting")
+require('displayBrightnessEv' in gl and 'glUniform1f' in gl,
+        "live Brightness EV uniform plumbing missing")
+require('uniform float displayGamma;' in hdr_shader
+        and 'applyDisplayGamma(displayLinear, displayGamma)' in hdr_shader
+        and 'displayGamma' in gl and 'glUniform1f' in gl,
+        "live Gamma uniform/plumbing missing")
+require('float requestedScale = mappedY / y;' in hdr_shader
+        and 'float gamutScale = 1.0 / max(max3(rgb), 0.000001);' in hdr_shader
+        and 'return rgb * min(requestedScale, gamutScale);' in hdr_shader,
+        "Gamma must remain luminance-driven, RGB-ratio preserving and gamut-safe")
+require('float scalarAppearanceGain = secondLargest3(' in fusion
+        and 'float mr = SRGB_TO_LINEAR[sr8] * scalarAppearanceGain;' in fusion
+        and 'float mg = SRGB_TO_LINEAR[sg8] * scalarAppearanceGain;' in fusion
+        and 'float mb = SRGB_TO_LINEAR[sb8] * scalarAppearanceGain;' in fusion
+        and 'lr + (sr - lr)' not in fusion,
+        "CPU utility path must no longer implement a second LONG/SHORT RGB interpolation algorithm")
+require('brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
+        and 'float tr = mr * brightnessGain;' in fusion
+        and 'targetBodyY = bodyY + 0.45f * toe * highlightProtect' in fusion,
+        "CPU utility Brightness must remain post-source and feed the photographic body curve")
+require('buildGammaLut(clampedGamma)' in fusion
+        and 'float mappedGammaY = mapLut(gammaY, gammaLut);' in fusion
+        and 'float gammaScale = Math.min(requestedGammaScale, gammaGamutScale);' in fusion,
+        "CPU utility Gamma must remain RGB-ratio preserving and gamut-safe")
+require('private static float mapLut(float value, float[] lut) {' in fusion,
+        "mapLut helper required by saved Gamma must remain present")
+require('const float knee = 0.70;' in hdr_shader and 'HDR_KNEE = 0.70f' in fusion,
+        "live/save HDR knee must remain 0.70")
+require('0.82 - 0.04 * (bracketStops - 1.0)' in hdr_shader
+        and '0.82f - 0.04f * (bracketStops - 1.0f)' in fusion,
+        "live/save white-anchor policy changed")
+require('whiteAnchor + 0.14' in hdr_shader and 'whiteAnchor + 0.14f' in fusion,
+        "live/save display-ceiling policy changed")
+require('adaptiveAppearanceLift' not in hdr_shader and 'appearanceLiftScale' not in fusion,
+        "retired global appearance lift must not return")
+require('65_536.0' in fusion and '65_536.0' in saver and '65_536.0' in gl and '65536.0' in hdr_shader,
+        "widened exposure normalization must remain consistent GPU/utility/metadata")
 
 # 016 / 022 - V1.4.2 on-device sideways preview: producer transform owns live orientation.
 require('SCALER_AVAILABLE_ROTATE_AND_CROP_MODES' in camera,
@@ -568,13 +303,8 @@ require('haveStagingShort' in gl and 'stagingShortMeta' in gl,
         "atomic pair metadata state missing")
 require('return stagingShortTexture;' in gl and 'return stagingLongTexture;' in gl,
         "incoming HDR frames must land in staging textures")
-require('Publish only an exact exposure-generation pair' in gl,
-        "exact exposure-generation publication contract marker missing")
-require('stagingShortMeta.exposureGeneration == meta.exposureGeneration' in gl
-        and 'highestExposureGenerationSeen' in gl,
-        "SHORT/LONG exposure-generation equality guard missing")
-require('stats.exposureGeneration != previewExposureGeneration' in camera,
-        "retired-generation statistics must not drive the live controller")
+require('Only publish a complete temporal pair' in gl,
+        "complete-pair publication contract marker missing")
 require('meta.frameNumber - stagingShortMeta.frameNumber <= 3' in gl,
         "SHORT/LONG temporal adjacency guard missing")
 short_accept = gl[gl.index('private void acceptMeta'):gl.index('private void renderExternalToTexture')]
@@ -583,30 +313,45 @@ require(short_accept.count('fpsWindowPairs++;') == 1,
 require('lastShortMeta = stagingShortMeta;' in short_accept and 'lastLongMeta = meta;' in short_accept,
         "display exposure metadata must update atomically with the published pair")
 
-# 018 / 021 / 029 / 052 - AUTO/MANUAL remain available and the viewfinder stays live.
+# 018 / 021 / 029 - AUTO/MANUAL remain available; clean AE metering never uses one-shot capture().
 require('void setAutoHdrExposure(boolean enabled)' in camera,
         "AUTO/MANUAL HDR exposure owner switch missing")
 require('HDR AUTO: ON' in main and 'HDR MANUAL' in main,
         "AUTO/MANUAL HDR UI control missing")
 require('setManualControlsEnabled(!autoHdrEnabled)' in main,
-        "manual controls must remain user-accessible in MANUAL")
-require('glView.setSceneStatsListener(controller::onHdrSceneStats);' in main,
-        "live HDR scene-stat listener is not wired")
-require('void onHdrSceneStats(HdrGlView.SceneStats stats)' in camera,
-        "CameraController live scene-stat callback missing")
-require('SceneStatsListener' in gl and 'maybePublishSceneStats();' in gl,
-        "GPU live scene-stat publisher missing")
-require('STATS_WIDTH = 32' in gl and 'STATS_HEIGHT = 24' in gl
-        and 'STATS_INTERVAL_NS = 200_000_000L' in gl,
-        "bounded 32x24 / 200ms live statistics contract missing")
-require('glReadPixels' in gl and 'MEANINGFUL_CLIP_CHANNEL = 0.992f' in gl,
-        "meaningful highlight sampling missing")
+        "manual controls must be explicitly gated by AUTO/MANUAL ownership")
+require('TAG_METER' in camera and 'buildMeterPreviewRequest' in camera,
+        "clean contiguous AE metering phase missing")
+require('captureSession.capture(' not in camera,
+        "V1.4.2 one-shot live capture() meter must never return")
+require('buildMeterPreviewRequest(), previewCaptureCallback' in camera,
+        "AUTO metering must use a contiguous repeating AE phase")
 require('Arrays.asList(shortRequest, longRequest)' in camera,
         "steady AUTO/MANUAL HDR must remain a two-manual-request repeating pair")
+require('AUTO_REMETER_INTERVAL_MS' not in camera
+        and 'autoRemeterRunnable' not in camera
+        and 'scheduleAutoRemeterLocked' not in camera
+        and 'hasFreshAutoAnchorLocked' not in camera,
+        "periodic 5-second AE takeover must remain removed after bootstrap")
+bootstrap = camera[camera.index('private void startAutoMeteringLocked()'):camera.index('private void processAutoMeterResultLocked')]
+require('if (haveAeSample) {' in bootstrap and 'Bootstrap only' in bootstrap,
+        "clean HAL AE must be bootstrap-only once the live HDR pair exists")
+require('STATS_WIDTH = 32' in gl and 'STATS_HEIGHT = 24' in gl
+        and 'STATS_INTERVAL_NS = 100_000_000L' in gl
+        and 'glReadPixels' in gl and 'readTextureStats' in gl,
+        "V2.12 32x24 / 100ms paired SHORT/LONG statistics path missing")
+require('AUTO_LIVE_HYSTERESIS_EV = 0.10' in camera
+        and 'AUTO_LIVE_MAX_STEP_EV = 0.30' in camera
+        and 'AUTO_LIVE_SCENE_CUT_EV = 0.70' in camera
+        and 'AUTO_LIVE_SCENE_CUT_MAX_STEP_EV = 6.0' in camera
+        and 'AUTO_LIVE_UPDATE_MIN_NS = 80_000_000L' in camera,
+        "V2.3 fast scene-cut AUTO response bounds missing")
+require('setSceneStatsListener(controller::onHdrSceneStats)' in main
+        and 'processHdrSceneStatsLocked' in camera,
+        "live scene-statistics route to CameraController missing")
 require('FrameMeta.METER.equals(meta.kind)' in gl,
-        "initial meter frames must remain hidden from HDR pair publication")
-require('captureSession.capture(' not in camera,
-        "out-of-band one-shot live meter must never interrupt the pair")
+        "initial bootstrap meter frames must remain hidden from display/pair publication")
+
 # 025 / 031 - Both manual pair members carry one FPS range; true-60 mode uses exact [60,60].
 manual_builder = camera[camera.index('private CaptureRequest buildManualPreviewRequest'):camera.index('private CaptureRequest buildMeterPreviewRequest')]
 require('CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE' in manual_builder,
@@ -618,33 +363,42 @@ require('60 FPS CROP: ON' in main and '60 FPS CROP: OFF' in main,
 require('FOV_OVERRIDE' in camera and 'allowCropped60Fps' in camera,
         "cropped-60 override must be explicit and logged")
 
-# 019 / 029 / 045 / 052 - Flicker-aware independent LONG/SHORT exposure ownership.
-require('CaptureResult.STATISTICS_SCENE_FLICKER' in camera,
-        "Camera2 scene-flicker evidence missing")
-require('CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO' in camera,
-        "clean AE bootstrap must request HAL automatic antibanding")
-require('STATISTICS_SCENE_FLICKER_50HZ' in camera and 'STATISTICS_SCENE_FLICKER_60HZ' in camera,
-        "50/60-Hz evidence labels must remain explicit")
-require('flickerPeriodNs' in camera and '10_000_000L' in camera and '8_333_333L' in camera,
-        "50/60-Hz safe integration periods missing")
-require('solveLongSettingForProductLocked' in camera and 'solveShortSettingForProductLocked' in camera,
-        "separate LONG/SHORT timing solvers missing")
-require('Stay on whole flicker periods whenever the required headroom is' in camera
-        and 'if (allowFastRecovery)' in camera
-        and 'Use exact binary subdivisions of the measured mains period' in camera
-        and 'return new ExposureSetting(fast, minIso);' in camera
-        and 'No proven local need: keep the stable full-period SHORT.' in camera,
-        "known 50/60-Hz SHORT must stay flicker-safe until localized unresolved clipping proves fast minimum-ISO recovery is required")
-require('Unknown/PWM without localized unresolved clipping: preserve LONG timing' in camera
-        and 'return new ExposureSetting(desired, minIso);' in camera,
-        "unknown/PWM SHORT must preserve LONG timing unless localized unresolved clipping proves fast minimum-ISO recovery is required")
-require('Unknown/PWM: preserve the clean-AE integration in both directions' in camera,
-        "unknown/PWM LONG must not invent a new modulation phase")
-require('targetPreviewFps >= 60 ? SIXTY_FPS_DURATION_NS' in camera,
-        "forced-60 live integration ceiling missing")
-require('autoShortExposureNs = shortSetting.exposureNs;' in camera
-        and 'autoLongExposureNs = longSetting.exposureNs;' in camera,
-        "AUTO SHORT and LONG must have independent solved settings")
+# 019 / 020 / 044 - V2.10 real 50/60-Hz authority. AUTO is only safe when
+# Camera2 proves 50/60; explicit 50/60 applies integer mains cycles to BOTH
+# SHORT and LONG when sensor exposure/ISO bounds permit. OFF is explicit.
+for token in [
+    'FLICKER_MODE_AUTO = 0', 'FLICKER_MODE_50HZ = 1', 'FLICKER_MODE_60HZ = 2', 'FLICKER_MODE_OFF = 3',
+    'FLICKER_50_PERIOD_NS = 10_000_000L', 'FLICKER_60_PERIOD_NS = 8_333_333L',
+    'void setFlickerMode(int mode)', 'aeAntibandingModeLocked()', 'effectiveFlickerPeriodNsLocked()',
+    'solveFlickerSafeSettingForProductLocked(', 'solveMinimumIsoFlickerSettingLocked(',
+    'AUTO UNSAFE(none)', 'AUTO UNSAFE(unknown/PWM)'
+]:
+    require(token in camera, f"V2.10 flicker authority missing {token}")
+require('CaptureResult.STATISTICS_SCENE_FLICKER' in camera
+        and 'STATISTICS_SCENE_FLICKER_50HZ' in camera
+        and 'STATISTICS_SCENE_FLICKER_60HZ' in camera,
+        "Camera2 50/60-Hz evidence must remain explicit")
+require('CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_50HZ' in camera
+        and 'CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_60HZ' in camera
+        and 'CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_OFF' in camera
+        and 'CaptureRequest.CONTROL_AE_ANTIBANDING_MODE_AUTO' in camera,
+        "AUTO/50/60/OFF must map to real Camera2 antibanding requests")
+require('flickerMode == FLICKER_MODE_AUTO' in camera
+        and 'sceneFlicker == CaptureResult.STATISTICS_SCENE_FLICKER_NONE' in camera,
+        "AUTO must distinguish Camera2 NONE from proven 50/60")
+require('safeLong = solveFlickerSafeSettingForProductLocked' in camera
+        and 'safeShort = solveMinimumIsoFlickerSettingLocked' in camera,
+        "safe AUTO/MANUAL pair must solve BOTH LONG and SHORT timing")
+require('Proven V1.4.7 flicker-safe behavior' not in camera,
+        "obsolete one-sided V1.4.7 flicker contract must be retired")
+require('STATE_FLICKER_MODE' in main and 'flickerButton.setOnClickListener' in main
+        and 'FLICKER AUTO:' in main and 'FLICKER 60Hz:' in main and 'FLICKER 50Hz:' in main and 'FLICKER OFF:' in main,
+        "V2.10 user-visible AUTO/60/50/OFF authority is incomplete")
+# Exposure convergence constants are intentionally frozen; flicker correction must not masquerade as metering retuning.
+require('AUTO_METER_MIN_FRAMES = 4' in camera and 'AUTO_METER_MAX_FRAMES = 12' in camera
+        and 'AUTO_METER_STABLE_FRAMES = 3' in camera and 'AUTO_METER_STABLE_EV = 0.18' in camera,
+        "V2.10 must not randomly retune bootstrap metering constants")
+
 # 023 - On-device DNG Orientation=9 regression: DNG must always receive explicit valid TIFF orientation.
 require('import android.media.ExifInterface;' in saver,
         "DNG orientation must use Android EXIF constants")
@@ -663,8 +417,8 @@ for token in [
     require(token in saver, f"DNG orientation mapping missing {token}")
 require('ExifInterface.ORIENTATION_UNDEFINED' not in saver,
         "DNG must never request undefined orientation, which DngCreator maps to TIFF 9")
-require(saver.index('creator.setOrientation(dngOrientation);') < saver.index('creator.writeByteBuffer'),
-        "DNG orientation must be set before writeByteBuffer")
+require(saver.index('creator.setOrientation(dngOrientation);') < saver.index('creator.writeImage'),
+        "DNG orientation must be set before writeImage")
 
 # 024 - First measured FPS window starts on the first CaptureResult, not during camera/session startup.
 require('private void resetCaptureResultFpsLocked()' in camera,
@@ -689,7 +443,7 @@ require('targetPreviewFps = 30;' in fps_policy and 'aeFpsRange = chooseAeFpsRang
         "turning cropped-60 OFF must immediately restore stable 30-fps policy")
 require('FOV_OVERRIDE' in camera and 'allowCropped60Fps' in camera,
         "cropped-60 sensor-readout difference must remain explicit and logged")
-callback = camera[camera.index('private final CameraCaptureSession.CaptureCallback previewCaptureCallback'):camera.index('private void beginCaptureLocked(HdrGlView.PublishedPairSnapshot publishedPair)')]
+callback = camera[camera.index('private final CameraCaptureSession.CaptureCallback previewCaptureCallback'):camera.index('private void beginCaptureLocked()')]
 require('if (!FrameMeta.METER.equals(kind)) {' in callback
         and 'updateCaptureResultFpsLocked();' in callback
         and 'updateFovEvidenceLocked(result);' in callback,
@@ -698,32 +452,42 @@ require('CaptureRequest.CONTROL_ZOOM_RATIO' not in camera
         and 'CaptureRequest.SCALER_CROP_REGION' not in camera,
         "FOV policy must not fake parity by digitally cropping or zooming requests")
 
-# 027 / 031 / 054 / 144 - MANUAL SAFE literal shutter/ISO ownership.
-require('recomputeManualAdaptivePairLocked' in camera,
-        "MANUAL literal sensor-pair owner missing")
+# 027 / 031 - V2.10 MANUAL SAFE uses one explicit flicker authority for BOTH shutters.
+require('recomputeManualFlickerSafetyLocked' in camera,
+        "MANUAL flicker-safe exposure owner missing")
 require('manualEffectiveShortExposureNs' in camera and 'manualEffectiveLongExposureNs' in camera,
-        "requested and effective MANUAL shutters must remain separately observable")
-require('manualEffectiveLongExposureNs = clampExposure(longExposureNs);' in camera
-        and 'manualEffectiveLongIso = clampIso(manualIso);' in camera,
-        "LONG slider/ISO must directly own the manual LONG sensor request")
-require('manualEffectiveShortExposureNs = Math.min(' in camera
-        and 'clampExposure(shortExposureNs), manualEffectiveLongExposureNs);' in camera
-        and 'manualEffectiveShortIso = minIso;' in camera,
-        "SHORT slider must directly own integration, clamp only at LONG, and use sensor-min ISO")
-manual_recompute = camera[camera.index('private boolean recomputeManualAdaptivePairLocked()'):camera.index('private int sensorMinIsoLocked()')]
-require('solveLongSettingForProductLocked' not in manual_recompute
-        and 'solveShortSettingForProductLocked' not in manual_recompute
-        and 'solveIsoForProduct' not in manual_recompute,
-        "MANUAL literal shutter path must not call exposure-product solvers")
-manual_stats = camera[camera.index("} else {\n            // V1.5.4 V1.2: MANUAL SAFE"):camera.index('    private double robustSceneBodyMid')]
-require('deriveAdaptiveAutoPairLocked' not in manual_stats
-        and 'recomputeManualAdaptivePairLocked' not in manual_stats
-        and 'applyPreviewRepeatingLocked' not in manual_stats,
-        "live scene statistics must not rewrite literal MANUAL shutter/ISO controls")
+        "requested and effective MANUAL shutters must remain separate")
+require('manualEffectiveShortIso = minIso;' in camera,
+        "MANUAL SHORT must preserve sensor-minimum-gain preference")
+require('solveFlickerSafeSettingForProductLocked' in camera and 'solveMinimumIsoFlickerSettingLocked' in camera,
+        "V2.10 50/60-Hz pair solvers missing")
 require('MANUAL_SAFE' in camera and 'HDR MANUAL SAFE' in main,
         "user-visible safe MANUAL ownership missing")
-require('MANUAL_LIVE_ADAPT' not in camera,
-        "retired MANUAL live-adaptive pair regeneration must not survive")
+require('MANUAL_FLICKER' in camera,
+        "manual flicker decision must be logged")
+manual_recompute = camera[camera.index('private boolean recomputeManualFlickerSafetyLocked()'):camera.index('private int effectiveFlickerLocked()')]
+manual_setter = camera[camera.index('void setManualSettings'):camera.index('void onHdrSceneStats')]
+require('safeShort = solveMinimumIsoFlickerSettingLocked' in manual_recompute
+        and 'safeLong = solveFlickerSafeSettingForProductLocked' in manual_recompute,
+        "MANUAL SAFE must project SHORT and LONG independently onto the authoritative mains lattice")
+require('manualEffectiveShortExposureNs = safeShort.exposureNs;' in manual_recompute
+        and 'manualEffectiveLongExposureNs = safeLong.exposureNs;' in manual_recompute,
+        "safe MANUAL pair must publish both solved integration windows")
+require('manualEffectiveLongIso = safeLong.iso;' in manual_recompute
+        and 'manualEffectiveShortIso = safeShort.iso;' in manual_recompute,
+        "safe MANUAL pair must publish ISO compensation with SHORT minimum-gain preference")
+require('if (shortExposureNs > longExposureNs)' in manual_setter
+        and 'shortExposureNs = longExposureNs;' in manual_setter,
+        "SHORT crossing LONG must still clamp SHORT at LONG")
+require('long tmp = shortExposureNs;' not in manual_setter,
+        "manual controls must not silently swap SHORT and LONG")
+def integer_cycle(exposure_ns, period_ns):
+    return abs(exposure_ns / period_ns - round(exposure_ns / period_ns)) < 2e-6
+require(integer_cycle(10_000_000.0, 10_000_000.0) and integer_cycle(8_333_333.0, 8_333_333.0),
+        "50/60-Hz base periods must be exact integration-lattice members")
+require(integer_cycle(20_000_000.0, 10_000_000.0) and integer_cycle(16_666_666.0, 8_333_333.0),
+        "multi-cycle LONG windows must remain mains-safe")
+
 # 028 - Production logger for device freezes/crashes without turning logging into a frame-rate owner.
 require('final class RuntimeLogger' in main,
         "production RuntimeLogger missing")
@@ -750,9 +514,8 @@ for token in ['1_000_000_000L / 8000', '1_000_000_000L / 100', '1_000_000_000L /
     require(token in main, f"manual exposure slider step missing: {token}")
 require('SIXTY_FPS_DURATION_NS = 16_666_666L' in camera,
         "forced 60fps must use 16,666,666 ns SENSOR_FRAME_DURATION target")
-require('if (enforcePreviewCadence && targetPreviewFps >= 60)' in camera
-        and 'exposure = Math.min(exposure, SIXTY_FPS_DURATION_NS);' in camera,
-        "60fps live preview may enforce cadence legality only at request build time")
+require('targetPreviewFps >= 60' in camera and 'manualEffectiveLongExposureNs' in camera,
+        "60fps mode must cap effective manual integration and preserve LONG product through ISO")
 require('boolean enforcePreviewCadence' in camera
         and 'if (enforcePreviewCadence && targetPreviewFps >= 60)' in camera
         and 'frameDuration = SIXTY_FPS_DURATION_NS;' in camera,
@@ -778,504 +541,852 @@ require('EDGE_AVAILABLE_EDGE_MODES' in camera and 'CaptureRequest.EDGE_MODE_OFF'
 require('configureProcessingControls(builder);' in camera,
         "processed preview/still requests must apply edge/noise ownership")
 
-# 034 / 050 / 052 - Continuous live HDR regression: periodic meter takeover is forbidden.
+# 034 - Recorded V1.4.5 HDR FUSED crop/FPS glitch becomes permanent regression.
 require('scheduleAutoRemeterLocked' not in camera and 'autoRemeterRunnable' not in camera,
-        "periodic clean-AE takeover must remain removed")
+        "periodic AUTO request takeover must not return")
+require('!haveShort || !haveLong' in gl
+        and 'lastShortMeta == null || lastLongMeta == null' in gl
+        and 'lastShortMeta.frameNumber' in gl and 'lastLongMeta.frameNumber' in gl
+        and 'lastShortMeta.exposureProduct()' in gl and 'lastLongMeta.exposureProduct()' in gl,
+        "continuous AUTO statistics must be sourced only from an actually published SHORT/LONG pair")
 start_meter = camera[camera.index('private void startAutoMeteringLocked()'):camera.index('private void processAutoMeterResultLocked')]
-require('Bootstrap only' in start_meter and 'if (haveAeSample) {' in start_meter,
-        "AE repeating request must be initial-bootstrap only")
 require('resetCaptureResultFpsLocked();' in start_meter,
-        "initial bootstrap must start a clean FPS window")
+        "entering hidden AE meter must reset steady-preview FPS evidence")
+finish_meter = camera[camera.index('if (finishMeter) {', camera.index('private void commitAutoAnchorFromResultLocked')):camera.index('private void deriveAutoPairFromAnchorLocked')]
+require('resetCaptureResultFpsLocked();' in finish_meter,
+        "returning to SHORT/LONG pair must start a fresh steady-preview FPS window")
 require('FOV SAFE: fixed 30 fps preview avoids live sensor-crop/FPS transitions' in main,
         "UI must state deterministic FOV-safe 30-fps semantics")
 require('60 FPS CROP ON: request fixed 60/60 preview' in main,
         "UI must state explicit force-60 semantics")
 
-# Adaptive-policy math: V1.4.23 AUTO SHORT is driven by localized recoverability,
-# not by a minimum full-frame clipping area. Two consecutive samples are still
-# required before increasing headroom; release remains slower. MANUAL retains the
-# prior global clipping contract and user SHORT-ceiling behavior.
-def adapt_bracket_sequence(current_ev, samples, manual=False, floor=2.0):
-    min_ev=floor if manual else 3.0
-    max_ev=6.0 if manual else 7.0
-    up=down=0
-    out=current_ev
-    for sample in samples:
-        if manual:
-            long_clip, short_clip, short_reliable = sample
-            meaningful=long_clip>=0.005
-            wants_up=meaningful and short_clip>0.0015 and short_reliable
-            wants_down=(not meaningful) and short_clip<=0.0005 and out>min_ev
-            peak=0.0
-        else:
-            long_cells, near_fraction, peak, signal_fraction = sample
-            local_damage=long_cells>0
-            wants_up=(local_damage and signal_fraction>=0.50
-                      and (peak>0.90 or near_fraction>0.20))
-            wants_down=(out>min_ev and (not local_damage
-                        or (peak<0.72 and near_fraction<=0.05)))
-        if wants_up:
-            up+=1; down=0
-            if up>=2:
-                step=0.75 if (not manual and peak>=0.98) else 0.50
-                out=min(max_ev,out+step); up=0
-        elif wants_down:
-            down+=1; up=0
-            if down>=3:
-                out=max(min_ev,out-0.15); down=0
-        else:
-            up=down=0
-    return max(min_ev,min(max_ev,out))
 
-# Tiny-but-real direct emitters must now be allowed to own SHORT headroom.
-require(math.isclose(adapt_bracket_sequence(3.0,[(1,1.0,0.995,1.0)]),3.0),
-        "one localized clipped sample must not widen AUTO SHORT")
-require(adapt_bracket_sequence(3.0,[(1,1.0,0.995,1.0),(1,1.0,0.995,1.0)])>=3.75,
-        "two localized unresolved highlight samples must darken AUTO SHORT")
-require(math.isclose(adapt_bracket_sequence(3.0,[(1,1.0,0.995,0.0),(1,1.0,0.995,0.0)]),3.0),
-        "LONG-damaged cells without usable SHORT signal must not chase darker exposure")
-require(adapt_bracket_sequence(4.0,[(0,0.0,0.0,0.0)]*3) < 4.0,
-        "AUTO headroom must release slowly after localized LONG damage disappears")
-require(adapt_bracket_sequence(2.0,[(0.02,0.01,True),(0.02,0.01,True)],manual=True,floor=2.0)>2.0,
-        "MANUAL safety must still add headroom after measured SHORT clipping")
+# 036 / 043 / V2 - Exact V1.4.7 highlight mapping plus V1.4.11-V2 brightness/gamma math.
+def v147_policy(exposure_ratio):
+    ratio = max(1.0, min(65536.0, exposure_ratio))
+    stops = max(1.0, min(6.0, math.log(max(ratio, 1.0001), 2.0)))
+    clip_start = max(0.90, min(0.95, 0.90 + 0.01 * (stops - 1.0)))
+    white_anchor = max(0.68, min(0.82, 0.82 - 0.04 * (stops - 1.0)))
+    display_ceiling = max(0.84, min(0.96, white_anchor + 0.14))
+    return ratio, stops, clip_start, white_anchor, display_ceiling
 
-# 60-Hz direct-light regression from the chandelier set. At 1/120 + sensor-min ISO
-# the current build can still clip. Once localized evidence confirms that failure,
-# AUTO may cross the full-period anti-flicker floor using binary period subdivisions
-# while keeping ISO at sensor minimum rather than brightening the probe back up.
-def solve_auto_short(long_ns,long_iso,bracket_ev,min_iso=50,period_ns=8_333_333,fast=False):
-    target=(long_ns*long_iso)/(2.0**bracket_ev)
-    if target >= long_ns*min_iso:
-        iso=max(min_iso,round(target/long_ns))
-        return long_ns,iso
-    desired=max(1,round(target/min_iso))
-    if desired>=period_ns:
-        periods=max(1,desired//period_ns)
-        safe=periods*period_ns
-        iso=max(min_iso,round(target/safe))
-        return safe,iso
-    if fast:
-        e=period_ns
-        while e>desired and e>1:
-            e=max(1,e//2)
-        return e,min_iso
-    return period_ns,min_iso
+def smoothstep_math(edge0, edge1, value):
+    t = max(0.0, min(1.0, (value - edge0) / (edge1 - edge0)))
+    return t * t * (3.0 - 2.0 * t)
 
-ch_long=round(1e9/120); ch_iso=343
-e0,i0=solve_auto_short(ch_long,ch_iso,3.0,fast=False)
-require(abs(e0-8_333_333)<=2 and i0==50,
-        f"pre-confirm chandelier SHORT must remain 1/120 ISO-min: {e0},{i0}")
-e1,i1=solve_auto_short(ch_long,ch_iso,3.75,fast=True)
-require(4_100_000 <= e1 <= 4_200_000 and i1==50,
-        f"confirmed unresolved chandelier must step to about 1/240 ISO-min: {e1},{i1}")
-achieved=math.log2((ch_long*ch_iso)/(e1*i1))
-require(achieved>3.70,
-        f"fast recoverability probe must create real additional headroom: {achieved}")
+def map_peak_math(scene_peak, exposure_ratio, brightness_ev=0.0):
+    ratio, stops, _, white_anchor, display_ceiling = v147_policy(exposure_ratio)
+    boosted = scene_peak * (2.0 ** max(-16.0, min(1.0, brightness_ev)))
+    knee = 0.70
+    if boosted <= knee:
+        return boosted
+    if boosted <= 1.0:
+        t = max(0.0, min(1.0, (boosted - knee) / (1.0 - knee)))
+        return knee + (white_anchor - knee) * t
+    t = max(0.0, min(1.0, math.log(boosted, 2.0) / max(math.log(max(ratio, 1.0001), 2.0), 0.0001)))
+    return white_anchor + (display_ceiling - white_anchor) * t
 
-# V1.4.23 device-state regressions. A darker tier is a probe, not a new permanent
-# bracket merely because the emitter remains bright. No information gain or an
-# uncorrectable flicker field must roll back once and exhaust the search until a
-# materially different scene arrives.
-def probe_decision(baseline_usable, baseline_near, usable, near, row_mod,
-                   correction_confidence, coverage, evidence_count=0):
-    modulation_unsafe=(coverage < 0.25 or (row_mod >= 0.12 and correction_confidence < 0.65))
-    information_gain=max(usable-baseline_usable, baseline_near-near)
-    if modulation_unsafe:
-        return 'reject', information_gain, 0
-    if information_gain >= 0.08 or (near <= 0.05 and usable >= baseline_usable):
-        return 'accept', information_gain, 0
-    evidence_count += 1
-    if evidence_count >= 2:
-        return 'reject', information_gain, 0
-    return 'hold-probe', information_gain, evidence_count
+ratio8, stops8, clip8, anchor8, ceiling8 = v147_policy(8.0)
+require(math.isclose(stops8, 3.0, abs_tol=1e-6), "8x bracket must equal 3 EV")
+require(math.isclose(clip8, 0.92, abs_tol=1e-6), "8x SHORT admission must begin at 92% LONG code")
+require(math.isclose(anchor8, 0.74, abs_tol=1e-6) and math.isclose(ceiling8, 0.88, abs_tol=1e-6),
+        "V1.4.7 3-EV highlight anchors changed")
+require(smoothstep_math(clip8, 0.995, 0.50) == 0.0,
+        "SHORT must contribute zero in healthy LONG shadows/midtones")
+require(map_peak_math(0.40, 8.0, 0.0) == 0.40,
+        "0.0 EV must be the exact no-brightness-change V1.4.7 baseline")
+require(map_peak_math(0.40, 8.0, 0.5) > map_peak_math(0.40, 8.0, 0.0),
+        "+0.5 EV must brighten a lower midtone")
+require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
+        "brightness gain must be highlight-fitted rather than post-SDR clipped")
+require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
+        "recovered highlight ordering must survive positive Brightness EV")
 
-# Chandelier: progressively darker SHORT with no new recovered information must stop.
-decision,gain,count=probe_decision(0.62,0.40,0.64,0.38,0.03,0.90,0.80,0)
-require(decision == 'hold-probe' and gain < 0.08,
-        f"first no-gain chandelier sample must wait for confirmation: {decision},{gain}")
-decision,gain,count=probe_decision(0.62,0.40,0.64,0.38,0.03,0.90,0.80,count)
-require(decision == 'reject',
-        f"second no-gain chandelier sample must roll back and exhaust the tier: {decision},{gain}")
+# 038 / 042 / V2.20 - Exact successful V2.19 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.19' in workflow
+        and 'run-id: 33947113826' in workflow
+        and "authority='13393e945e7313d981b38ce5a44e31eceff7dc79'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.19 Actions authority")
+require("authority='f70e85bc3ca8a5ce0fcf0e0c4634ec786e141d73'" not in workflow,
+        "V2.20 must not seed runtime from V2.18 after successful V2.19")
+require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
+        "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
-# Table: a 1/240 -> 1/480 probe that is phase-sensitive/poorly covered must reject
-# immediately; exhausted search prevents 1/240 <-> 1/480 oscillation in the same scene.
-decision,gain,_=probe_decision(0.58,0.32,0.67,0.21,0.22,0.40,0.18,0)
-require(decision == 'reject',
-        f"uncorrectable table flicker probe must fail closed immediately: {decision},{gain}")
+# 039 / 043 / V2.17 - Saved fusion may select exactly LONG or SHORT RGB, but it
+# must never interpolate RGB between sources. Live preview remains V2.15 SHORT-owned.
+require('mix(longScene, shortScene' not in hdr_shader,
+        "production shader must not interpolate LONG/SHORT RGB")
+require('highlightColorOwnership' not in hdr_shader
+        and 'adaptiveClipStart' not in hdr_shader
+        and 'applyHighlightColorOwnership' not in fusion
+        and 'computeShortOwnership' not in fusion
+        and 'computeShortCoreOwnership' not in fusion
+        and 'shortSupportEvidence' not in fusion,
+        "dead historical RGB ownership machinery must remain absent")
+require('if (highlightWeight > 0.0005)' not in hdr_shader,
+        "legacy live LONG-first highlight color ownership must not return")
+require('vec3 mergedScene = shortScene;' in hdr_shader,
+        "V2.15 live preview behavior must remain SHORT-owned and unchanged")
+require('colorSafeFromSources' not in hdr_shader and 'adaptiveAppearanceLift' not in hdr_shader,
+        "global chroma/appearance repair must not return")
+require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
+        "runtime shader must not add hidden neighborhood RGB reconstruction")
 
-def exhausted_scene_changed(base_cells, cells, base_p98, p98, base_product, product):
-    if cells == 0: return True
-    baseline=max(1,base_cells)
-    delta=abs(cells-base_cells)
-    large=delta > max(3, round(baseline*0.60))
-    very_large=delta > max(5, baseline)
-    p98_ev=abs(math.log(max(p98,0.001)/max(base_p98,0.001),2))
-    product_ev=abs(math.log(max(product,1.0)/max(base_product,1.0),2))
-    return product_ev >= 0.50 or very_large or (large and p98_ev >= 0.30)
-require(not exhausted_scene_changed(8,9,0.92,0.94,1.0e9,1.03e9),
-        "minor table clipped-cell jitter must not reopen an exhausted SHORT tier search")
-require(exhausted_scene_changed(8,17,0.92,1.20,1.0e9,1.0e9),
-        "material highlight-topology change must be able to reopen SHORT search")
-
-# Quantized fast-SHORT solver must obey the achieved physical max bracket after
-# period subdivision. The 7 EV request may not silently become the V1.4.22 7.9 EV.
-def quantized_fast_short(long_ns,long_iso,max_ev,min_iso=50,period_ns=8_333_333):
-    long_product=long_ns*long_iso
-    min_product=max(1.0,long_product/(2.0**max_ev))
-    fastest=max(1,math.ceil(min_product/min_iso))
-    fast=period_ns
-    while fast>1:
-        candidate=max(1,fast//2)
-        if candidate < fastest: break
-        fast=candidate
-    achieved=math.log2(long_product/(fast*min_iso))
-    return fast,achieved
-fast,physical_ev=quantized_fast_short(round(1e9/120),397,7.0)
-require(physical_ev <= 7.0 + 0.02,
-        f"quantized fast SHORT must obey real 7 EV ceiling: shutter={fast} achieved={physical_ev}")
-
-# Pair-rate flicker field fail-closed semantics: phase-sensitive SHORT needs local
-# luma trust; flicker-safe/outdoor SHORT bypasses a sparse field rather than losing HDR.
-def effective_field_trust(guard_required, encoded_trust):
-    return encoded_trust if guard_required else 1.0
-require(effective_field_trust(True,0.0) == 0.0,
-        "phase-sensitive SHORT with no correction evidence must have zero recovery authority")
-require(effective_field_trust(False,0.0) == 1.0,
-        "flicker-safe/outdoor SHORT must not be disabled by sparse correction evidence")
-
-# V1.4.16 office data is regression evidence, not a universal +EV calibration.
-# The robust body + scene-shape controller should autonomously demand a large correction
-# there, while a truly low-light scene gets a lower body target.
-def scene_ss(edge0, edge1, value):
-    t=max(0.0,min(1.0,(value-edge0)/(edge1-edge0)))
-    return t*t*(3.0-2.0*t)
-
-def scene_body_target(p25,p35,p50,p90,p98,long_product,ref_product=(1e9/60.0)*100.0):
-    body=(max(p25,0.0005)*max(p35,0.0005)*max(p50,0.0005))**(1.0/3.0)
-    tail90=math.log(max(p90,0.0005)/max(p50,0.0005),2)
-    tail98=math.log(max(p98,0.0005)/max(p50,0.0005),2)
-    broad=scene_ss(0.60,1.60,tail90)
-    extreme=scene_ss(1.50,3.50,tail98)
-    strength=max(0.0,min(1.0,0.70*broad+0.30*extreme))
-    target=0.070+(0.115-0.070)*strength
-    required=max(1.0,long_product*target/max(body,0.0005))
-    demand=math.log(required/ref_product,2)
-    low=scene_ss(5.0,8.0,demand)
-    target*=1.0-0.38*low
-    spread=math.log(max(p50,0.0005)/max(p25,0.0005),2)
-    target*=1.0-0.10*scene_ss(2.2,4.0,spread)
-    return max(0.040,min(0.135,target)),body
-
-office_target,office_body=scene_body_target(
-    0.01933,0.02640,0.04384,0.09615,0.39291,(1e9/120.0)*384.0)
-office_error=math.log(office_target/office_body,2)
-require(1.4 < office_error < 2.2,
-        f"office body should request a substantial learned correction, got {office_error}EV")
-low_target,_=scene_body_target(0.01,0.015,0.025,0.04,0.08,(1e9/15.0)*1600.0)
-require(low_target < office_target,
-        f"low-key scene must not be locked to office brightness: low={low_target} office={office_target}")
-
-# Color-admission math: one bright channel is insufficient, SHORT clipping vetoes
-# recovery, and a neutral multi-channel LONG clip suppresses weak processed-ISP tint.
-def smoothstep_local(edge0, edge1, value):
-    t=max(0.0,min(1.0,(value-edge0)/(edge1-edge0)))
-    return t*t*(3.0-2.0*t)
-
-def long_highlight(linear_rgb, encoded_rgb):
-    luma=0.2126*linear_rgb[0]+0.7152*linear_rgb[1]+0.0722*linear_rgb[2]
-    ordered=sorted(encoded_rgb)
-    second=ordered[1]; peak=ordered[2]
-    return max(smoothstep_local(0.955,0.988,second),
-               smoothstep_local(0.62,0.84,luma)*smoothstep_local(0.985,0.998,peak))
-
-def long_clipped_core(linear_rgb, encoded_rgb):
-    luma=0.2126*linear_rgb[0]+0.7152*linear_rgb[1]+0.0722*linear_rgb[2]
-    ordered=sorted(encoded_rgb)
-    second=ordered[1]; peak=ordered[2]
-    return max(smoothstep_local(0.980,0.990,second),
-               smoothstep_local(0.990,0.997,peak)*smoothstep_local(0.50,0.78,luma))
-
-def short_safe(encoded_rgb):
-    return 1.0-smoothstep_local(0.965,0.985,max(encoded_rgb))
-
-red_skin_like=long_clipped_core((1.0,0.30,0.12),(0.995,0.58,0.38))
-neutral_highlight=long_clipped_core((1.0,0.96,0.93),(0.995,0.985,0.975))
-bright_green=long_clipped_core((0.16,1.0,0.08),(0.44,0.995,0.31))
-require(red_skin_like < 0.01,
-        f"single saturated skin-red channel must not admit SHORT: {red_skin_like}")
-require(neutral_highlight > 0.75 and bright_green > 0.70,
-        f"real neutral/bright-luma clipped highlights must remain recoverable: neutral={neutral_highlight} green={bright_green}")
-require(short_safe((247/255,1.0,1.0)) < 0.01,
-        "V1.4.15 white-car failure: a SHORT with clipped G/B must not create a red-only fill")
-
-
-# 093-098 - V1.4.23 device regressions: information-gain SHORT search, rolling/PWM fail-closed,
-# pair-rate chroma ownership, and live/still parity.
-for token in ['autoShortProbePending','autoShortSearchExhausted','SHORT_GAIN_TEST',
-              'FAST_SHORT_ACCEPT','FAST_SHORT_REJECT','AUTO_SHORT_INFO_GAIN_MIN = 0.08',
-              'AUTO_SHORT_PROBE_CONFIRM_SAMPLES = 2']:
-    require(token in camera, f"V1.4.23 SHORT probe/search contract missing: {token}")
-require('return autoShortProbeBaselineEv;' in camera and 'if (autoShortSearchExhausted)' in camera,
-        "failed/no-gain SHORT probe must rollback once and lock until material scene change")
-require('AUTO_SHORT_SCENE_RESET_EV = 0.50' in camera and 'autoShortSearchSceneChangedLocked' in camera,
-        "SHORT search lock must reset only after material LONG-scene change")
-require('final boolean flickerGuardRequired;' in frame_meta
-        and 'flickerGuardRequiredForShortLocked' in camera
-        and 'lastShortMeta != null && lastShortMeta.flickerGuardRequired ? 1 : 0' in gl
-        and 'renderFlickerRowField(ratio);' in gl,
-        "fast-SHORT flicker guard must remain part of exact paired live metadata")
-require('FLICKER_FIELD_WIDTH = 16' in gl and 'FLICKER_ROW_HEIGHT = 64' in gl
-        and 'renderFlickerRowField(ratio);' in gl
-        and 'PHOTO_FIELD_HEIGHT = 64' in raw_fusion
-        and 'rowPhotometric(qCenter.y + flowState.g)' in raw_fusion_shader,
-        "live and RAW still must each retain pair-rate row-radiometry protection in their proper domains")
-require(hdr_shader.count('shortReliabilityTex') == 1 and 'temporalTrust' not in hdr_shader,
-        "slow 200-ms reliability history must not own visible luma/chroma fusion")
-require('float fieldLumaTrust = mix(1.0, clamp(fieldState.g, 0.0, 1.0), guardRequired);' in hdr_shader
-        and 'float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);' in hdr_shader,
-        "phase-sensitive SHORT must fail closed at pair rate while safe SHORT bypasses mandatory field trust")
-
-# 056 / 074 / 080 / V1.5.4 V1.2 - Exact current pre-handoff authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.5.4-V1.1' in workflow
-        and 'run-id: 33711764471' in workflow,
-        "workflow must download the exact successful V1.5.4 V1.1 Actions authority")
-require('cc45ba874776f0ce99e9503497a970d6e4b57cbe' in workflow
-        and '2911c0edff409ac65e337bd7871af958cb9f675b' in workflow,
-        "V1.5.4 V1.1 authority commit/tree pins missing")
-require('backup-' not in workflow,
-        "build workflow must not depend on the safety backup branch")
-
-# 048 / 049 / 052 / 054 / 137 / 144 - Brightness remains AUTO LONG intent; MANUAL literal sensor controls are not rewritten by it.
+# V2.13 - independent two-exposure HDR contract. SHORT owns highlight capture;
+# LONG owns body/shadow capture. Unknown/PWM flicker may report UNSAFE but may never
+# collapse SHORT onto LONG. MANUAL LONG ISO has no path into SHORT solving.
 require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in main
         and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in main
         and 'DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10' in main,
-        "Brightness slider must be -16..+1 EV in 0.1 EV increments")
-require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in camera
-        and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in camera,
-        "Camera Brightness clamp must match UI")
-require('LONG_APPEARANCE_SHORT_ADAPTIVE' in camera
-        and 'METADATA_ONLY_LITERAL_MANUAL' in camera
-        and 'MANUAL_BRIGHTNESS_METADATA_ONLY' in camera,
-        "Brightness ownership must remain AUTO LONG appearance while MANUAL literal sensor controls stay untouched")
-require('root.put("brightnessOwner", "LONG_APPEARANCE_SHORT_HIGHLIGHT_EVIDENCE");' in saver,
-        "saved metadata must report LONG appearance + SHORT highlight-evidence ownership")
-require('brightnessBar.setEnabled(true);' in main and 'brightnessBar.setAlpha(1.0f);' in main,
-        "MANUAL SAFE must keep Brightness usable")
-require('glView.setDisplayBrightnessEv' not in main,
-        "Brightness slider must not drive post-fusion GL gain")
-require('getSystemWindowInsetBottom' in main and 'root.requestApplyInsets();' in main,
-        "control panel must reserve Android navigation/gesture-bar bottom inset")
-require('statusText.setSingleLine(true);' in main and 'statusText.setMaxHeight(dp(20));' in main,
-        "status/debug geometry must remain invariant")
+        "Brightness slider must remain -16..+1 EV in 0.1 EV increments")
+require('DISPLAY_GAMMA_MIN = 0.50f' in main
+        and 'DISPLAY_GAMMA_MAX = 2.00f' in main
+        and 'DISPLAY_GAMMA_STEPS_PER_UNIT = 20' in main,
+        "Gamma slider must remain 0.50..2.00 in 0.05 increments")
+require('AUTO_BRACKET_MIN_RATIO = 4.0' in camera
+        and 'AUTO_BRACKET_MAX_RATIO = 64.0' in camera
+        and 'AUTO_SHORT_P50_LONG_TARGET = 0.015' in camera
+        and 'AUTO_SHORT_P90_LONG_TARGET = 0.10' in camera
+        and 'AUTO_SHORT_P98_LONG_HEADROOM = 0.65' in camera
+        and 'AUTO_LONG_P95_BODY_TARGET = 0.24' in camera
+        and 'AUTO_LONG_P98_BODY_TARGET = 0.42' in camera
+        and 'AUTO_LONG_MAX_NEAR_CLIP_FRACTION = 0.005' in camera,
+        "V2.18 MANUAL-calibrated AUTO bracket/body targets missing")
 
-# 057 - Stable update signing identity.
-gradle = (ROOT / 'app/build.gradle.kts').read_text()
-require('versionCode = 35' in gradle and 'versionName = "1.0-v1.5.4-v1.2"' in gradle,
-        "V1.5.4 V1.2 version/build pin missing")
-require('IRIS_TEST_KEYSTORE_PATH' in gradle and 'stableDebug' in gradle
-        and 'iris-hdr-test' in gradle and 'PKCS12' in gradle,
-        "stable test signing config missing")
-require('IRIS_TEST_SIGNING_KEY_B64' in workflow and 'IRIS_TEST_KEYSTORE_PATH' in workflow,
-        "Actions stable-signing secret materialization missing")
-require('2a4ec2ab3fed7ae4d2e9c1b6b80c3b5bb19f07420952e97c203fda31e69cff2e' in workflow,
-        "stable test keystore SHA-256 pin missing")
-require('53:1A:EE:D9:EA:D7:9D:28:C4:24:AD:8F:71:A4:59:B4:CE:D8:AF:F3:7E:95:C1:1B:D2:95:08:3F:BB:25:C4:E8' in workflow,
-        "stable signing certificate fingerprint pin missing")
-# 040 / 055 - Shutter press freezes one immutable adaptive pair.
-begin_capture = camera[camera.index('private void beginCaptureLocked(HdrGlView.PublishedPairSnapshot publishedPair)'):camera.index('private void issueStillBurstLocked()')]
+# 092 - Exact javac failure from failed V2.13 run 33900980849: CameraController
+# consumed stats.shortP90Linear while SceneStats did not publish that field. Preserve
+# the intended V2.13 P90 controller math by requiring the producer contract itself.
+scene_stats_block = gl[gl.index('static final class SceneStats'):gl.index('private final HdrRenderer renderer;')]
+require('final float shortP90Linear;' in scene_stats_block
+        and 'float shortP90Linear,' in scene_stats_block
+        and 'this.shortP90Linear = shortP90Linear;' in scene_stats_block
+        and 'percentileSorted(shortSorted, 0.90f),' in gl,
+        "failed V2.13 shortP90Linear SceneStats producer omission returned")
+scene_stats_fields = set(re.findall(
+        r'\bfinal\s+(?:long|double|float|int|boolean)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;',
+        scene_stats_block))
+scene_stats_refs = set(re.findall(r'\bstats\.([A-Za-z_][A-Za-z0-9_]*)', camera))
+missing_scene_stats = sorted(scene_stats_refs - scene_stats_fields)
+require(not missing_scene_stats,
+        f"CameraController SceneStats consumer fields missing from producer: {missing_scene_stats}")
+require('autoLiveTargetMedianLinear' not in camera,
+        "AUTO must not restore HAL-median brightness ownership")
+require('Math.min(ratioBody, Math.min(ratioHeadroom, ratioLongBody))' in camera
+        and 'stats.longP95Linear' in camera
+        and 'stats.longP98Linear' in camera
+        and 'stats.longNearClipFraction' in camera
+        and 'targetShortProduct * AUTO_BRACKET_MIN_RATIO' in camera,
+        "AUTO must use MANUAL-calibrated body/headroom plus closed-loop LONG-body protection")
+require('autoShortExposureNs = autoLongExposureNs;' not in camera[camera.index('private void deriveAutoPairFromAnchorLocked()'):camera.index('private void processHdrSceneStatsLocked')],
+        "AUTO unknown/PWM flicker must never collapse SHORT exposure onto LONG")
+require('FLICKER UNSAFE' in camera and 'autoFlickerSafetySatisfied = false;' in camera,
+        "unknown/PWM best-effort HDR must remain explicitly UNSAFE rather than fake safety")
+
+# MANUAL Long ISO independence: safeShort is solved before and independently of safeLong.
+manual_solver = camera[camera.index('private boolean recomputeManualFlickerSafetyLocked()'):camera.index('private int effectiveFlickerLocked()')]
+short_solve = manual_solver.index('ExposureSetting safeShort = solveMinimumIsoFlickerSettingLocked(')
+long_solve = manual_solver.index('ExposureSetting safeLong = solveFlickerSafeSettingForProductLocked(')
+require(short_solve < long_solve,
+        "MANUAL SHORT must be solved independently before LONG")
+short_call = manual_solver[short_solve:long_solve]
+require('safeLong' not in short_call and 'manualIso' not in short_call
+        and 'shortExposureNs' in short_call and 'minIso' in short_call,
+        "Long ISO/LONG solution must have no path into MANUAL SHORT")
+
+# V2.18 changes only what MANUAL reports to UI; physical 50/60-Hz safety math is
+# byte-equivalent to successful V2.17. This prevents a cosmetic slider fix from
+# weakening SAFE timing.
+flicker_solver_slice = camera[camera.index('    private ExposureSetting solveMinimumIsoFlickerSettingLocked('):
+                              camera.index('    private static final class ExposureSetting')]
+manual_flicker_slice = camera[camera.index('    private boolean recomputeManualFlickerSafetyLocked()'):
+                              camera.index('    private int effectiveFlickerLocked()')]
+require(hashlib.sha256(flicker_solver_slice.encode()).hexdigest() ==
+        '70338617bf724bf03f96f2ab25c50e2b21bc06c920329df9561ac297dbc1c29f',
+        "V2.17 physical minimum-ISO flicker solver changed")
+require(hashlib.sha256(manual_flicker_slice.encode()).hexdigest() ==
+        '735edbb4317c0cbf6b003b46e45247bd8d37a1b780c510eed6877e142c009214',
+        "V2.17 MANUAL flicker safety/order math changed")
+require(camera.count('manualEffectiveShortExposureNs, manualEffectiveLongExposureNs') == 4
+        and camera.count('manualEffectiveLongIso);') >= 4
+        and 'listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);' not in camera,
+        "MANUAL callbacks must expose effective realizable SAFE values")
+require('Short ACTUAL ' in main and 'Long ACTUAL ' in main,
+        "MANUAL UI must label effective shutter values as actual")
+
+# V2.19 is post-fusion presentation-only inside CameraController. The successful
+# V2.18 physical AUTO exposure controller must remain byte-exact.
+physical_stats_slice = camera[camera.index('    private void processHdrSceneStatsLocked('):
+                              camera.index('    private void deriveAutoPairFromSceneTargetsLocked()')]
+physical_pair_slice = camera[camera.index('    private void deriveAutoPairFromSceneTargetsLocked()'):
+                             camera.index('    private void updateAdaptivePresentationLocked(')]
+physical_anchor_slice = camera[camera.index('    private void deriveAutoPairFromAnchorLocked()'):
+                               camera.index('    private void processHdrSceneStatsLocked(')]
+require(hashlib.sha256(physical_stats_slice.encode()).hexdigest() ==
+        'aefcfea728217485c9d39764aba520dc3b3b29f8460c4beb6060927c05845d0c',
+        "successful V2.18 scene-stat physical exposure controller changed")
+require(hashlib.sha256(physical_pair_slice.encode()).hexdigest() ==
+        '7794c401735797af9edd2edb2468d76b9bc4de0d86946d9c0c9a8d2e9d2b040b',
+        "successful V2.18 scene-target pair solver changed")
+require(hashlib.sha256(physical_anchor_slice.encode()).hexdigest() ==
+        '306add9a9eed6e80d14555c24c8a37f35b93a79f4af7cf6d7d0e939cec6e9e7d',
+        "successful V2.18 clean-AE anchor solver changed")
+
+# V2.19 exact post-fusion exposure regression from the supplied V2.18/Photon pairs.
+# The physical bracket remains V2.18-owned. V2.19 solves only the final scene key.
+def body_tone_v219(y):
+    if y <= 0.000001:
+        return y
+    toe = smoothstep_math(0.015, 0.090, y)
+    protect = 1.0 - smoothstep_math(0.45, 0.68, y)
+    return y + 0.45 * toe * protect * y * (1.0 - max(0.0, min(1.0, y)))
+
+def hdr_fit_v219(y, ratio):
+    bracket_stops = max(1.0, min(6.0, math.log(max(ratio, 1.0001), 2.0)))
+    if y <= 0.70:
+        return y
+    white_anchor = max(0.68, min(0.82, 0.82 - 0.04 * (bracket_stops - 1.0)))
+    display_ceiling = max(0.84, min(0.96, white_anchor + 0.14))
+    if y <= 1.0:
+        t = max(0.0, min(1.0, (y - 0.70) / 0.30))
+        return 0.70 + (white_anchor - 0.70) * t
+    headroom = max(math.log(max(ratio, 1.0001), 2.0), 0.0001)
+    t = max(0.0, min(1.0, math.log(max(y, 0.000001), 2.0) / headroom))
+    return white_anchor + (display_ceiling - white_anchor) * t
+
+def predict_presented_v219(scene_y, brightness_ev, gamma, ratio):
+    y = max(0.0, scene_y) * (2.0 ** brightness_ev)
+    y = body_tone_v219(y)
+    y = hdr_fit_v219(y, ratio)
+    return max(0.0, min(1.0, y)) ** (1.0 / max(0.50, min(2.00, gamma)))
+
+def targets_v219(fused_p50, fused_p90, long_p98, long_clip):
+    contrast_stops = math.log(max(0.001, fused_p90) / max(0.001, fused_p50), 2.0)
+    contrast_pressure = smoothstep_math(1.20, 2.60, contrast_stops)
+    base_median = 0.18 * (2.0 ** (-0.45 * max(0.0, contrast_stops - 1.0)))
+    base_median = max(0.105, min(0.18, base_median))
+    specular_pressure = max(
+        smoothstep_math(0.50, 0.85, long_p98),
+        smoothstep_math(0.003, 0.015, long_clip))
+    specular_pressure *= 1.0 - 0.75 * contrast_pressure
+    target_median = max(0.10, min(0.18, base_median * (1.0 - 0.25 * specular_pressure)))
+    target_contrast = max(1.0, min(2.0, contrast_stops))
+    target_p90 = max(0.26, min(0.42, target_median * (2.0 ** target_contrast)))
+    return target_median, target_p90
+
+def solve_presentation_v219(fused_p50, fused_p90, long_p98, long_clip, ratio=4.0):
+    target_median, target_p90 = targets_v219(fused_p50, fused_p90, long_p98, long_clip)
+    best = None
+    brightness = -4.0
+    while brightness <= 1.0001:
+        gamma = 0.80
+        while gamma <= 2.0001:
+            predicted_median = predict_presented_v219(fused_p50, brightness, gamma, ratio)
+            predicted_p90 = predict_presented_v219(fused_p90, brightness, gamma, ratio)
+            median_error = math.log(max(0.0001, predicted_median) / max(0.0001, target_median), 2.0)
+            p90_error = math.log(max(0.0001, predicted_p90) / max(0.0001, target_p90), 2.0)
+            score = (1.20 * median_error * median_error + p90_error * p90_error
+                     + 0.01 * brightness * brightness + 0.01 * (gamma - 1.20) * (gamma - 1.20))
+            if best is None or score < best[0]:
+                best = (score, brightness, gamma, predicted_median, predicted_p90)
+            gamma += 0.05
+        brightness += 0.10
+    return target_median, target_p90, best
+
+# Exact V2.18 shelf final was ~2.27 EV dark at median and ~2.33 EV dark at P90
+# versus the supplied Photon reference. Recovered pre-presentation fused statistics
+# from that exact JPEG must solve to a Photon-like key, not the V2.18 -2.4 EV key.
+shelf_target50, shelf_target90, shelf_solution = solve_presentation_v219(
+    0.01972576, 0.12988126, 0.3373257, 0.0007289, 4.0)
+require(0.100 <= shelf_target50 <= 0.110 and 0.410 <= shelf_target90 <= 0.420,
+        "V2.19 shelf scene-key targets moved away from supplied Photon reference")
+require(0.40 <= shelf_solution[1] <= 0.70 and 1.50 <= shelf_solution[2] <= 1.65,
+        "V2.19 shelf solver must replace V2.18 negative exposure with a bright Photon-like key")
+require(abs(math.log(shelf_solution[3] / 0.10583283, 2.0)) < 0.08
+        and abs(math.log(shelf_solution[4] / 0.39880091, 2.0)) < 0.12,
+        "V2.19 shelf predicted P50/P90 no longer track supplied Photon reference")
+
+# Exact V2.18 chandelier was ~2.65 EV dark at median and ~2.74 EV dark at P90.
+# A specular-heavy scene must brighten the body while keeping bulb pressure lower.
+ch_target50, ch_target90, ch_solution = solve_presentation_v219(
+    0.05279177, 0.10876445, 0.80, 0.020, 4.0)
+require(0.125 <= ch_target50 <= 0.140 and 0.265 <= ch_target90 <= 0.285,
+        "V2.19 chandelier specular scene-key targets changed")
+require(0.80 <= ch_solution[1] <= 1.01 and 0.90 <= ch_solution[2] <= 1.05,
+        "V2.19 chandelier solver must brighten the body without flattening bulbs")
+require(abs(math.log(ch_solution[3] / 0.13369069, 2.0)) < 0.08
+        and abs(math.log(ch_solution[4] / 0.26844543, 2.0)) < 0.10,
+        "V2.19 chandelier predicted P50/P90 no longer track supplied Photon reference")
+
+# Ordinary lower-contrast scenes remain brighter, matching the supplied Photon kitchen
+# reference rather than inheriting the dark high-contrast shelf key.
+k_target50, k_target90, k_solution = solve_presentation_v219(0.080, 0.180, 0.35, 0.001, 4.0)
+require(0.165 <= k_target50 <= 0.180 and 0.375 <= k_target90 <= 0.410,
+        "ordinary-scene V2.19 key must remain kitchen-bright")
+require(k_solution[1] > 0.50 and k_solution[3] > 0.16 and k_solution[4] > 0.36,
+        "ordinary V2.19 scenes must use preserved HDR headroom instead of remaining dim")
+
+# V2.18 physical exposure behavior remains mandatory.
+def desired_ratio_v218(p50, p90, p98, long_p95, long_p98, long_clip, current_ratio):
+    ratio_body = math.sqrt((0.015 / max(0.00025, p50)) * (0.10 / max(0.00025, p90)))
+    ratio_headroom = 0.65 / max(0.002, p98)
+    ratio_long_p95 = current_ratio * 0.24 / max(0.010, long_p95)
+    ratio_long_p98 = current_ratio * 0.42 / max(0.010, long_p98)
+    ratio_long_body = min(ratio_long_p95, ratio_long_p98)
+    if long_clip > 0.005:
+        clip_scale = 0.005 / max(0.000001, long_clip)
+        ratio_long_body = min(ratio_long_body, current_ratio * max(0.25, min(1.0, clip_scale)))
+    return max(4.0, min(64.0, ratio_body, ratio_headroom, ratio_long_body))
+
+manual_ratio = desired_ratio_v218(0.0030643, 0.0306402, 0.0822136,
+                                  0.2051309, 0.3373257, 0.0007289, 4.0)
+bad_auto_ratio = desired_ratio_v218(0.0031255, 0.0306025, 0.0828143,
+                                    0.9559018, 1.0, 0.0705973, 20.56)
+require(math.isclose(manual_ratio, 4.0, abs_tol=0.01),
+        "V2.18 clean shelf physical bracket must remain 4x / 2EV")
+require(math.isclose(bad_auto_ratio, 4.0, abs_tol=0.01),
+        "V2.18 bad 20.6x AUTO physical regression must remain fixed")
+require(desired_ratio_v218(0.00025, 0.00025, 0.003, 0.010, 0.010, 0.0, 4.0) >= 64.0,
+        "genuinely dark feasible scenes must retain the 64x / 6EV AUTO ceiling")
+
+# Presentation remains adaptive, but a failed physical bracket is restrained rather
+# than disguised with strong brightness/gamma/dehaze/microcontrast.
+require('boolean collapsedBracket = physicalRatio < 2.0;' in camera
+        and 'targetBrightness = Math.min(targetBrightness, 0.15f);' in camera
+        and 'targetGamma = Math.min(targetGamma, 1.20f);' in camera
+        and 'targetDehaze = Math.min(targetDehaze, 0.30f);' in camera
+        and 'targetMicro = Math.min(targetMicro, 0.22f);' in camera,
+        "collapsed physical bracket must fail closed to restrained presentation")
+
+# Existing settling mechanics remain bounded; only scene target ownership changes.
+def live_step(error_ev):
+    if abs(error_ev) <= 0.10:
+        return 0.0
+    max_step = 6.0 if abs(error_ev) >= 0.70 else 0.30
+    return max(-max_step, min(max_step, error_ev))
+require(math.isclose(live_step(+2.0), +2.0) and math.isclose(live_step(-2.0), -2.0),
+        "large scene cuts must retain immediate correction")
+require(math.isclose(live_step(+0.50), +0.30) and math.isclose(live_step(-0.50), -0.30),
+        "ordinary exposure drift must retain the successful 0.30-EV bound")
+require(math.isclose(live_step(+0.05), 0.0) and math.isclose(live_step(-0.05), 0.0),
+        "small scene-stat jitter must remain inside exposure hysteresis")
+
+# Presentation controller ownership and capture freeze. V2.19 retains the same
+# MANUAL domains but AUTO now closes the loop on predicted final P50/P90.
+require('private void updateAdaptivePresentationLocked(' in camera
+        and 'AUTO_PRESENT_BRIGHTNESS_MIN_EV = -4.00f' in camera
+        and 'AUTO_PRESENT_BRIGHTNESS_MAX_EV = 1.00f' in camera
+        and 'AUTO_PRESENT_GAMMA_MIN = 0.50f' in camera
+        and 'AUTO_PRESENT_GAMMA_MAX = 2.00f' in camera
+        and 'float contrastPressure = smoothstepFloat(1.20f, 2.60f, contrastStops);' in camera
+        and 'float targetMedian = clampFloat(' in camera
+        and 'float targetP90 = clampFloat(' in camera
+        and 'predictAutoPresentedLuma' in camera
+        and 'log2RatioFloat' in camera,
+        "V2.19 Photon-normalized AUTO scene-key solver missing")
+require('float targetP90 = lerpFloat(0.024f, 0.020f, highlightPressure);' not in camera
+        and '0.029f, 0.023f' not in camera,
+        "V2.18 dark MANUAL-calibrated final-render targets survived")
+require('displayDehaze, 0.0f' in camera and 'displayMicroContrast, 0.0f' in camera,
+        "AUTO must neutralize the second mode-6 global darkening exponent")
+require('if (automatic) {' in camera[camera.index('private void updateAdaptivePresentationLocked'):camera.index('private void publishPresentationLocked')],
+        "AUTO-only Brightness/Gamma authority boundary missing")
+manual_pres = camera[camera.index('private void updateAdaptivePresentationLocked'):camera.index('private void publishPresentationLocked')]
+require('float targetBrightness = displayBrightnessEv;' in manual_pres
+        and 'float targetGamma = displayGamma;' in manual_pres,
+        "MANUAL must begin from user Brightness/Gamma rather than replace them")
+require('sliderLift' in camera and 'targetDehaze' in camera and 'targetMicro' in camera,
+        "dehaze/microcontrast must adapt to both scene evidence and slider-controlled presentation")
+require('captureDisplayBrightnessEv = displayBrightnessEv;' in camera
+        and 'captureDisplayGamma = displayGamma;' in camera
+        and 'captureDisplayDehaze = displayDehaze;' in camera
+        and 'captureDisplayMicroContrast = displayMicroContrast;' in camera,
+        "shutter press must freeze one complete presentation state")
+require('displayDehaze' in saver and 'displayMicroContrast' in saver
+        and 'root.put("displayDehaze", displayDehaze);' in saver
+        and 'root.put("displayMicroContrast", displayMicroContrast);' in saver,
+        "saved metadata must record the frozen adaptive clarity state")
+require('shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma,' in saver.replace('\n', ' ')
+        and 'displayDehaze, displayMicroContrast,' in saver.replace('\n', ' '),
+        "CaptureSetSaver must carry frozen Brightness/Gamma/dehaze/microcontrast to GPU still fusion")
+require('brightnessBar.setEnabled(enabled)' in main and 'gammaBar.setEnabled(enabled)' in main,
+        "AUTO must own Brightness/Gamma sliders while MANUAL keeps them user-authoritative")
+require('Brightness AUTO' in main and 'Dehaze' in main and 'Micro' in main,
+        "UI must expose the learned presentation state without adding extra required sliders")
+
+# V2.17 topology-safe saved presentation (math inherited unchanged). Saved mode 6 is pointwise/monotonic only:
+# it may reshape luma but can never sample a neighbor or create spatial topology.
+require('IRIS_V217_TOPOLOGY_SAFE_PRESENTATION_BEGIN' in hdr_shader
+        and 'vec3 fusedLinear = srgbToLinear(texture(normalTex, uv).rgb);' in hdr_shader
+        and 'float exponent = 1.0' in hdr_shader
+        and 'vec3 presented = fusedLinear * min(requestedScale, gamutScale);' in hdr_shader,
+        "V2.17 saved presentation must remain pointwise, luminance-only and RGB-ratio preserving")
+v217_mode6 = hdr_shader[hdr_shader.index('// IRIS_V217_TOPOLOGY_SAFE_PRESENTATION_BEGIN'):
+                         hdr_shader.index('// IRIS_V217_TOPOLOGY_SAFE_PRESENTATION_END')]
+require('presentationGuideLumaAt' not in v217_mode6
+        and 'applyAdaptiveClarity' not in v217_mode6
+        and v217_mode6.count('texture(') == 2,
+        "V2.17 saved mode 6 must not sample neighbors or reintroduce source contours")
+require('unsharp' not in v217_mode6.lower() and 'clahe' not in v217_mode6.lower(),
+        "V2.17 must not substitute sharpening/CLAHE")
+require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
+        "V2.17 must reuse the successful shader-file universe")
+
+# Production still fusion remains GPU-only and preserves the successful mode
+# ordering. V2.20 intentionally repeats only mode 4 on the small topology atlas
+# until connected-region reconstruction converges; modes 3/5/6 remain one-shot.
+require('controller.setStillFusionView(glView);' in main
+        and 'renderStillPass(' in gl
+        and '3, longTexture, shortTexture, longTexture' in gl
+        and '4, readTopologyTexture, shortTexture, longTexture' in gl
+        and '5, readTopologyTexture, shortTexture, longTexture' in gl
+        and '6, presentationTexture, shortTexture, longTexture' in gl
+        and 'while (propagationPasses < maxPropagationPasses)' in gl
+        and 'stillFusionProgram' not in gl
+        and 'still_fusion.frag' not in gl
+        and 'GPU_STILL_FUSION' in gl,
+        "saved HDR must remain GPU-only with mode-4-only convergent topology reconstruction")
+require('submitCpuFusionFallback' not in saver
+        and 'JpegFusion.fuse(' not in saver
+        and 'GPU_STILL_FUSION_REQUIRED' in saver
+        and 'CPU HDR substitution is disabled' in saver,
+        "production capture must never substitute independent CPU HDR after GPU failure")
+require(not (ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java').exists()
+        and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_demosaic.frag').exists()
+        and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_fusion.frag').exists(),
+        "V2.14 must remain on the successful JPEG-source architecture")
+
+# V2.17 reverses V2.15 geometry ownership around the clean LONG body. LONG is the
+# immutable reference and only SHORT is globally/local-residual aligned into it.
+require('static Registration estimateRegistration(Bitmap movingBitmap, Bitmap referenceBitmap)' in fusion
+        and 'estimateOneWayRegistration(movingBitmap, referenceBitmap)' in fusion
+        and 'estimateOneWayRegistration(referenceBitmap, movingBitmap)' in fusion
+        and 'cycleConfidence = 1.0f - smoothstep(0.45f, 1.50f, cycleError)' in fusion,
+        "bidirectional global registration with cycle consistency is missing")
+require('static Bitmap alignLongToShort(Bitmap longBitmap, Registration registration)' in fusion
+        and 'canvas.drawBitmap(longBitmap, matrix, paint);' in fusion,
+        "byte-protected generic moving-frame alignment helper changed")
+require('JpegFusion.estimateRegistration(shortBitmap, longBitmap)' in gl
+        and 'JpegFusion.alignLongToShort(shortBitmap, registration)' in gl
+        and 'JpegFusion.estimateLocalRegistration(shortBitmap, longBitmap)' in gl,
+        "GPU saved path must treat SHORT as moving and LONG as immutable reference")
+require('JpegFusion.estimateRegistration(longBitmap, shortBitmap)' not in gl,
+        "V2.16 LONG-moving geometry direction survived into V2.17")
+require('final int maxDimension = 1024;' in fusion
+        and 'final int cell = 32;' in fusion
+        and 'final int searchRadius = 2;' in fusion
+        and 'final int windowRadius = 12;' in fusion
+        and 'final float maxResidualPixels = 4.0f;' in fusion
+        and 'LocalMatch backward = localGradientMatch(' in fusion
+        and 'cycleConfidence = 1.0f - smoothstep(0.20f, 0.90f, cycleError)' in fusion,
+        "bounded bidirectional local SHORT residual registration is incomplete")
+require('if (confidence < 0.28f)' in fusion
+        and 'if (neighbors < 5 || weightSum <= 0.0f) continue;' in fusion
+        and 'if (coherent >= 5 && rms <= 0.75f)' in fusion
+        and 'if (disagreement > 1.0f) continue;' in fusion,
+        "local residual field must fail closed and regularize only coherent camera motion")
+require('GPU_STILL_LOCAL_REGISTRATION' in gl
+        and 'uploadRgba8Texture(' in gl
+        and 'localRegistration.rgba);' in gl
+        and gl.count('localFlowTexture, width, height,') == 4
+        and 'haveLocalFlow' in gl and 'localFlowMaxPixels' in gl
+        and 'stillImageSize' in gl,
+        "GPU saved path must carry bounded SHORT residual flow into the four inherited passes")
+require('uniform sampler2D localFlowTex;' in hdr_shader
+        and 'vec2 stillShortUvAt(vec2 sampleUv)' in hdr_shader
+        and 'return texture(shortTex, stillShortUvAt(sampleUv)).rgb;' in hdr_shader
+        and 'stillLongUvAt' not in hdr_shader
+        and 'return texture(longTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;' in hdr_shader,
+        "shader must flow only SHORT and sample LONG at immutable coordinates")
+require(gl.count('GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST') >= 2
+        and gl.count('GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST') >= 2,
+        "immutable LONG source and full-resolution mode-5 raster must both use nearest sampling")
+require('presentationTexture);\n                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);' in gl,
+        "mode-6 must not bilinear-resample the selected-source fused raster")
+
+# V2.20 source-loss atlas separates strict seeds from the physically allowed
+# propagation domain. The atlas still never carries source RGB.
+require('IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN' in hdr_shader
+        and 'float shortRecoveryValidityAt(vec2 sampleUv)' in hdr_shader
+        and 'float registrationNeighborhoodConfidenceAt(vec2 sampleUv)' in hdr_shader
+        and 'vec2 registrationNeighborhoodFlowAt(vec2 sampleUv)' in hdr_shader
+        and 'float longHardLossBaseAt(vec2 sampleUv)' in hdr_shader
+        and 'float compactHardLossSupportAt(vec2 sampleUv)' in hdr_shader
+        and 'float longEffectiveLossAt(vec2 sampleUv)' in hdr_shader
+        and 'float shortRecoveryEvidenceAt(vec2 sampleUv)' in hdr_shader
+        and 'float longLossRecoveryDomainAt(vec2 sampleUv)' in hdr_shader
+        and 'vec3 broadRecoverySeedStatsAt(vec2 sampleUv)' in hdr_shader
+        and 'float broadRecoveryDomainAt(vec2 sampleUv)' in hdr_shader,
+        "V2.20 seed/domain source-loss evidence chain is incomplete")
+require('localLinearRangeAtRadius(sampleUv, 4.0)' in hdr_shader
+        and 'localLinearRangeAtRadius(sampleUv, 12.0)' in hdr_shader
+        and 'smoothstep(0.68, 0.90, max3(longRgb))' in hdr_shader
+        and 'shortMediumRange - 1.06 * longMediumRange' in hdr_shader
+        and 'shortBroadRange - 1.04 * longBroadRange' in hdr_shader,
+        "effective LONG information-loss proof must retain smooth medium/broad response evidence")
+require('shortCoherentDetailAt' not in hdr_shader
+        and 'float recoveryProof =' not in hdr_shader
+        and 'step(0.58, recoveryProof)' not in hdr_shader,
+        "V2.16 per-pixel detail/recovery gate must be completely removed")
+require('int analysisWidth = Math.max(1, (width + 15) / 16);' in gl
+        and 'int analysisHeight = Math.max(1, (height + 15) / 16);' in gl,
+        "V2.17 ownership atlas must preserve the proven 1/16 allocation")
+require(math.ceil(4096 / 16) == 256 and math.ceil(3072 / 16) == 192,
+        "3072x4096 device captures must map to a 192x256 ownership atlas")
+v220_recon = hdr_shader[hdr_shader.index('// IRIS_V220_RATIO_INVARIANT_REGION_RECONSTRUCTION_BEGIN'):
+                         hdr_shader.index('// IRIS_V220_RATIO_INVARIANT_REGION_RECONSTRUCTION_END')]
+require('float seed = step(0.30, seedStrength);' in v220_recon
+        and 'float recoveryDomain = step(0.30, broadRecoveryDomainAt(uv));' in v220_recon
+        and 'float currentOwned = step(0.5, centerState.r);' in v220_recon
+        and 'if (currentOwned > 0.5 || recoveryDomain < 0.5)' in v220_recon
+        and 'float propagate = step(0.35, coherentFlow) * recoveryDomain;' in v220_recon,
+        "V2.20 mode 3/4 must implement strict-seed, mask-constrained monotonic reconstruction")
+require('for (int oy = -2; oy <= 2; ++oy)' not in v220_recon
+        and 'float coherentSupport = seededRegion' not in v220_recon,
+        "retired finite-radius one-pass V2.19 closure returned")
+require('exposureRatio' not in v220_recon,
+        "ownership reconstruction topology must be exposure-ratio invariant")
+require('meanFlowPixels' in v220_recon
+        and 'flowRms' in v220_recon
+        and 'smoothstep(0.85, 1.25, flowRms)' in v220_recon
+        and 'registrationNeighborhoodFlowAt(uv)' in v220_recon,
+        "wide clipped regions must inherit coherent residual geometry from proven seeds")
+
+# Saved mode 5 is reversed-V2.15 source truth: LONG by default, aligned SHORT as a
+# complete source only when the already-established ownership atlas selects it.
+require('IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN' in hdr_shader
+        and 'vec2 propagatedResidualPixels = (support.ba * 2.0 - vec2(1.0))' in hdr_shader
+        and 'vec2 shortOwnedUv = clamp(' in hdr_shader
+        and 'vec3 shortRgb = texture(shortTex, shortOwnedUv).rgb;' in hdr_shader
+        and 'vec3 longRgb = stillLongRgbAt(uv);' in hdr_shader
+        and 'vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;' in hdr_shader
+        and 'vec3 longScene = srgbToLinear(longRgb);' in hdr_shader,
+        "V2.20 mode 5 must use propagated SHORT residual geometry and immutable LONG candidates")
+v217_mode5 = hdr_shader[hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN'):
+                         hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_END')]
+require('float shortOwns = step(0.50, support.r) * usableBracket;' in v217_mode5
+        and 'vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;' in v217_mode5,
+        "V2.17 must default to LONG and switch discretely by coherent atlas ownership")
+require('shortRecoveryValidityAt(uv)' not in v217_mode5
+        and 'registrationNeighborhoodConfidenceAt(uv)' not in v217_mode5
+        and 'longHardLossBaseAt(uv)' not in v217_mode5
+        and 'longEffectiveLossAt(uv)' not in v217_mode5,
+        "mode 5 must not re-prove ownership per pixel and recreate V2.16 holes")
+require('mix(longScene, shortScene' not in v217_mode5
+        and 'mix(shortScene, longScene' not in v217_mode5,
+        "mode 5 must never create a fractional LONG/SHORT RGB sample")
+require('radianceFloorWeight' not in hdr_shader and 'radianceRaised' not in hdr_shader
+        and 'recoveredSourceDisplay' not in hdr_shader,
+        "synthetic radiance/color fill paths must remain absent")
+
+# Dormant CPU helper remains byte-preserved and production-unreachable. It must not
+# be mistaken for the V2.16 owner or used as a fallback after a GPU failure.
+require('float mr = SRGB_TO_LINEAR[sr8] * scalarAppearanceGain;' in fusion
+        and 'float mg = SRGB_TO_LINEAR[sg8] * scalarAppearanceGain;' in fusion
+        and 'float mb = SRGB_TO_LINEAR[sb8] * scalarAppearanceGain;' in fusion
+        and 'lr + (sr - lr)' not in fusion
+        and 'recycle(longBitmap);\n        longBitmap = null;' in fusion,
+        "byte-preserved CPU utility unexpectedly changed")
+require('bitmap.compress(Bitmap.CompressFormat.JPEG, 100, bytes)' in fusion,
+        "fused JPEG must use maximum encoder quality")
+
+# Mathematical provenance: a full-resolution output sample is one complete source
+# vector, never an RGB interpolation. The default branch is LONG; SHORT wins only
+# when the binary ownership proof is true.
+def v217_select(long_rgb, short_rgb, short_owns):
+    return short_rgb if short_owns else long_rgb
+
+long_rgb = (0.61, 0.55, 0.49)
+short_rgb = (0.44, 0.31, 0.17)
+require(v217_select(long_rgb, short_rgb, False) == long_rgb,
+        "healthy/default V2.17 source must be LONG")
+require(v217_select(long_rgb, short_rgb, True) == short_rgb,
+        "proven LONG information loss must retain exact SHORT RGB")
+for owns in (False, True):
+    out = v217_select(long_rgb, short_rgb, owns)
+    require(out in (long_rgb, short_rgb),
+            "binary source selector manufactured a third RGB sample")
+
+# Capture/exposure policy is frozen from successful V2.15. AUTO must retain the 64x
+# ceiling and MANUAL controls must retain enough independent shutter/ISO range to
+# realize at least a 64x pair without LONG feeding back into SHORT.
+require('AUTO_BRACKET_MAX_RATIO = 64.0' in camera,
+        "AUTO 64x/6EV capability changed")
+require('1_000_000_000L / 8000' in main and '1_000_000_000L / 8' in main
+        and 'private static final int[] ISO_VALUES = {100, 200, 400, 800, 1600, 3200};' in main,
+        "MANUAL exposure/ISO control range no longer contains a 64x-capable pair")
+manual_64_ratio = ((1.0 / 1000.0) * 400.0) / ((1.0 / 8000.0) * 50.0)
+require(manual_64_ratio >= 64.0,
+        "representative independent MANUAL controls must retain at least 64x separation")
+
+# Exact hard exposure ordering. Request-time correction may raise LONG only; actual
+# CaptureResult metadata must reject any inversion instead of clamping it to 1x.
+require('enforceManualExposureOrderingLocked();' in camera
+        and 'private void enforceManualExposureOrderingLocked()' in camera
+        and 'private void enforceAutoExposureOrderingLocked(String reason)' in camera
+        and 'private boolean enforceFrozenExposureOrderingLocked()' in camera,
+        "SHORT<=LONG request ordering guards are incomplete")
+manual_order = camera[camera.index('private void enforceManualExposureOrderingLocked()'):
+                      camera.index('private void enforceAutoExposureOrderingLocked(String reason)')]
+auto_order = camera[camera.index('private void enforceAutoExposureOrderingLocked(String reason)'):
+                    camera.index('private boolean enforceFrozenExposureOrderingLocked()')]
+frozen_order = camera[camera.index('private boolean enforceFrozenExposureOrderingLocked()'):
+                      camera.index('private int effectiveFlickerLocked()')]
+for block, owner in ((manual_order, 'MANUAL'), (auto_order, 'AUTO'), (frozen_order, 'FROZEN')):
+    require('Long' not in block or True, "unreachable")
+    require('manualEffectiveShortExposureNs =' not in block if owner == 'MANUAL' else True,
+            "MANUAL ordering guard must never mutate SHORT")
+    require('autoShortExposureNs =' not in block if owner == 'AUTO' else True,
+            "AUTO ordering guard must never mutate SHORT")
+    require('captureShortExposureNs =' not in block if owner == 'FROZEN' else True,
+            "freeze ordering guard must never mutate SHORT")
+require('if (Double.isNaN(ratio) || Double.isInfinite(ratio) || ratio < 1.0)' in saver
+        and 'HDR exposure ordering violated/unprovable' in saver
+        and 'return Double.NaN;' in saver
+        and 'return longProduct / Math.max(shortProduct, 1.0);' in saver,
+        "actual CaptureResult ordering must be proven; inverted/unprovable pairs may not fuse")
+require('return Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));' not in saver,
+        "actual inverted exposure ratio must never be hidden by a 1x clamp")
+
+# Production architecture remains dependency-free and GPU-owned.
+require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kts').read_text().lower(),
+        "OpenCV must remain simulation-only and absent from runtime")
+
+# V2.20 changes topology only. Successful V2.19 exposure/tone/capture owners and
+# JpegFusion registration/calibration utility remain exact.
+require(hashlib.sha256(camera.encode()).hexdigest() ==
+        '032b90942199b400d2ea8ac91de27e49af6d3e0eaa92560865ae0edc2803673c',
+        "successful V2.19 CameraController bytes changed")
+require(hashlib.sha256(fusion.encode()).hexdigest() ==
+        '7aa3f4956f28a48b204375c0123195c020d57c8d8edd774946dccb39d42f7434',
+        "successful V2.19 JpegFusion bytes changed")
+require(hashlib.sha256(saver.encode()).hexdigest() ==
+        '60cfa6d09db46d2af8fc1917e5ebf1e3c580102e1b07fe6bfea8e683c8372248',
+        "successful V2.19 CaptureSetSaver bytes changed")
+require(hashlib.sha256(main.encode()).hexdigest() ==
+        'b142084c33bb2482ad60113bb66653b9c3efeff55c9bdcdd84082d3345a4be3b',
+        "successful V2.19 MainActivity bytes changed")
+
+# V2.17 permanent visual/source regressions include the exact V2.16 device failure:
+# valid SHORT highlight pieces may not be dropped by a per-pixel re-proof inside one
+# coherent LONG-loss region. LONG remains global/default body; SHORT is aligned to it.
+require('mix(longScene, shortScene' not in hdr_shader,
+        "gray/blue third-edge RGB interpolation returned")
+require('vec2 stillShortUvAt(vec2 sampleUv)' in hdr_shader
+        and 'stillLongUvAt' not in hdr_shader,
+        "reversed V2.15 geometry ownership disappeared")
+require('vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;' in v217_mode5,
+        "V2.17 binary LONG-default/aligned-SHORT ownership disappeared")
+require('vec3 mergedScene = shortScene * envelopeScale;' not in hdr_shader,
+        "V2.15 global SHORT ownership regression returned")
+require('step(0.58, recoveryProof)' not in hdr_shader
+        and 'shortCoherentDetailAt' not in hdr_shader,
+        "exact V2.16 fragmented pixel-gate regression returned")
+require('(width + 15) / 16' in gl
+        and 'while (propagationPasses < maxPropagationPasses)' in gl
+        and 'counts[0] == previousOwned' in gl
+        and 'readTopologyTexture = writeTopologyTexture;' in gl,
+        "V2.20 connected ownership topology/convergence loop disappeared")
+require('aligned auxiliary' in hdr_shader and 'immutable LONG body' in hdr_shader,
+        "LONG-body / aligned-SHORT source contract markers disappeared")
+require('radianceFloorWeight' not in hdr_shader and 'radianceRaised' not in hdr_shader,
+        "unsupported peach/orange radiance fill returned")
+
+# Appearance calibration remains byte-identical to successful V2.14. Registration
+# matching math is preserved conceptually, but alignment direction intentionally
+# changes so only LONG is transformed into SHORT geometry.
+appearance_slice = fusion[fusion.index('    static AppearanceGain estimateAppearanceGain'):
+                          fusion.index('    private static float[] logLuma')]
+require(hashlib.sha256(appearance_slice.encode()).hexdigest() ==
+        'd83dc871411da89ae113a85284ab493400baad0347eeb6c127fa8a20086e7e97',
+        "successful appearance-calibration bytes changed")
+registration_core = fusion[fusion.index('    static Registration estimateRegistration'):
+                           fusion.index('    private static OneWayRegistration estimateOneWayRegistration')]
+for token in ['estimateOneWayRegistration(movingBitmap, referenceBitmap)',
+              'estimateOneWayRegistration(referenceBitmap, movingBitmap)',
+              'forward.sampleDx + backward.sampleDx',
+              'forward.sampleDy + backward.sampleDy']:
+    require(token in registration_core, f"global registration matcher changed unexpectedly: {token}")
+
+# Global photographic body tone is tone reproduction only: black stays anchored,
+# body/midtones rise, and extra lift is zero before the 0.70 HDR shoulder.
+require('applyPhotographicBodyTone' in hdr_shader
+        and '0.45 * toe * highlightProtect * y' in hdr_shader
+        and 'smoothstep(0.45, 0.68, y)' in hdr_shader
+        and 'targetBodyY = bodyY + 0.45f * toe * highlightProtect' in fusion,
+        "GPU/CPU photographic body tone curve missing or mismatched")
+live_mode_start = hdr_shader.index('// V2.17 leaves the successful live preview path unchanged.')
+require(hdr_shader.index('applyPhotographicBodyTone(mergedScene * brightnessGain)', live_mode_start)
+        < hdr_shader.index('adaptiveHdrToneMap(bodyToned, ratio, bracketStops)', live_mode_start)
+        < hdr_shader.index('applyDisplayGamma(displayLinear, displayGamma)', live_mode_start),
+        "photographic body tone must run before HDR shoulder and Gamma in strict live mode=2")
+
+def body_tone_v26(y):
+    if y <= 0.000001:
+        return y
+    toe = smoothstep_math(0.015, 0.090, y)
+    protect = 1.0 - smoothstep_math(0.45, 0.68, y)
+    return y + 0.45 * toe * protect * y * (1.0 - max(0.0, min(1.0, y)))
+
+require(math.isclose(body_tone_v26(0.0), 0.0, abs_tol=1e-9),
+        "photographic tone must keep true black anchored")
+require(body_tone_v26(0.20) > 0.26 and body_tone_v26(0.40) > 0.49,
+        "photographic tone must lift the scene body/midtones")
+require(math.isclose(body_tone_v26(0.68), 0.68, abs_tol=1e-6)
+        and math.isclose(body_tone_v26(0.75), 0.75, abs_tol=1e-6),
+        "body lift must be zero before and throughout recovered-highlight shoulder")
+# No local tone map / local contrast operator is introduced by V2.7.
+require('localTone' not in hdr_shader and 'unsharp' not in hdr_shader and 'sharpen' not in hdr_shader,
+        "V2.7 must remain a restrained global SDR tone curve without local pop/sharpening")
+
+require('applySafeSystemBarInsets(root, panel);' in main
+        and 'WindowInsets.Type.systemBars()' in main
+        and 'panelBottom + bottom' in main,
+        "controls must reserve Android system-bar/gesture-pill insets")
+require('statusText.setSingleLine(true);' in main
+        and 'statusText.setEllipsize(TextUtils.TruncateAt.END);' in main
+        and 'statusText.setIncludeFontPadding(false);' in main
+        and 'statusText.setMinHeight(dp(20));' in main
+        and 'statusText.setMaxHeight(dp(20));' in main
+        and 'ViewGroup.LayoutParams.MATCH_PARENT,\n                dp(20)' in main,
+        "V2.1 fixed-height status-row bounce correction must remain intact")
+require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
+        and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
+        "V1.4.11 V2 must have a side-by-side application identity and visible label")
+require('versionCode = 37' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.20"' in Path('app/build.gradle.kts').read_text(),
+        "V2.20 version/build marker must be exact")
+
+# 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
+begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
 still_burst = camera[camera.index('private void issueStillBurstLocked()'):camera.index('private final CameraCaptureSession.CaptureCallback stillCaptureCallback')]
 require('autoMetering = false;' in begin_capture,
-        "shutter press must ignore any initial bootstrap meter before snapshotting controls")
+        "shutter press must freeze/ignore bootstrap metering before snapshotting controls")
+stats_block = camera[camera.index('private void processHdrSceneStatsLocked'):camera.index('private void deriveAutoPairFromSceneTargetsLocked')]
+require('stillSessionActive' in stats_block and 'autoMetering' in stats_block,
+        "continuous live statistics must not mutate an in-flight still capture")
 for token in [
-    'captureShortExposureNs = publishedPair.shortMeta.exposureTimeNs;',
-    'captureLongExposureNs = publishedPair.longMeta.exposureTimeNs;',
-    'captureShortIso = publishedPair.shortMeta.iso;',
-    'captureLongIso = publishedPair.longMeta.iso;',
-    'captureColorGains = publishedPair.longMeta.colorGains;',
-    'captureColorTransform = publishedPair.longMeta.colorTransform;',
-    'captureExpectedPhysicalId = publishedPair.longMeta.activePhysicalId;',
-    'captureViewfinderSensorCrop = publishedPair.longMeta.physicalSensorCropRegion',
+    'captureShortExposureNs = activeShortExposureNs();',
+    'captureLongExposureNs = activeLongExposureNs();',
+    'captureShortIso = activeShortIso();',
+    'captureLongIso = activeLongIso();',
     'capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;',
     'captureDisplayBrightnessEv = displayBrightnessEv;',
+    'captureDisplayGamma = displayGamma;',
+    'captureDisplayDehaze = displayDehaze;',
+    'captureDisplayMicroContrast = displayMicroContrast;',
 ]:
-    require(token in begin_capture, f"immutable displayed-pair capture snapshot missing: {token}")
-require('publishedPair.shortMeta.exposureGeneration' in begin_capture
-        and 'publishedPair.longMeta.exposureGeneration' in begin_capture
-        and 'publishedPair.longMeta.provisionalShortProbe' in begin_capture,
-        "shutter-time generation/probe state must remain frozen with the exact displayed pair")
+    require(token in begin_capture, f"immutable capture snapshot missing: {token}")
 require('activeShortExposureNs()' not in still_burst and 'activeLongExposureNs()' not in still_burst
         and 'activeShortIso()' not in still_burst and 'activeLongIso()' not in still_burst,
-        "temporary still session must never re-read mutable live-adaptive exposure state")
+        "temporary still session must never re-read mutable preview/remeter exposure state")
 require('captureShortExposureNs' in still_burst and 'captureLongExposureNs' in still_burst
         and 'captureShortIso' in still_burst and 'captureLongIso' in still_burst
-        and 'capturePostRawBoost' in still_burst
-        and still_burst.count('configureRawHdrStillState(') == 2
-        and 'builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, captureColorGains);' in camera
-        and 'builder.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, captureColorTransform);' in camera,
-        "still burst must use only frozen shutter-time exposure/color controls")
+        and 'capturePostRawBoost' in still_burst,
+        "still burst must use only the frozen shutter-time controls")
 require('CAPTURE_INPUTS' in camera and 'acquiredMs=' in camera and 'totalMs=' in camera,
         "minimal capture timing evidence must separate sensor acquisition from post-processing")
-# 041 / 043 / 053 / 077 / 078 / 079 / 084 / 085 - Full-resolution RAW fusion stays bounded, GPU-owned and concurrent with I/O.
-require('displayBrightnessEv' not in raw_fusion and 'brightnessGain' not in raw_fusion,
-        "physical RAW fusion must not contain post-fusion Brightness gain")
-require('PhotometricField.estimate' in raw_fusion
-        and 'PHOTO_FIELD_HEIGHT = 64' in raw_fusion
-        and 'POST_RAW_SENSITIVITY_BOOST is intentionally excluded' in raw_fusion,
-        "saved RAW fusion must use physical overlap radiometry rather than JPEG response learning")
-require('Bitmap output = Bitmap.createBitmap' in raw_fusion
-        and 'TILE_ROWS = 512' in raw_fusion
-        and 'RAW_HDR_GPU_TILES' in raw_fusion,
-        "full-resolution output must be generated by bounded tiled RAW GPU worker")
-require('Executors.newFixedThreadPool(2)' in saver
-        and 'Executors.newSingleThreadExecutor()' in saver
-        and 'fusion.execute(() ->' in saver,
-        "DNG/source I/O and RAW GPU fusion must remain concurrent")
-require('RAW_HDR_ALIGN' in raw_fusion and 'RAW_HDR_RADIOMETRY' in raw_fusion
-        and 'RAW_HDR_GPU' in raw_fusion and 'RAW_HDR_ENCODE' in raw_fusion
-        and 'RAW_HDR_TOTAL' in raw_fusion
-        and 'FUSION_WRITE' in saver and 'DNG_SAVE' in saver,
-        "critical RAW post-capture timing regressions must remain observable")
-require('private final ExecutorService io = Executors.newSingleThreadExecutor();' not in saver,
-        "retired single queue for all capture processing returned")
 
-# 074 / 075 / 076 / 077 / 078 / 079 / 084 / 085 - V1.4.20 temporal response and boundary invariants.
-def update_trust(value, stable, attack, release):
-    return min(255, value + attack) if stable else max(0, value - release)
+# 041 / 043 / V2.7 - Full-resolution CPU fallback stays allocation-light. Expensive
+# power/LUT setup is outside the per-pixel output loop; sparse support reuses strip buffers.
+inner = fusion[fusion.index('for (int row = 0; row < rows; row++)'):fusion.index('output.setPixels')]
+for forbidden in ['Math.exp(', 'Math.pow(', 'Math.sqrt(', 'Math.log(', 'new float[']:
+    require(forbidden not in inner, f"expensive/per-pixel saved-fusion operation returned: {forbidden}")
+require('float brightnessGain = (float) Math.pow(2.0, clampedBrightnessEv);' in fusion
+        and fusion.index('float brightnessGain = (float) Math.pow') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
+        "Brightness EV power must be computed once before full-resolution loops")
+require('buildGammaLut(clampedGamma)' in fusion
+        and fusion.index('buildGammaLut(clampedGamma)') < fusion.index('for (int y = 0; y < height; y += rowsPerStrip)'),
+        "Gamma LUT must be computed once before full-resolution loops")
+require('int[] shortPixels = new int[width * rowsPerStrip];' in fusion
+        and 'int[] outPixels = new int[width * rowsPerStrip];' in fusion
+        and 'supportEvidence' not in fusion,
+        "byte-preserved CPU utility must use bounded strip buffers and no LONG support mask")
 
-luma=224
-luma=update_trust(luma, False, 48, 64)
-require(luma == 160,
-        "graded luma quality history must remain bounded after one marginal sample")
-chroma=128
-chroma=update_trust(chroma, False, 48, 96)
-require(chroma == 32 and chroma < luma,
-        "chroma trust must release faster than luma quality history")
+# V2.20 exact wide-bracket topology regression. The supplied MANUAL failure used
+# SHORT 1/1000 ISO50 and LONG 1/100 ISO100 = 20x / 4.32 EV. At the production
+# 1/16 atlas, its large hard-loss components contain interior cells roughly 14 cells
+# from a valid boundary, far beyond the retired radius-2 one-pass closure.
+require('int maxPropagationPasses = Math.min(1024, Math.max(64, analysisWidth * analysisHeight));' in gl
+        and 'final int convergenceBatch = 8;' in gl
+        and 'int[] counts = countAtlasMasks(' in gl
+        and 'if (counts[0] == previousOwned)' in gl,
+        "GPU topology must iterate in bounded batches until monotonic occupancy converges")
+require('setTextureFilter(evidenceTexture, GLES30.GL_NEAREST);' in gl
+        and 'setTextureFilter(supportTexture, GLES30.GL_NEAREST);' in gl
+        and 'setTextureFilter(readTopologyTexture, GLES30.GL_LINEAR);' in gl,
+        "topology propagation must be nearest/discrete; only final binary boundary lookup may be linear")
+count_masks = gl[gl.index('        private int[] countAtlasMasks('):
+                 gl.index('        private static void setTextureFilter(')]
+require('shortTexture' not in count_masks and 'longTexture' not in count_masks
+        and 'glReadPixels' in count_masks,
+        "convergence readback may inspect only the small ownership atlas, never CPU-fuse source RGB")
 
-photo_knots=[0.020,0.060,0.150,0.350,0.700]
-def enforce_monotonic(scale):
-    out=list(scale)
-    for i in range(1,len(out)):
-        previous_output=photo_knots[i-1]*out[i-1]
-        minimum_scale=previous_output*1.01/photo_knots[i]
-        out[i]=max(0.60,min(1.50,max(out[i],minimum_scale)))
-    return out
-curve=enforce_monotonic([1.50,0.60,1.50,1.50,0.60])
-mapped=[k*v for k,v in zip(photo_knots,curve)]
-require(all(mapped[i] > mapped[i-1] for i in range(1,len(mapped))),
-        f"learned response curve must remain monotonic after bounded correction: {mapped}")
-require('PHOTO_COMMIT_STABLE_SAMPLES = 3' in gl and 'PHOTO_COMMIT_STABLE_EV = 0.045f' in gl,
-        "live learned response must require three consecutive stable estimates before target commit")
-require('shortPhotoTargetScale' in gl and 'advanceVisiblePhotoCurve' in gl,
-        "5-Hz learned target must be decoupled from pair-rate visible response")
-require('shortOnlyModulated = longDeltaEv <= PHOTO_LONG_STABLE_EV' in gl
-        and '&& shortDeltaEv >= PHOTO_SHORT_ONLY_MODULATION_EV;' in gl,
-        "stable LONG + oscillating SHORT samples must be excluded from response learning")
+# Mathematical replay of the shader's monotonic geodesic reconstruction. Ratio is
+# deliberately not an argument: 4x/20x/64x affect the physical domain size only.
+def reconstruct_mask(seed, domain, max_passes=1024):
+    h = len(domain)
+    w = len(domain[0])
+    owned = [row[:] for row in seed]
+    previous_count = sum(sum(1 for value in row if value) for row in owned)
+    for pass_index in range(max_passes):
+        nxt = [row[:] for row in owned]
+        for y in range(h):
+            for x in range(w):
+                if owned[y][x] or not domain[y][x]:
+                    continue
+                found = False
+                for oy in (-1, 0, 1):
+                    for ox in (-1, 0, 1):
+                        if ox == 0 and oy == 0:
+                            continue
+                        ny, nx = y + oy, x + ox
+                        if 0 <= ny < h and 0 <= nx < w and owned[ny][nx]:
+                            found = True
+                            break
+                    if found:
+                        break
+                if found:
+                    nxt[y][x] = True
+        owned = nxt
+        current_count = sum(sum(1 for value in row if value) for row in owned)
+        if current_count == previous_count:
+            return owned, pass_index + 1
+        previous_count = current_count
+    return owned, max_passes
 
-# Device regression from fixed MANUAL SAFE plant-light test: LONG stayed fixed while
-# SHORT-driven highlight radiometry moved by ~0.38 EV. That must be treated as SHORT-only
-# modulation and excluded from global photometric response learning.
-def short_only_modulated(long_delta_ev, short_delta_ev):
-    return long_delta_ev <= 0.08 and short_delta_ev >= 0.12
-require(short_only_modulated(0.02, 0.38),
-        "fixed-LONG / oscillating-SHORT plant-light regression must be rejected from curve learning")
-require(not short_only_modulated(0.30, 0.32),
-        "coherent real scene change must not be mistaken for SHORT-only modulation")
-require('PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.65f' in gl
-        and 'shortPhotoVisibleGeneration' not in gl,
-        "visible response may converge only toward a committed stable target and must not reset on AUTO generation churn")
+def enclosed_component(radius):
+    side = 2 * radius + 5
+    domain = [[False] * side for _ in range(side)]
+    seed = [[False] * side for _ in range(side)]
+    lo, hi = 2, side - 3
+    for y in range(lo, hi + 1):
+        for x in range(lo, hi + 1):
+            domain[y][x] = True
+            if y in (lo, hi) or x in (lo, hi):
+                seed[y][x] = True
+    return seed, domain
 
-def v1423_recovery_mask(long_second, long_peak, long_luma, short_second, short_luma, field_trust=1.0):
-    shoulder=max(smoothstep_local(0.955,0.988,long_second),
-                 smoothstep_local(0.985,0.998,long_peak)
-                 * smoothstep_local(0.62,0.84,long_luma))
-    core=max(smoothstep_local(0.980,0.990,long_second),
-             smoothstep_local(0.990,0.997,long_peak)
-             * smoothstep_local(0.50,0.78,long_luma))
-    luma_safe=1.0-smoothstep_local(0.975,0.997,short_second)
-    signal=smoothstep_local(0.008,0.025,short_luma)
-    usable=min(luma_safe,signal)*field_trust
-    core_mask=core*smoothstep_local(0.25,0.55,usable)
-    # V1.4.23 raw ownership seed is ONLY the genuine clipped core. Shoulder is
-    # boundary support for neighboring-core feathering, never independent authority.
-    raw=core_mask
-    support=max(core_mask,smoothstep_local(0.38,0.86,shoulder*usable))
-    return raw,core,support
+for ratio, radius in ((4.0, 2), (20.0, 14), (64.0, 64)):
+    seed, domain = enclosed_component(radius)
+    owned, passes = reconstruct_mask(seed, domain)
+    require(all((not domain[y][x]) or owned[y][x]
+                for y in range(len(domain)) for x in range(len(domain[0]))),
+            f"{ratio:g}x connected LONG-loss component retained an internal LONG hole")
+    require(passes <= radius + 2,
+            f"{ratio:g}x reconstruction did not converge with one-cell geodesic growth")
 
-mask,core,damage=v1423_recovery_mask(1.0,1.0,0.95,0.70,0.25)
-require(core > 0.999 and mask > 0.999 and damage > 0.999,
-        f"recoverable LONG-clipped core must retain complete current-SHORT detail authority: {core},{mask},{damage}")
-mask_bad,_,_=v1423_recovery_mask(1.0,1.0,0.95,0.999,0.25)
-require(mask_bad < 0.05,
-        f"SHORT that is itself multi-channel clipped must not be recoverable: {mask_bad}")
-mask_mid,_,damage_mid=v1423_recovery_mask(0.70,0.80,0.30,0.40,0.20)
-require(mask_mid < 0.01 and damage_mid < 0.01,
-        f"ordinary scene body must remain literal LONG: mask={mask_mid} damage={damage_mid}")
-# Table/TV regression: merely bright-but-valid LONG cannot independently invite SHORT.
-mask_bright,_,support_bright=v1423_recovery_mask(0.970,0.990,0.70,0.70,0.25)
-require(mask_bright < 1e-6,
-        f"bright-but-not-clipped LONG must have zero independent SHORT ownership: {mask_bright}")
-
-# V1.4.21 chandelier-edge regression remains permanent. Coherent source ownership
-# must stay convex and one-sided.
-def old_split_band(long_center, short_center, long_low, short_low, coarse, fine):
-    return (long_low + (short_low-long_low)*coarse
-            + (long_center-long_low)*(1.0-fine)
-            + (short_center-short_low)*fine)
-old_edge=old_split_band(0.30,0.80,0.70,0.40,0.80,0.20)
-require(old_edge < 0.30,
-        f"chandelier regression fixture must reproduce old invented dark contour: {old_edge}")
-for ownership in [0.0,0.15,0.50,0.85,1.0]:
-    coherent=0.30+(0.80-0.30)*ownership
-    require(0.30-1e-9 <= coherent <= 0.80+1e-9,
-            f"coherent ownership must never leave source endpoint range: {ownership},{coherent}")
-center_mask=0.8; neighbor_mask=1.0; core_mask=0.0; damage_support=0.35
-blurred=min(damage_support,(center_mask*4.0+neighbor_mask)/5.0)
-ownership=max(core_mask,blurred)
-require(ownership <= damage_support + 1e-9,
-        f"one-sided damage support must bound coherent source authority: {ownership}")
-
-# V1.5.1 bounded single-ownership regression. Live source selection and RAW source
-# selection each happen once in their own scene-linear reconstruction domain; GTM follows.
-require('recoveredShort = trustedShort;' in hdr_shader
-        and 'mapRecoveredHighlight' not in hdr_shader,
-        "live SHORT must remain calibrated scene-linear radiance through source ownership")
-require(hdr_shader.count('mix(longCenter, shortCenter, ownershipMask)') == 1
-        and 'vec3 fusedRadiance = mix(longCenter, shortCenter, ownershipMask);' in hdr_shader
-        and 'return clamp(fusedRadiance, min(longCenter, shortCenter), max(longCenter, shortCenter));' in hdr_shader
-        and 'recoveredDisplay = mix(mappedLong, mappedShort, ownershipMask)' not in hdr_shader,
-        "live source ownership must occur once in radiance before shared GTM")
-for ownership in [0.0, 0.15, 0.50, 0.85, 1.0]:
-    long_endpoint=0.30; short_endpoint=0.80
-    fused=long_endpoint+(short_endpoint-long_endpoint)*ownership
-    require(long_endpoint-1e-9 <= fused <= short_endpoint+1e-9,
-            f"convex radiance ownership must remain within source endpoints: {ownership},{fused}")
-require('float shoulderMask = shoulderNeed' in hdr_shader
-        and 'rawMask = max(coreMask, shoulderMask);' in hdr_shader,
-        "V1.5.3 live HDR must preserve valid SHORT structure throughout the highlight shoulder")
-require('shoulderNeed * max(shortUsable, 0.75 * shortPhysicalUsable)' in hdr_shader,
-        "live recovery feather must preserve current SHORT signal even when pair-rate trust is conservative")
-require('float fieldLumaTrust = mix(1.0, clamp(fieldState.g, 0.0, 1.0), guardRequired);' in hdr_shader
-        and 'float fieldChromaTrust = mix(1.0, clamp(fieldState.b, 0.0, 1.0), guardRequired);' in hdr_shader,
-        "flicker-safe/outdoor live SHORT must bypass mandatory field trust while phase-sensitive SHORT fails closed")
-require('uv * reliabilityUvScale + reliabilityUvOffset' in hdr_shader,
-        "live local flicker field must preserve full-frame coordinates")
-require('provisionalShortProbe' in frame_meta and 'autoShortProbeBaselineEv' in camera
-        and 'HDR SHORT probe is still being validated' in camera,
-        "still capture must never commit an unaccepted darker SHORT probe")
-require('rowPhotometric(qCenter.y + flowState.g)' in raw_fusion_shader
-        and 'float geometricAdmission = flowConfidence' in raw_fusion_shader
-        and '* correspondenceConfidence * inheritedBoundaryGate;' in raw_fusion_shader,
-        "RAW still pre-clipping SHORT transition must remain geometry/radiometry gated")
-
-# Validity-aware guide must continue to use calibrated SHORT where LONG has lost edge
-# structure while remaining LONG-owned in ordinary scene body.
-def validity_guide(long_luma, short_luma, clipped_core, shoulder_need, short_usable):
-    short_authority=max(clipped_core, smoothstep_local(0.20,0.85,shoulder_need*short_usable))
-    return long_luma+(short_luma-long_luma)*short_authority
-require(abs(validity_guide(1.0,0.62,1.0,1.0,1.0)-0.62) < 1e-9,
-        "fully clipped LONG must hand edge-guide authority to SHORT")
-require(abs(validity_guide(0.25,0.27,0.0,0.0,1.0)-0.25) < 1e-9,
-        "ordinary valid LONG must remain the edge guide")
+# The exact 20x failure must be impossible under the new topology: a radius-14
+# component cannot be completed by the retired radius-2 closure, but reconstruction
+# reaches its center without changing any exposure/ratio-specific threshold.
+seed20, domain20 = enclosed_component(14)
+center = len(domain20) // 2
+require(not any(seed20[y][x]
+                for y in range(center - 2, center + 3)
+                for x in range(center - 2, center + 3)),
+        "20x regression fixture must exceed the retired finite closure radius")
+owned20, _ = reconstruct_mask(seed20, domain20)
+require(owned20[center][center],
+        "exact 20x wide-plateau center must inherit SHORT ownership after convergence")
 
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
@@ -1337,264 +1448,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-# V1.5.2 device regressions from the V1.5.1 office test remain permanent.
-require('quadLongPeak' in raw_fusion_shader
-        and 'quadShortSupportAndCorrespondence' in raw_fusion_shader
-        and 'float softOwnership = clamp(' in raw_fusion_shader
-        and 'longHighlightNeed * shortSupport * geometricAdmission' in raw_fusion_shader,
-        "orange/peach CFA checkerboard regression: soft source ownership must remain one quad decision")
-require('quadBoundaryContrast' in raw_fusion_shader
-        and 'inheritedFlow * smoothstep(0.08, 0.28, boundaryContrast)' in raw_fusion_shader,
-        "white-blotch/green-edge regression: inherited flow must remain bounded at real LONG boundaries before clipping")
-require('vec3 neutralAtShortLuma = vec3(shortSceneLuma);' in hdr_shader
-        and 'vec3 trustedShort = mix(neutralAtShortLuma, shortScene, colorTrust);' in hdr_shader
-        and 'longChromaticityAtShortLuma' not in hdr_shader,
-        "live highlight color must remain SHORT-or-neutral once LONG is damaged")
-require('PHOTO_COMMIT_STABLE_SAMPLES = 3' in gl
-        and 'PHOTO_COMMIT_STABLE_EV = 0.045f' in gl
-        and 'shortPhotoCandidateScale' in gl
-        and 'shortPhotoCandidateStableSamples' in gl
-        and 'PHOTO_VISIBLE_RATE_EV_PER_SECOND = 0.65f' in gl,
-        "live processed-response calibration must retain consecutive stable evidence")
-require('shortPhotoVisibleGeneration' not in gl
-        and 'PHOTO_VISIBLE_FAST_RATE_EV_PER_SECOND' not in gl
-        and 'PHOTO_VISIBLE_FAST_NS' not in gl,
-        "AUTO exposure generations must not reopen a fast visible photo-response window")
-
-# 129 - V1.5.3 real GLSL compiler regression (Actions run 33690475046):
-# hardClippedCore originally referenced longPeak/longSecond/longLuma outside the
-# helper-function scopes where they had been declared. Require all three locals
-# inside fusionSample itself before the hard-core expression.
-fusion_start = hdr_shader.index('void fusionSample(')
-fusion_end = hdr_shader.index('void main()', fusion_start)
-fusion_scope = hdr_shader[fusion_start:fusion_end]
-require('float longPeak = max3(longRgb);' in fusion_scope
-        and 'float longSecond = second3(longRgb);' in fusion_scope
-        and 'float longLuma = longSceneLuma;' in fusion_scope
-        and fusion_scope.index('float longPeak = max3(longRgb);') < fusion_scope.index('float hardClippedCore =')
-        and fusion_scope.index('float longSecond = second3(longRgb);') < fusion_scope.index('float hardClippedCore =')
-        and fusion_scope.index('float longLuma = longSceneLuma;') < fusion_scope.index('float hardClippedCore ='),
-        "GLSL compiler regression 129: fusionSample hard-core LONG descriptors must be locally declared before use")
-
-# V1.5.3 exact device failure: every physically clipped LONG quad with current usable
-# SHORT must be 100% SHORT-owned. Geometry/photometric confidence may shape the warp
-# before clipping, but may never select clipped LONG as radiometric fallback.
-require('float hardLongClip = smoothstep(0.985, 0.997, longPeak);' in raw_fusion_shader
-        and 'float hardShortTakeover = hardLongClip * hardShortAvailable;' in raw_fusion_shader
-        and 'if (longPeak >= 0.997 && quadValidation.x >= 0.10)' in raw_fusion_shader
-        and 'ownership = 1.0;' in raw_fusion_shader,
-        "clipped-LONG leakage regression: valid SHORT must become unconditional whole-quad authority")
-require('shortValidated = max(shortValidated, hardShortTakeover);' not in raw_fusion_shader
-        and 'float shortValidated = smoothstep(0.55, 0.90, quadValidation.x);' not in raw_fusion_shader
-        and 'float shortSemanticValidated =' in raw_fusion_shader
-        and 'PROVENANCE_CENSORED_UNKNOWN_CHROMA' in raw_fusion_shader
-        and 'PROVENANCE_SHORT_VALIDATED' in raw_fusion_shader
-        and 'shortGeometryTrust' not in raw_fusion_shader
-        and 'shortPhotometricTrust' not in raw_fusion_shader,
-        "V1.5.4 V1.2 ownership/provenance regression: hard radiometric takeover may not imply chroma; SHORT color needs terminal semantic validation after geometry/radiometry")
-
-def v153_raw_ownership(long_peak, short_min_support, geometric):
-    highlight = smoothstep_local(0.70, 0.92, long_peak)
-    hard_clip = smoothstep_local(0.985, 0.997, long_peak)
-    short_support = smoothstep_local(0.35, 0.78, short_min_support)
-    hard_available = smoothstep_local(0.10, 0.35, short_min_support)
-    soft = max(0.0, min(1.0, highlight * short_support * geometric))
-    hard = hard_clip * hard_available
-    ownership = max(soft, hard)
-    if long_peak >= 0.997 and short_min_support >= 0.10:
-        ownership = 1.0
-    return ownership
-require(v153_raw_ownership(1.0, 0.40, 0.0) == 1.0,
-        "physically clipped LONG may not survive when usable SHORT exists even at zero soft geometry confidence")
-require(v153_raw_ownership(0.45, 1.0, 1.0) == 0.0,
-        "ordinary scene body must remain LONG-owned")
-require(0.0 < v153_raw_ownership(0.82, 1.0, 1.0) < 1.0,
-        "pre-clipping HDR shoulder must transition coherently toward SHORT instead of waiting for sensor clipping")
-
-# AUTO can reach 7 EV. A fixed 6-EV scene ceiling discarded valid SHORT structure
-# after correct fusion, so keep one global no-LTM map with a fixed 8-EV ceiling.
-require('const float maxSceneRadiance = 256.0;' in hdr_shader,
-        "shared GTM must retain at least 8 EV scene range for the 7-EV AUTO bracket")
-def v153_gtm_peak(scene_peak):
-    knee=0.70; at_one=0.80; max_scene=256.0; ceiling=0.9995
-    if scene_peak <= knee: return scene_peak
-    if scene_peak <= 1.0:
-        t=max(0.0,min(1.0,(scene_peak-knee)/(1.0-knee)))
-        st=t*t*(3.0-2.0*t)
-        return knee+(at_one-knee)*st
-    pos=max(0.0,min(1.0,math.log2(scene_peak)/math.log2(max_scene)))
-    return at_one+(ceiling-at_one)*pos
-require(v153_gtm_peak(64.0) < v153_gtm_peak(96.0) < v153_gtm_peak(128.0) < v153_gtm_peak(192.0) < 0.9995,
-        "recoverable 6-7+ EV SHORT structure must retain ordered display separation rather than collapse to white")
-
-# 131-134 / 143 - V1.5.4 device-artifact protections. Preserve the broad-pink,
-# white-paint, whole-quad ownership and continuous geometric reconstruction behavior,
-# while intentionally replacing fractional semantic chroma authority with terminal
-# NORMAL_MEASURED / SHORT_VALIDATED / CENSORED_UNKNOWN_CHROMA provenance.
-require('quadColorRisk' in raw_demosaic_shader and 'coherentHighlightColorRisk' in raw_demosaic_shader,
-        "broad-pink protection: physical clipping/trust risk path must remain")
-require('vec3 neutralCameraRgb = vec3(g);' in raw_demosaic_shader
-        and 'max(g, median3' not in raw_demosaic_shader
-        and 'float neutralLevel = max(' not in raw_demosaic_shader,
-        "white-paint regression 131: uncertain highlight chroma may not increase green/luminance")
-require('if (support < 1.10)' not in raw_demosaic_shader
-        and 'if (support < 1.50)' not in raw_demosaic_shader
-        and 'if (highOrderTrust >= 0.95)' not in raw_demosaic_shader
-        and 'smoothstep(0.70, 0.95, highOrderTrust)' in raw_demosaic_shader,
-        "block/stair regression 132: geometric reconstruction remains continuous even though semantic color admission is binary")
-require('Proven semantic sites contribute; censored sites contribute zero.' in raw_demosaic_shader,
-        "semantic-provenance regression 143: censored sites may not partially steer directional or opponent-color reconstruction")
-require('quadLongPeak' in raw_fusion_shader
-        and 'float softOwnership = clamp(' in raw_fusion_shader
-        and 'if (longPeak >= 0.997 && quadValidation.x >= 0.10)' in raw_fusion_shader,
-        "peach/checkerboard regression 133: source ownership must remain coherent per Bayer quad")
-
-# HdrGlView live response/GTM are intentionally untouched in this saved-RAW artifact fix.
-require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java').read_bytes()).hexdigest()
-        == '3377d4f3ebac7a46cfb5887ca4592174ea6586e7d84a46af390bed6302a6f9fe',
-        "generation-stable live calibration must remain byte-identical to successful V1.5.3")
-require(hashlib.sha256((ROOT / 'app/src/main/assets/shaders/hdr_display.frag').read_bytes()).hexdigest()
-        == '45483186243cffb220c00a23e4de78396a2d482168452cec22238da79eb1dcb8',
-        "V1.5.3 live fusion + 8-EV no-LTM GTM must remain byte-identical")
-require('local tone' not in hdr_shader.lower() and 'bilateral tone' not in hdr_shader.lower(),
-        "V1.5.4 must remain no-LTM")
-
-# 135 - Instant scene changes without steady-state flicker. Only >=0.90-EV body
-# errors bypass the old 0.18-EV/2-sample controller; normal fluctuations retain it.
-require('AUTO_BODY_SCENE_CUT_EV = 0.90' in camera
-        and 'AUTO_BODY_SCENE_CUT_MAX_STEP_EV = 4.0' in camera
-        and 'boolean sceneCut = Math.abs(errorEv) >= AUTO_BODY_SCENE_CUT_EV;' in camera
-        and 'fastPairUpdate = true;' in camera
-        and 'AUTO_BODY_MAX_STEP_EV = 0.18' in camera
-        and 'AUTO_BODY_CONFIRM_SAMPLES = 2' in camera,
-        "scene-cut regression 135: fast response must coexist with proven steady-state hysteresis")
-def v154_body_step(error_ev):
-    if abs(error_ev) >= 0.90:
-        return max(-4.0,min(4.0,error_ev)), True
-    if error_ev > 0.10:
-        return min(0.18,error_ev), False
-    if error_ev < -0.10:
-        return max(-0.18,error_ev), False
-    return 0.0, False
-require(v154_body_step(3.2) == (3.2, True),
-        "3.2-EV real scene cut must jump in one stats update")
-require(v154_body_step(0.12) == (0.12, False),
-        "small steady-state error must remain on conservative path")
-require(v154_body_step(0.08) == (0.0, False),
-        "sub-hysteresis fluctuation must not cause exposure pumping")
-
-# 136 / 144 - MANUAL SAFE sliders are literal shutter-speed controls. AUTO may
-# continue using exposure-product solvers, but MANUAL recomputation must not call them.
-manual_recompute = camera[camera.index('private boolean recomputeManualAdaptivePairLocked()'):
-        camera.index('private int sensorMinIsoLocked()', camera.index('private boolean recomputeManualAdaptivePairLocked()'))]
-require('manualEffectiveLongExposureNs = clampExposure(longExposureNs);' in manual_recompute
-        and 'manualEffectiveLongIso = clampIso(manualIso);' in manual_recompute
-        and 'manualEffectiveShortExposureNs = Math.min(' in manual_recompute
-        and 'manualEffectiveShortIso = minIso;' in manual_recompute
-        and 'solveLongSettingForProductLocked' not in manual_recompute
-        and 'solveShortSettingForProductLocked' not in manual_recompute
-        and 'solveIsoForProduct' not in manual_recompute,
-        "manual literal-shutter regression 144: MANUAL must map sliders directly to sensor time/ISO without exposure-product solving")
-require('longExposureNs = clampExposure(longNs);' in camera
-        and 'shortExposureNs = Math.min(clampExposure(shortNs), longExposureNs);' in camera
-        and 'long tmp = shortExposureNs;' not in camera,
-        "manual literal-shutter regression 144: crossing SHORT clamps to LONG instead of swapping control meanings")
-manual_stats = camera[camera.index('private void processHdrSceneStatsLocked'):
-        camera.index('private double robustSceneBodyMid', camera.index('private void processHdrSceneStatsLocked'))]
-require('MANUAL SAFE no longer rewrites either shutter from scene' in manual_stats
-        and camera.count('adaptBracketEvLocked(') == 2,
-        "manual literal-shutter regression 144: scene statistics may not silently rewrite MANUAL shutter times")
-
-# 137 - Brightness contract is exactly -16..+1 EV everywhere it is owned/stored.
-require('DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in camera
-        and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in camera
-        and 'DISPLAY_BRIGHTNESS_MIN_EV = -16.0f' in main
-        and 'DISPLAY_BRIGHTNESS_MAX_EV = 1.0f' in main
-        and 'Math.max(-16.0f, Math.min(1.0f, displayBrightnessEv))' in saver,
-        "brightness regression 137: UI/controller/capture metadata must share -16..+1 EV")
-
-# 138 - Exact AUTO/MANUAL device failure: a local flow vector that failed its
-# forward/backward proof may never remain the hard-SHORT sampling geometry. Geometry
-# authority is resolved once in Java before fusion: local proof -> coherent neighbor
-# -> global fallback. Alpha is local geometry authority, not raw sample-count evidence.
-require('locally proven -> coherent-neighbor fallback -> global fallback' in raw_fusion
-        and 'if (localConfidence >= 0.35f)' in raw_fusion
-        and 'else if (strongNeighbors >= 2 && rmsSpread <= 1.50f)' in raw_fusion
-        and 'smooth[index] = global.dx * GUIDE_FACTOR;' in raw_fusion
-        and 'smooth[index + 3] = 1.0f;' in raw_fusion
-        and raw_fusion.count('smooth[index + 3] = 0.0f;') >= 2
-        and 'High-evidence but inconsistent local motion is never rescued' not in raw_fusion,
-        "geometry regression 138: rejected local flow must be replaced by coherent-neighbor/global geometry before SHORT sampling")
-
-# 139 - The metadata ratio + robust global residual are radiometric authority. Local
-# row/PWM correction is optional and its confidence must control consumption of its
-# value. Confidence below the proof band means effective local scale exactly 1.0.
-require('float rowCorrectionWeight = smoothstep(0.30, 0.70, clamp(photoState.y, 0.0, 1.0));' in raw_fusion_shader
-        and 'float effectiveRowScale = mix(1.0, photoState.x, rowCorrectionWeight);' in raw_fusion_shader
-        and 'sampleShortSamePhase(sourcePos, channel, effectiveRowScale)' in raw_fusion_shader
-        and 'qOrigin, flowState.rg, effectiveRowScale' in raw_fusion_shader
-        and 'sampleShortSamePhase(sourcePos, channel, photoState.x)' not in raw_fusion_shader,
-        "radiometry regression 139: unproven row scale must collapse to 1.0 instead of being consumed at full strength")
-
-def v154v11_effective_row_scale(scale, confidence):
-    w = smoothstep_local(0.30, 0.70, max(0.0, min(1.0, confidence)))
-    return 1.0 + (scale - 1.0) * w
-require(math.isclose(v154v11_effective_row_scale(1.25, 0.0), 1.0, abs_tol=1e-12)
-        and math.isclose(v154v11_effective_row_scale(0.75, 0.20), 1.0, abs_tol=1e-12)
-        and math.isclose(v154v11_effective_row_scale(1.25, 1.0), 1.25, abs_tol=1e-12),
-        "radiometry regression 139 math: confidence must actually own local scale consumption")
-
-# 140 / 143 - SHORT color requires semantic proof after safe geometry/radiometry.
-# Complete same-phase support alone is not enough in a saturated textureless center:
-# locally proven geometry or strong coherent-neighbor geometry must also be observable.
-require('float shortPhaseComplete = step(0.90, quadValidation.x);' in raw_fusion_shader
-        and 'float shortCorrespondence = step(0.55, correspondenceConfidence);' in raw_fusion_shader
-        and 'step(0.50, localFlowEvidence)' in raw_fusion_shader
-        and 'step(0.70, flowConfidence)' in raw_fusion_shader
-        and 'float shortSemanticValidated =' in raw_fusion_shader
-        and 'shortPhaseComplete * shortCorrespondence * observableGeometry' in raw_fusion_shader,
-        "SHORT color regression 140/143: complete SHORT CFA must also prove observable geometry before gaining chroma authority")
-# Java caps final global-fallback confidence below the shader's 0.70 semantic gate.
-require('smooth[index + 2] = Math.min(0.85f, 0.75f * globalConfidence);' in raw_fusion,
-        "semantic-provenance regression 143: global fallback must remain unable to self-certify SHORT color")
-
-# 141 - Broad-pink boundary protection may propagate risk only into an incomplete
-# current quad. A fully proven current SHORT quad is sovereign and cannot be bleached
-# by uncertainty in an adjacent Bayer quad. Neutralization still cannot add luminance.
-require('float currentTrust = quadMinPhysicalTrust(q);' in raw_demosaic_shader
-        and 'float neighborPermission = 1.0 - smoothstep(0.80, 0.98, currentTrust);' in raw_demosaic_shader
-        and '0.85 * neighborPermission' in raw_demosaic_shader
-        and 'vec3 neutralCameraRgb = vec3(g);' in raw_demosaic_shader
-        and 'max(g, median3' not in raw_demosaic_shader,
-        "neighbor-risk regression 141: adjacent uncertainty may not bleach complete current SHORT color or create white luminance")
-require(math.isclose(1.0 - smoothstep_local(0.80, 0.98, 1.0), 0.0, abs_tol=1e-12),
-        "neighbor-risk regression 141 math: fully trusted current quad must block borrowed risk")
-
-# 142 / 145 - Preserve every successful V1.5.4 V1.1 runtime owner outside the exact
-# three-file runtime allowlist. AUTO exposure, live GPU pairing/GTM, RAW host geometry,
-# capture/DNG/JPEG routing, and UI remain byte-identical to the successful authority.
-protected_v154v11 = {
-    'app/src/main/AndroidManifest.xml':'c183cb4caf4c9c8aa40a41d3891c197d9e84db196c6ecccd822b1c424ebc73e6',
-    'app/src/main/assets/shaders/hdr_display.frag':'45483186243cffb220c00a23e4de78396a2d482168452cec22238da79eb1dcb8',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java':'3377d4f3ebac7a46cfb5887ca4592174ea6586e7d84a46af390bed6302a6f9fe',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java':'cbd76d5a21cddd1ac3e48ad57896ef50d7770f6415d10749df2cb9f82650f1e4',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java':'b565eea5d43d68d84a2984202df492297eb8fb4f68566d4b5a409dde8818e33e',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java':'a5206949d9c09fd45ee0f3b7ec3b0787c10f037b8447db249ead6df19aed91ed',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java':'87d58462eb3822b2135f423be9ba12c6d61f87d3d9fb091ddde3b0a2ed3a9178',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java':'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java':'37bab4f6641f75e3e53822765cd2e1c9ca78e63edd3802f8be20d7253e49bc2e'}
-for rel, want in protected_v154v11.items():
-    require(hashlib.sha256((ROOT / rel).read_bytes()).hexdigest() == want,
-            f"V1.5.4 V1.1 protected-runtime regression 145: byte drift in {rel}")
-
-# 130 / 145 - Never assume ancestry. V1.5.4 V1.2 must be a direct child of the
-# exact successful V1.5.4 V1.1 Actions authority and reconstruct from its artifact.
-workflow = (ROOT / '.github/workflows/build.yml').read_text()
-require('fetch-depth: 2' in workflow
-        and "authority='cc45ba874776f0ce99e9503497a970d6e4b57cbe'" in workflow
-        and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow
-        and 'run-id: 33711764471' in workflow
-        and 'name: Iris-HDR-Viewfinder-Test-V1.5.4-V1.1' in workflow,
-        "authority-lineage regression 130/145: V1.5.4 V1.2 must prove direct parent and exact successful V1.5.4 V1.1 Actions authority")
-
-print("V1.5.4 V1.2 REGRESSION PASS: exact V1.5.4 V1.1 Actions authority; semantic NORMAL/CENSORED/SHORT provenance survives through demosaic; censored CFA has zero chroma authority; validated SHORT color requires observable geometry; parity-safe boundary and no-white-paint behavior remain; MANUAL SHORT/LONG are literal shutter controls with SHORT=min ISO and LONG ISO separate; AUTO/live/capture owners outside the exact allowlist remain protected")
+print("V1.4.11 V2.20 REGRESSION PASS: exact successful V2.19 authority, V2.18/V2.19 capture+tone preserved, finite-radius closure replaced by convergent LONG-loss-constrained GPU reconstruction with coherent residual-flow inheritance and 4x/20x/64x topology invariance")

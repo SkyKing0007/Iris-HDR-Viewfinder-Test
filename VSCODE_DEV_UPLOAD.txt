@@ -1,20 +1,27 @@
-Iris HDR Viewfinder Test V1.5.4 V1.2 - vscode.dev upload
+V1.4.11 V2.20 — VSCODE.DEV UPLOAD
 
-1. Open https://github.dev/SkyKing0007/Iris-HDR-Viewfinder-Test (or press . from the GitHub repository).
-2. Confirm branch main points exactly to successful V1.5.4 V1.1 commit cc45ba874776f0ce99e9503497a970d6e4b57cbe before replacing files.
-3. No new backup is required for this localized correction, as requested.
-4. Upload/replace the complete contents of this FULL-UPLOAD ZIP at repository root.
-5. Do not add APKs, DNGs, JPEGs, build/, .cxx/, __pycache__, .pyc or other generated files.
-6. Commit with: V1.5.4 V1.2 semantic CFA provenance and literal manual shutter controls
-7. Push main once. The packaged workflow reconstructs the exact successful V1.5.4 V1.1 compiled-candidate authority and performs the authoritative real GLSL/Java/full Android proof.
+Branch: experiment-v1.4.11-v2-brightness-4ev
+Required direct parent / runtime authority: 13393e945e7313d981b38ce5a44e31eceff7dc79 (successful V2.19)
 
-Expected version after replacement: versionCode 35 / versionName 1.0-v1.5.4-v1.2.
+1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.19 parent before uploading.
+2. Upload/replace ALL files from this ZIP at repository root, preserving paths.
+3. Do not add extra files or folders.
+4. Source Control must show exactly 10 changed tracked files relative to V2.19:
+   .github/workflows/build.yml
+   BUILD_WORKFLOW_COPY.yml
+   PACKAGE_INFO.txt
+   PACKAGE_MANIFEST_SHA256.txt
+   README.md
+   VSCODE_DEV_UPLOAD.txt
+   app/build.gradle.kts
+   app/src/main/assets/shaders/hdr_display.frag
+   app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+   scripts/verify_orientation.py
+5. Commit once and push once.
 
-Expected runtime changes relative to the exact successful V1.5.4 V1.1 Actions candidate: exactly three files:
-- app/src/main/assets/shaders/raw_hdr_demosaic.frag
-- app/src/main/assets/shaders/raw_hdr_fusion.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+Suggested commit message:
+V1.4.11 V2.20 ratio-invariant connected-region fusion
 
-RawHdrFusion.java, HdrGlView.java, MainActivity.java, CaptureSetSaver.java, JpegFusion.java, hdr_display.frag, AUTO HDR exposure, geometry/radiometry ownership, WYSIWYG crop/color, global GTM and capture/DNG/JPEG routing are protected byte-identically.
-
-V1.5.4 V1.2 changes the common physical artifact producer rather than tuning this scene: terminal CFA provenance prevents censored highlight samples from steering chroma, while fully validated SHORT remains real color authority. MANUAL SAFE SHORT/LONG values are literal shutter times; SHORT=min sensor ISO and LONG uses the separate ISO slider. AUTO HDR is unchanged.
+Do not commit the ZIP itself.
+Do not alter dev/main.
+GitHub Actions is the authoritative pinned GLSL / real Java / full Android build proof.

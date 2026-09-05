@@ -2,30 +2,16 @@ plugins {
     id("com.android.application")
 }
 
-val stableDebugKeystore = System.getenv("IRIS_TEST_KEYSTORE_PATH")
-
 android {
     namespace = "com.skyking0007.irishdrviewfinder"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.skyking0007.irishdrviewfinder"
+        applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"
         minSdk = 29
         targetSdk = 37
-        versionCode = 35
-        versionName = "1.0-v1.5.4-v1.2"
-    }
-
-    signingConfigs {
-        if (!stableDebugKeystore.isNullOrBlank()) {
-            create("stableDebug") {
-                storeFile = file(stableDebugKeystore)
-                storePassword = "IrisHdrTest2026"
-                keyAlias = "iris-hdr-test"
-                keyPassword = "IrisHdrTest2026"
-                storeType = "PKCS12"
-            }
-        }
+        versionCode = 37
+        versionName = "1.0-v1.4.11-v2.20"
     }
 
     compileOptions {
@@ -34,11 +20,6 @@ android {
     }
 
     buildTypes {
-        debug {
-            if (!stableDebugKeystore.isNullOrBlank()) {
-                signingConfig = signingConfigs.getByName("stableDebug")
-            }
-        }
         release {
             isMinifyEnabled = false
         }

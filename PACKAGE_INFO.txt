@@ -1,67 +1,92 @@
-Iris HDR Viewfinder Test V1.5.4 V1.2
-Repository: https://github.com/SkyKing0007/Iris-HDR-Viewfinder-Test
-Status: PREPARED / UPLOAD-READY - NOT V1.5.4 V1.2 BUILD-PROVEN
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.20 RATIO-INVARIANT CONNECTED-REGION FUSION PACKAGE INFO
 
-Runtime authority:
-- Exact successful V1.5.4 V1.1 GitHub Actions compiled candidate/artifact
-- Commit: cc45ba874776f0ce99e9503497a970d6e4b57cbe
-- Tree: 2911c0edff409ac65e337bd7871af958cb9f675b
-- Actions run: 33711764471
-- Job: 100512589458
-- Artifact ID: 9877178323
-- Artifact name: Iris-HDR-Viewfinder-Test-V1.5.4-V1.1
-- Artifact digest: sha256:9aab5e3acede1d5bfe00614c66bb30bd4fad84baeedc3290145aafe98e79d640
-- APK SHA-256: c9bc4e7887824904750bebf6db3108ac8073613125277b4d950db357454ec0d1
-- Source-candidate TAR SHA-256: 9aaad68090fa2bf0c8cc422e6281171e34c83bde40cbc030722fbe3fe3abf806
-- Runtime manifest SHA-256: 505eaeb9384a62cf24e000a4ff06f3ab36f535fcda2bbd61807376c17e99899f
-- Repository manifest SHA-256: 9edeccd8f60452f29d5e1d51a8cd080dacd100ef473b60ba18059f74f03dd089
-- Regressions SHA-256: 905c894e14ab20e5ccc143797ae270c7b99433855043426129c518c65d985c55
+STATUS
+PREPARED / UPLOAD-READY only after packaged proof completes; NOT BUILD-PROVEN until GitHub Actions succeeds.
+No backup branch requested or created.
 
-Verification-mechanics authority:
-- Exact successful V1.5.4 V1.1 16-stage authority-seeded compiler/build/invariance sequence.
-- Same checkout depth, parent-artifact reconstruction, Java 17, Android 37, Gradle 9.6.0, stable signing, pinned glslang 15.1.0-2~ubuntu0.24.04.2, complete GLSL reserved-identifier scan, exact runtime GLSL compile commands, real project Java compile, deterministic full-index patch proof at core.abbrev 7/12/40 with GNU patch fuzz=0, PRE-BUILD SAFETY PROOF, :app:assembleDebug, one-APK proof, signing proof, post-build invariance and clean-extract replay.
-- Workflow mechanics are not redesigned. Infrastructure changes only update parent authority/version/allowlists/protected hashes/new permanent regressions/output identity, plus validator assertions for the new runtime contract.
+TARGET
+Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
+Branch: experiment-v1.4.11-v2-brightness-4ev
+Target versionCode: 37
+Target versionName: 1.0-v1.4.11-v2.20
+Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
-Backup status:
-- No new backup requested or created.
-- Exact parent authority, pre-edit hashes, and deterministic V1.1<->V1.2 patches provide localized rollback proof.
+RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
+Commit: 13393e945e7313d981b38ce5a44e31eceff7dc79
+Tree: 401b1c3b2fdf7ae979788d21bf963471debe874b
+GitHub Actions run: 33947113826 — SUCCESS
+Artifact ID: 9963691541
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.19
+Artifact ZIP digest: sha256:ecbe17d5988a059c49bbe863624aa6d55eccef4a5ed4e2c361459fb3a0344e54
+V2.19 APK SHA-256: 4539fa6ebf6cf1ebecf589936ada659e2a3be6a19ac51a8bb400bfc03b62fe6d
+V2.19 source-candidate TAR SHA-256: 67deec2a8e644b8e06f85b4ae1a9537c6725b16e3466f34fdbce8196044df91d
+V2.19 runtime manifest SHA-256: e9c9effd529ee23a44a207c59083f51b5d19483d880fc9231d1ceff1699a2dfa
+V2.19 repository manifest SHA-256: 5b3dedc8a61260d0adb99ea1ae6b1b9391d3aa2bf2ed30ca333f313ac1eeaecf
+V2.19 regressions SHA-256: 343be162660a589b5409afeb5c5e5c7b4ff3367b56b06b87ea1e49eac2a30c7d
 
-V1.5.4 V1.2 intended runtime changed-file allowlist: exactly 3 files
-- app/src/main/assets/shaders/raw_hdr_demosaic.frag
-- app/src/main/assets/shaders/raw_hdr_fusion.frag
+VERIFICATION-MECHANICS AUTHORITY
+Exact successful V2.19/V2.18 procedure inherited unchanged. Step count/order, action versions, authority reconstruction, allowlist proof, deterministic full-index patch proof, pinned real glslang commands, real Java compiler, PRE-BUILD SAFETY proof, full :app:assembleDebug, post-build invariance, exactly-one-APK proof and artifact export remain unchanged.
+
+PRIMARY V2.20 DEVICE EVIDENCE
+The supplied MANUAL V2.19 failure is SHORT 1/1000 ISO50 and LONG 1/100 ISO100 = 20x / 4.32 EV. Global displacement was approximately 0.5 pixel with negligible scale/rotation error; physical exposure ratio and JPEG appearance gain were both ~20x. The failure was therefore isolated to ownership topology: a large LONG-clipped component exceeded the finite reach of the old one-pass 1/16 atlas closure, leaving internal LONG holes/white-cyan-orange fragments inside a valid SHORT recovery component.
+
+STRICT V2.20 FUSION CONTRACT
+- AUTO and MANUAL share one fusion engine; only exposure selection differs.
+- Fusion topology must remain correct across the supported 4x..64x / 2..6 EV range; exact regressions cover 4x, supplied 20x and 64x.
+- LONG remains the primary clean saved body/default RGB/detail owner.
+- Existing V2.19 registration direction and capture/radiometric owners remain unchanged.
+- Mode 3 separates a strict locally registered SHORT-recovery seed from a broader LONG-loss + valid-SHORT recovery domain.
+- Domain membership alone never creates a seed.
+- Mode 4 performs monotonic geodesic reconstruction by dilation under the recovery mask; it ping-pongs at 1/16 atlas resolution until ownership occupancy stops growing.
+- The retired fixed 5x5/radius-2 ownership closure is forbidden.
+- Hard-clipped interiors are not required to produce their own LONG gradient; coherent residual SHORT geometry propagates inward from proven seeds.
+- Propagated residual-flow disagreement remains a hard barrier; disconnected/mismatched motion cannot be bridged merely by brightness.
+- Mode 5 remains binary real-source ownership: immutable LONG by default, aligned SHORT only inside converged recovery ownership.
+- No fractional LONG/SHORT high-frequency RGB mix, synthetic radiance fill or third-source RGB.
+- Convergence readback inspects only the small ownership atlas; production source RGB remains GPU-owned.
+
+CAPTURE / EXPOSURE / TONE CONTRACT — BYTE-PROTECTED FROM SUCCESSFUL V2.19
+- V2.18 AUTO physical bracket solver remains 4x..64x with full 6-EV capability when feasible.
+- SHORT and LONG remain independent captures; SHORT effective exposure never exceeds LONG.
+- MANUAL exposure selection and truthful flicker-safe actual reporting remain unchanged.
+- Physical 50/60-Hz anti-flicker solver remains unchanged.
+- Actual CaptureResult exposure ratio remains final radiometric authority.
+- V2.19 Photon-normalized post-fusion scene-key solver remains byte-exact.
+- AUTO mode-6 Dehaze/Micro neutralization and MANUAL presentation behavior remain unchanged.
+- DNG and JPEG ownership remain unchanged.
+
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 2
+- app/src/main/assets/shaders/hdr_display.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+
+PROTECTED RUNTIME — EXACTLY 10
+- app/src/main/AndroidManifest.xml
+- app/src/main/assets/shaders/copy_2d.frag
+- app/src/main/assets/shaders/fullscreen.vert
+- app/src/main/assets/shaders/oes_to_rgb.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
 
-Infrastructure/package changed-file list: exactly 8 files
+INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - .github/workflows/build.yml
 - BUILD_WORKFLOW_COPY.yml
-- PACKAGE_INFO.txt
-- PACKAGE_MANIFEST_SHA256.txt
-- README.md
-- VSCODE_DEV_UPLOAD.txt
-- app/build.gradle.kts
 - scripts/verify_orientation.py
 
-V1.5.4 V1.2 runtime intent:
-- preserve V1.5.4 V1.1 whole-quad SHORT ownership, safe geometry hierarchy, row-radiometry confidence, parity-preserving mirrored CFA halo, AUTO HDR, live calibration/GTM and capture routing;
-- replace fractional downstream color trust with terminal semantic color provenance: 0=NORMAL_MEASURED, 1=CENSORED_UNKNOWN_CHROMA, 2=SHORT_VALIDATED;
-- allow CENSORED observations to retain a finite brightness/lower-bound carrier while contributing zero directional/opponent chroma;
-- require complete unsaturated SHORT CFA support plus correspondence and observable geometry before SHORT gains color authority; final global flow fallback cannot self-certify SHORT chroma;
-- preserve complete proven SHORT color and neutralize only physically unprovable opponent chroma without hue borrowing, RGB blur or luminance-raising white paint;
-- make MANUAL SAFE SHORT/LONG sliders literal integration-time controls: SHORT uses sensor-min ISO, LONG uses selected ISO, SHORT crossing LONG clamps to LONG instead of swapping meanings;
-- prevent live adaptive bracket logic and the Brightness control from silently regenerating the MANUAL sensor pair; AUTO HDR adaptive exposure remains unchanged.
+INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
+YES, PAYLOAD/REGRESSION CONTRACT ONLY. Authority/version/hash/allowlist/artifact payloads advance to V2.20. Successful V2.19 compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, deterministic patch replay, freeze and one-APK proof remain unchanged.
 
-Build/version:
-- versionCode 35
-- versionName 1.0-v1.5.4-v1.2
+V2.20 RUNTIME DIGEST
+72a29a8ed08c131cf8a79747d46003a12473223e24fd66decc6a9cab73d74209
+Runtime universe remains exactly 12 files.
 
-Prepared candidate runtime manifest:
-- app/src file count: 16
-- expected SHA-256 after runtime transform: 9e196269a96463c04f014f2c00c34f23029c62a2f6083f19fcd139570727c042
+COMPILER STATUS BEFORE ACTIONS
+REAL pinned GLSL compiler: NOT RUN locally.
+REAL project Java compiler: NOT RUN locally.
+FULL :app:assembleDebug: NOT RUN locally.
 
-Compiler status in this environment:
-- COMPLETE GLSL RESERVED-IDENTIFIER SCAN: PASS
-- PROJECT SEMANTIC/OWNERSHIP/REGRESSION VALIDATOR: PASS
-- REAL PINNED GLSLANG COMPILE: NOT RUN (compiler unavailable locally)
-- REAL PROJECT JAVA COMPILE: NOT RUN
-- FULL ANDROID :app:assembleDebug: NOT RUN
-- GitHub Actions remains authoritative; candidate is PREPARED / UPLOAD-READY only.
+FINAL ACTIONS AUTHORITY
+Until V2.20 succeeds, final authority remains V2.19 commit 13393e945e7313d981b38ce5a44e31eceff7dc79 / run 33947113826 / artifact 9963691541.
