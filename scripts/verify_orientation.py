@@ -21,7 +21,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.15 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.16 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -51,7 +51,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.15 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.16 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -602,19 +602,18 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.15 - Exact successful V2.14 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.14' in workflow
-        and 'run-id: 33915396541' in workflow
-        and "authority='9a6b4dfc3885f32d5dffbbee3954392a35a2ab08'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.14 Actions authority")
-require("authority='5e3f6bbc05b0ec1aeb70cce5acc1d719f760858d'" not in workflow,
-        "V2.15 must not seed runtime from V2.13 after successful V2.14")
+# 038 / 042 / V2.16 - Exact successful V2.15 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.15' in workflow
+        and 'run-id: 33918963537' in workflow
+        and "authority='b8996c649450ae1a19025d856e183aee609f16af'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.15 Actions authority")
+require("authority='9a6b4dfc3885f32d5dffbbee3954392a35a2ab08'" not in workflow,
+        "V2.16 must not seed runtime from V2.14 after successful V2.15")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
-# 039 / 043 / V2.15 - Historical LONG-first highlight color ownership is superseded
-# by immutable SHORT spatial/chromatic authority. The old RGB ownership helpers are
-# removed entirely so they cannot silently return through a later call-site change.
+# 039 / 043 / V2.16 - Saved fusion may select exactly LONG or SHORT RGB, but it
+# must never interpolate RGB between sources. Live preview remains V2.15 SHORT-owned.
 require('mix(longScene, shortScene' not in hdr_shader,
         "production shader must not interpolate LONG/SHORT RGB")
 require('highlightColorOwnership' not in hdr_shader
@@ -623,11 +622,11 @@ require('highlightColorOwnership' not in hdr_shader
         and 'computeShortOwnership' not in fusion
         and 'computeShortCoreOwnership' not in fusion
         and 'shortSupportEvidence' not in fusion,
-        "dead LONG/SHORT color/detail ownership machinery must be removed, not merely unused")
+        "dead historical RGB ownership machinery must remain absent")
 require('if (highlightWeight > 0.0005)' not in hdr_shader,
-        "legacy live LONG-first highlight color ownership must not remain active")
+        "legacy live LONG-first highlight color ownership must not return")
 require('vec3 mergedScene = shortScene;' in hdr_shader,
-        "live HDR must fail closed to exposure-normalized SHORT")
+        "V2.15 live preview behavior must remain SHORT-owned and unchanged")
 require('colorSafeFromSources' not in hdr_shader and 'adaptiveAppearanceLift' not in hdr_shader,
         "global chroma/appearance repair must not return")
 require('textureOffset' not in hdr_shader and 'texelFetch' not in hdr_shader,
@@ -759,23 +758,23 @@ require('brightnessBar.setEnabled(enabled)' in main and 'gammaBar.setEnabled(ena
 require('Brightness AUTO' in main and 'Dehaze' in main and 'Micro' in main,
         "UI must expose the learned presentation state without adding extra required sliders")
 
-# V2.15 topology-safe saved presentation. Saved mode 6 is pointwise/monotonic only:
+# V2.16 topology-safe saved presentation (math inherited from V2.15). Saved mode 6 is pointwise/monotonic only:
 # it may reshape luma but can never sample a neighbor or create spatial topology.
-require('IRIS_V215_TOPOLOGY_SAFE_PRESENTATION_BEGIN' in hdr_shader
+require('IRIS_V216_TOPOLOGY_SAFE_PRESENTATION_BEGIN' in hdr_shader
         and 'vec3 fusedLinear = srgbToLinear(texture(normalTex, uv).rgb);' in hdr_shader
         and 'float exponent = 1.0' in hdr_shader
         and 'vec3 presented = fusedLinear * min(requestedScale, gamutScale);' in hdr_shader,
-        "V2.15 saved presentation must be pointwise, luminance-only and RGB-ratio preserving")
-v215_mode6 = hdr_shader[hdr_shader.index('// IRIS_V215_TOPOLOGY_SAFE_PRESENTATION_BEGIN'):
-                         hdr_shader.index('// IRIS_V215_TOPOLOGY_SAFE_PRESENTATION_END')]
-require('presentationGuideLumaAt' not in v215_mode6
-        and 'applyAdaptiveClarity' not in v215_mode6
-        and v215_mode6.count('texture(') == 2,
-        "V2.15 saved mode 6 must not sample neighbors or reintroduce source contours")
-require('unsharp' not in v215_mode6.lower() and 'clahe' not in v215_mode6.lower(),
-        "V2.15 must not substitute sharpening/CLAHE")
+        "V2.16 saved presentation must remain pointwise, luminance-only and RGB-ratio preserving")
+v216_mode6 = hdr_shader[hdr_shader.index('// IRIS_V216_TOPOLOGY_SAFE_PRESENTATION_BEGIN'):
+                         hdr_shader.index('// IRIS_V216_TOPOLOGY_SAFE_PRESENTATION_END')]
+require('presentationGuideLumaAt' not in v216_mode6
+        and 'applyAdaptiveClarity' not in v216_mode6
+        and v216_mode6.count('texture(') == 2,
+        "V2.16 saved mode 6 must not sample neighbors or reintroduce source contours")
+require('unsharp' not in v216_mode6.lower() and 'clahe' not in v216_mode6.lower(),
+        "V2.16 must not substitute sharpening/CLAHE")
 require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
-        "V2.15 must reuse the successful shader-file universe")
+        "V2.16 must reuse the successful shader-file universe")
 
 # Production still fusion remains the exact four-pass GPU topology inherited from
 # successful V2.13 V1.2. Only the payload/ownership math changes.
@@ -799,9 +798,9 @@ require(not (ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrF
         and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_fusion.frag').exists(),
         "V2.14 must remain on the successful JPEG-source architecture")
 
-# V2.15 registration direction is intentionally reversed: SHORT is immutable reference
-# geometry and only LONG is transformed into it. The proven bidirectional/cycle-consistent
-# global matcher remains, followed by the bounded local residual field on moving LONG.
+# V2.16 preserves the successful V2.15 registration direction: SHORT is immutable
+# reference geometry and only LONG is transformed into it. This geometry is protected
+# while saved-still RGB ownership changes back to LONG-by-default.
 require('static Registration estimateRegistration(Bitmap movingBitmap, Bitmap referenceBitmap)' in fusion
         and 'estimateOneWayRegistration(movingBitmap, referenceBitmap)' in fusion
         and 'estimateOneWayRegistration(referenceBitmap, movingBitmap)' in fusion
@@ -810,7 +809,7 @@ require('static Registration estimateRegistration(Bitmap movingBitmap, Bitmap re
 require('static Bitmap alignLongToShort(Bitmap longBitmap, Registration registration)' in fusion
         and 'canvas.drawBitmap(longBitmap, matrix, paint);' in fusion
         and 'alignShortToLong' not in fusion,
-        "V2.15 must resample LONG into SHORT coordinates and never warp SHORT")
+        "V2.16 must resample LONG into SHORT coordinates and never warp SHORT")
 require('JpegFusion.estimateRegistration(longBitmap, shortBitmap)' in gl
         and 'JpegFusion.alignLongToShort(longBitmap, registration)' in gl
         and 'JpegFusion.estimateLocalRegistration(longBitmap, shortBitmap)' in gl,
@@ -843,87 +842,123 @@ require('uniform sampler2D localFlowTex;' in hdr_shader
         "shader must flow only LONG and sample SHORT at immutable coordinates")
 require(gl.count('GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST') >= 2
         and gl.count('GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST') >= 2,
-        "SHORT source and full-resolution mode-5 fused raster must both use nearest sampling")
+        "SHORT source and full-resolution mode-5 raster must both use nearest sampling")
 require('presentationTexture);\n                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);' in gl,
-        "mode-6 must not bilinear-resample the retained SHORT-derived fused raster")
+        "mode-6 must not bilinear-resample the selected-source fused raster")
 
-# V2.15 LONG is no longer an RGB/detail owner. Modes 3/4 derive only a deliberately
-# low-frequency achromatic luminance correction. At 3072x4096 the atlas is 96x128.
-require('IRIS_V215_IMMUTABLE_SHORT_PROVENANCE_BEGIN' in hdr_shader
-        and 'vec2 lowFrequencyEnvelopeEvidenceAt(vec2 sampleUv)' in hdr_shader
-        and 'vec2 radius = texel * 16.0;' in hdr_shader
-        and 'float logCorrection = clamp(log2(longSum / shortSum), -0.50, 0.50);' in hdr_shader,
-        "V2.15 low-frequency LONG luminance envelope evidence is incomplete")
-require('int analysisWidth = Math.max(1, (width + 31) / 32);' in gl
-        and 'int analysisHeight = Math.max(1, (height + 31) / 32);' in gl,
-        "V2.15 envelope atlas must be exactly 1/32 linear resolution")
-require(math.ceil(4096 / 32) == 128 and math.ceil(3072 / 32) == 96,
-        "3072x4096 device captures must map to a 96x128 luminance envelope atlas")
-require('float weightedDeviation = 0.0;' in hdr_shader
-        and 'float confidenceSum = 0.0;' in hdr_shader
-        and 'weightedDeviation / confidenceSum' in hdr_shader,
-        "mode 4 must neighborhood-smooth only scalar correction/confidence")
+# V2.16 source-loss evidence may authorize SHORT ownership but may not carry RGB.
+require('IRIS_V216_LONG_BODY_SHORT_RECOVERY_BEGIN' in hdr_shader
+        and 'float shortRecoveryValidityAt(vec2 sampleUv)' in hdr_shader
+        and 'float registrationNeighborhoodConfidenceAt(vec2 sampleUv)' in hdr_shader
+        and 'float shortCrossAverageAt(vec2 sampleUv, float radiusPixels)' in hdr_shader
+        and 'float shortCoherentDetailAt(vec2 sampleUv)' in hdr_shader
+        and 'float longHardLossBaseAt(vec2 sampleUv)' in hdr_shader
+        and 'float compactHardLossSupportAt(vec2 sampleUv)' in hdr_shader
+        and 'float longEffectiveLossAt(vec2 sampleUv)' in hdr_shader
+        and 'vec2 broadRecoveryEvidenceAt(vec2 sampleUv)' in hdr_shader,
+        "V2.16 strict source-loss evidence chain is incomplete")
+require('localLinearRangeAtRadius(sampleUv, 2.0)' in hdr_shader
+        and 'localLinearRangeAtRadius(sampleUv, 6.0)' in hdr_shader
+        and 'smoothstep(0.72, 0.90, max3(longRgb))' in hdr_shader
+        and 'shortFineRange - 1.12 * longFineRange' in hdr_shader
+        and 'shortBroadRange - 1.08 * longBroadRange' in hdr_shader,
+        "effective LONG information-loss proof must be multi-scale and near-highlight gated")
+require('smoothstep(0.06, 0.22, compactHardLossSupportAt(sampleUv))' in hdr_shader
+        and 'float bandPass = abs(fineAverage - broadAverage);' in hdr_shader
+        and 'smoothstep(0.025, 0.080, bandPass)' in hdr_shader,
+        "literal LONG clipping must require compact support plus coherent SHORT detail")
+loss_slice = hdr_shader[hdr_shader.index('float longEffectiveLossAt(vec2 sampleUv)'):
+                        hdr_shader.index('float shortRecoveryProofAt(vec2 sampleUv)')]
+proof_slice = hdr_shader[hdr_shader.index('float shortRecoveryProofAt(vec2 sampleUv)'):
+                         hdr_shader.index('vec2 broadRecoveryEvidenceAt(vec2 sampleUv)')]
+require('* shortCoherentDetailAt(sampleUv);' in loss_slice
+        and '* shortCoherentDetailAt(sampleUv);' in proof_slice,
+        "both hard and effective LONG-loss admission must reject smooth/noise-only SHORT evidence")
 
-# Saved mode 5 begins from complete SHORT RGB and only multiplies it by one scalar.
-require('IRIS_V215_SHORT_SPATIAL_TRUTH_BEGIN' in hdr_shader
+def v216_detail_gate(band_pass):
+    return smoothstep_math(0.025, 0.080, abs(band_pass))
+
+require(math.isclose(v216_detail_gate(0.0), 0.0, abs_tol=1e-9)
+        and v216_detail_gate(0.010) < 0.02,
+        "smooth clipped illumination must not authorize SHORT ownership")
+require(v216_detail_gate(0.060) > 0.69,
+        "real coherent SHORT detail must remain eligible for recovery")
+require('int analysisWidth = Math.max(1, (width + 15) / 16);' in gl
+        and 'int analysisHeight = Math.max(1, (height + 15) / 16);' in gl,
+        "V2.16 region-evidence atlas must be exactly 1/16 linear resolution")
+require(math.ceil(4096 / 16) == 256 and math.ceil(3072 / 16) == 192,
+        "3072x4096 device captures must map to a 192x256 region-evidence atlas")
+require('float strongCells = 0.0;' in hdr_shader
+        and 'float coherentRegion = smoothstep(2.0, 5.0, strongCells);' in hdr_shader
+        and 'float broadRecovery = smoothstep(0.10, 0.38, evidenceAverage)' in hdr_shader,
+        "mode 4 must reject isolated evidence and publish only broad region support")
+
+# Saved mode 5 is binary source ownership: LONG by default, exact SHORT only when
+# LONG is information-lost and SHORT+geometry are valid. No high-frequency crossfade.
+require('IRIS_V216_BINARY_SOURCE_OWNERSHIP_BEGIN' in hdr_shader
         and 'vec3 shortRgb = stillShortRgbAt(uv);' in hdr_shader
+        and 'vec3 longRgb = stillLongRgbAt(uv);' in hdr_shader
         and 'vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;' in hdr_shader
-        and 'vec3 mergedScene = shortScene * envelopeScale;' in hdr_shader,
-        "V2.15 saved fusion must begin and remain complete SHORT RGB")
-v215_mode5 = hdr_shader[hdr_shader.index('// IRIS_V215_SHORT_SPATIAL_TRUTH_BEGIN'):
-                         hdr_shader.index('// IRIS_V215_SHORT_SPATIAL_TRUTH_END')]
-require('longRgb' not in v215_mode5 and 'longScene' not in v215_mode5
-        and 'texture(longTex' not in v215_mode5
-        and 'mix(longScene, shortScene' not in v215_mode5,
-        "saved mode 5 must never read/blend LONG RGB or texture")
-require('float envelopeScale = mix(1.0, exp2(envelopeLog2), envelopeConfidence);' in v215_mode5,
-        "LONG contribution must be one confidence-gated achromatic scalar")
+        and 'vec3 longScene = srgbToLinear(longRgb);' in hdr_shader,
+        "V2.16 mode 5 must expose both exact source candidates in SHORT coordinates")
+v216_mode5 = hdr_shader[hdr_shader.index('// IRIS_V216_BINARY_SOURCE_OWNERSHIP_BEGIN'):
+                         hdr_shader.index('// IRIS_V216_BINARY_SOURCE_OWNERSHIP_END')]
+require('float shortOwns = step(0.58, recoveryProof) * usableBracket;' in v216_mode5
+        and 'vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;' in v216_mode5,
+        "V2.16 must default to LONG and switch discretely to SHORT only on proven loss")
+require('mix(longScene, shortScene' not in v216_mode5
+        and 'mix(shortScene, longScene' not in v216_mode5,
+        "mode 5 must never create a fractional LONG/SHORT RGB sample")
+require('float effectiveLoss = longEffectiveLossAt(uv)' in v216_mode5
+        and 'smoothstep(0.34, 0.70, support.r)' in v216_mode5,
+        "effective pre-clip recovery must require the broad region prior")
+require('float hardLoss = longHardLossBaseAt(uv)' in v216_mode5
+        and 'compactHardLossSupportAt(uv)' in v216_mode5
+        and 'smoothstep(0.18, 0.55, support.r)' in v216_mode5,
+        "hard-clipped highlights must require broad coherent-detail authorization before SHORT can own")
 require('radianceFloorWeight' not in hdr_shader and 'radianceRaised' not in hdr_shader
         and 'recoveredSourceDisplay' not in hdr_shader,
         "synthetic radiance/color fill paths must remain absent")
 
-# The dormant CPU helper may not become a second interpolation algorithm either.
+# Dormant CPU helper remains byte-preserved and production-unreachable. It must not
+# be mistaken for the V2.16 owner or used as a fallback after a GPU failure.
 require('float mr = SRGB_TO_LINEAR[sr8] * scalarAppearanceGain;' in fusion
         and 'float mg = SRGB_TO_LINEAR[sg8] * scalarAppearanceGain;' in fusion
         and 'float mb = SRGB_TO_LINEAR[sb8] * scalarAppearanceGain;' in fusion
         and 'lr + (sr - lr)' not in fusion
         and 'recycle(longBitmap);\n        longBitmap = null;' in fusion,
-        "CPU utility path must discard LONG after scalar calibration and preserve complete SHORT RGB")
+        "byte-preserved CPU utility unexpectedly changed")
 require('bitmap.compress(Bitmap.CompressFormat.JPEG, 100, bytes)' in fusion,
-        "fused JPEG must use maximum encoder quality to minimize loss of retained SHORT microdetail")
+        "fused JPEG must use maximum encoder quality")
 
-# Mathematical invariant: any LONG influence scales every SHORT channel equally;
-# confidence zero is exact SHORT, and local correction is bounded to +/-0.5 EV.
-def v215_envelope_scale(log2_correction, confidence):
-    log2_correction = max(-0.5, min(0.5, log2_correction))
-    t = smoothstep_math(0.18, 0.55, confidence)
-    return 1.0 + (2.0 ** log2_correction - 1.0) * t
-# Algebraic provenance proof: every production source/fusion transform after SHORT
-# sampling is one positive scalar applied equally to R/G/B. Therefore chromaticity
-# and all source edge locations are inherited from SHORT; LONG can change only a
-# slowly varying luminance envelope.
-def normalized_rgb(rgb):
-    total = sum(rgb)
-    return tuple(v / total for v in rgb) if total > 1e-12 else (0.0, 0.0, 0.0)
+# Mathematical provenance: a full-resolution output sample is one complete source
+# vector, never an RGB interpolation. The default branch is LONG; SHORT wins only
+# when the binary ownership proof is true.
+def v216_select(long_rgb, short_rgb, short_owns):
+    return short_rgb if short_owns else long_rgb
 
-for rgb in ((0.03, 0.07, 0.11), (0.40, 0.20, 0.05), (0.12, 0.45, 0.18), (0.81, 0.77, 0.70)):
-    for scale in (0.5, 1.0, 1.37, 4.0, 16.0):
-        a = normalized_rgb(rgb)
-        b = normalized_rgb(tuple(v * scale for v in rgb))
-        require(all(math.isclose(x, y, abs_tol=1e-9) for x, y in zip(a, b)),
-                "achromatic LONG envelope changed SHORT chromaticity")
+long_rgb = (0.61, 0.55, 0.49)
+short_rgb = (0.44, 0.31, 0.17)
+require(v216_select(long_rgb, short_rgb, False) == long_rgb,
+        "healthy/default V2.16 source must be LONG")
+require(v216_select(long_rgb, short_rgb, True) == short_rgb,
+        "proven LONG information loss must retain exact SHORT RGB")
+for owns in (False, True):
+    out = v216_select(long_rgb, short_rgb, owns)
+    require(out in (long_rgb, short_rgb),
+            "binary source selector manufactured a third RGB sample")
 
-require(math.isclose(v215_envelope_scale(0.5, 0.0), 1.0, abs_tol=1e-9),
-        "uncertain LONG must contribute exactly zero")
-require(2.0 ** -0.5 <= v215_envelope_scale(-9.0, 1.0) <= 1.0
-        and 1.0 <= v215_envelope_scale(9.0, 1.0) <= 2.0 ** 0.5,
-        "local LONG luminance correction must remain within +/-0.5 EV")
-rgb = (0.11, 0.23, 0.37)
-scale = v215_envelope_scale(0.35, 0.9)
-scaled = tuple(c * scale for c in rgb)
-require(math.isclose(scaled[0] / scaled[1], rgb[0] / rgb[1], rel_tol=1e-9)
-        and math.isclose(scaled[2] / scaled[1], rgb[2] / rgb[1], rel_tol=1e-9),
-        "achromatic LONG envelope must preserve SHORT chromatic ratios exactly")
+# Capture/exposure policy is frozen from successful V2.15. AUTO must retain the 64x
+# ceiling and MANUAL controls must retain enough independent shutter/ISO range to
+# realize at least a 64x pair without LONG feeding back into SHORT.
+require('AUTO_BRACKET_MAX_RATIO = 64.0' in camera,
+        "AUTO 64x/6EV capability changed")
+require('1_000_000_000L / 8000' in main and '1_000_000_000L / 8' in main
+        and 'private static final int[] ISO_VALUES = {100, 200, 400, 800, 1600, 3200};' in main,
+        "MANUAL exposure/ISO control range no longer contains a 64x-capable pair")
+manual_64_ratio = ((1.0 / 1000.0) * 400.0) / ((1.0 / 8000.0) * 50.0)
+require(manual_64_ratio >= 64.0,
+        "representative independent MANUAL controls must retain at least 64x separation")
 
 # Exact hard exposure ordering. Request-time correction may raise LONG only; actual
 # CaptureResult metadata must reject any inversion instead of clamping it to 1x.
@@ -958,29 +993,25 @@ require('return Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));' 
 require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kts').read_text().lower(),
         "OpenCV must remain simulation-only and absent from runtime")
 
-# V2.15 permanent visual-source regressions from the exact office/manual failures.
-# No production output path may create an RGB sample between LONG and SHORT, and no
-# coordinate transform may ever be applied to SHORT. These replace the older
-# conditional LONG/SHORT ownership regressions intentionally.
+# V2.16 permanent visual/source regressions from the V2.13-V2.15 device failures.
+# Preserve the successful V2.15 alignment direction, but never make SHORT global again.
 require('mix(longScene, shortScene' not in hdr_shader,
         "gray/blue third-edge RGB interpolation returned")
 require('stillShortUvAt' not in hdr_shader and 'alignShortToLong' not in fusion,
         "SHORT warp/resampling regression returned")
-require('vec3 mergedScene = shortScene * envelopeScale;' in v215_mode5,
-        "saved FUSED must retain SHORT spatial/chromatic/high-frequency truth")
-require('stillLongRgbAt' not in v215_mode5 and 'longTex' not in v215_mode5
-        and 'stillLongUvAt' not in v215_mode5,
-        "mode 5 must have no path for LONG RGB/geometry to enter the fused raster")
+require('vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;' in v216_mode5,
+        "V2.16 binary LONG-default/SHORT-recovery ownership disappeared")
+require('vec3 mergedScene = shortScene * envelopeScale;' not in hdr_shader,
+        "V2.15 global SHORT ownership regression returned")
 require('return texture(shortTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;' in hdr_shader,
-        "SHORT sampling must be direct at the output coordinate with no flow/warp")
-require('vec3 mergedScene = shortScene;' in hdr_shader,
-        "live HDR must retain SHORT spatial/chromatic/high-frequency truth")
+        "SHORT recovery sampling must remain direct and unwarped")
 require('radianceFloorWeight' not in hdr_shader and 'radianceRaised' not in hdr_shader,
         "unsupported peach/orange radiance fill returned")
-# 1/32 + 3x3 atlas smoothing means LONG cannot encode the observed 1-8 pixel
-# ground/foliage/road/sign defects into the FUSED high-frequency layer.
-require('(width + 31) / 32' in gl and 'vec2 offsets[9] = vec2[9](' in hdr_shader,
-        "LOW-frequency-only LONG envelope regression returned")
+require('(width + 15) / 16' in gl and 'float coherentRegion = smoothstep(2.0, 5.0, strongCells);' in hdr_shader,
+        "broad region-coherence protection returned to a fine/detail ownership map")
+require('Smooth clipped light pools therefore stay LONG-owned' in v216_mode5
+        and 'shortCoherentDetailAt(sampleUv)' in hdr_shader,
+        "smooth clipped-light regression protection disappeared")
 
 # Appearance calibration remains byte-identical to successful V2.14. Registration
 # matching math is preserved conceptually, but alignment direction intentionally
@@ -1005,7 +1036,7 @@ require('applyPhotographicBodyTone' in hdr_shader
         and 'smoothstep(0.45, 0.68, y)' in hdr_shader
         and 'targetBodyY = bodyY + 0.45f * toe * highlightProtect' in fusion,
         "GPU/CPU photographic body tone curve missing or mismatched")
-live_mode_start = hdr_shader.index('// V2.15 strict live contract:')
+live_mode_start = hdr_shader.index('// V2.16 leaves V2.15 live preview behavior unchanged.')
 require(hdr_shader.index('applyPhotographicBodyTone(mergedScene * brightnessGain)', live_mode_start)
         < hdr_shader.index('adaptiveHdrToneMap(bodyToned, ratio, bracketStops)', live_mode_start)
         < hdr_shader.index('applyDisplayGamma(displayLinear, displayGamma)', live_mode_start),
@@ -1043,9 +1074,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 32' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.15"' in Path('app/build.gradle.kts').read_text(),
-        "V2.15 version/build marker must be exact")
+require('versionCode = 33' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.16"' in Path('app/build.gradle.kts').read_text(),
+        "V2.16 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1091,7 +1122,7 @@ require('buildGammaLut(clampedGamma)' in fusion
 require('int[] shortPixels = new int[width * rowsPerStrip];' in fusion
         and 'int[] outPixels = new int[width * rowsPerStrip];' in fusion
         and 'supportEvidence' not in fusion,
-        "V2.15 CPU utility must use bounded strip buffers and no LONG support mask")
+        "byte-preserved CPU utility must use bounded strip buffers and no LONG support mask")
 
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
@@ -1153,4 +1184,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.15 REGRESSION PASS: exact successful V2.14 authority, SHORT<=LONG ordering protected, immutable SHORT geometry/RGB/detail, LONG-only low-frequency achromatic envelope, no RGB source interpolation or synthetic fill")
+print("V1.4.11 V2.16 REGRESSION PASS: exact successful V2.15 authority, AUTO/MANUAL 64x capability and SHORT<=LONG ordering protected, V2.15 LONG-to-SHORT geometry preserved, LONG default body/SNR ownership restored, exact SHORT recovery is binary/source-faithful, no RGB interpolation or synthetic fill")

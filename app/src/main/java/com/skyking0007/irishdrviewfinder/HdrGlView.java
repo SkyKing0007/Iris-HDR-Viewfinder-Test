@@ -800,11 +800,11 @@ final class HdrGlView extends GLSurfaceView {
                 throw new IllegalStateException("Short/long JPEG dimensions do not match for GPU fusion");
             }
 
-            // V2.15 immutable-SHORT contract: SHORT defines output geometry and is
-            // never translated, warped, or locally resampled. Only LONG is moved
-            // into SHORT coordinates, first by the proven global registration and
-            // then by a bounded/cycle-consistent residual field used for the broad
-            // achromatic luminance envelope only.
+            // V2.16 keeps the successful V2.15 geometry contract: SHORT defines
+            // output coordinates and is never translated/flow-warped. Only LONG is
+            // globally and locally aligned into SHORT coordinates. Ownership changes
+            // later: aligned LONG is the default body/SNR source and exact SHORT is
+            // selected only where LONG has proven information loss.
             JpegFusion.Registration registration = JpegFusion.estimateRegistration(longBitmap, shortBitmap);
             Bitmap alignedLong = JpegFusion.alignLongToShort(longBitmap, registration);
             JpegFusion.recycleBitmap(longBitmap);
@@ -846,7 +846,7 @@ final class HdrGlView extends GLSurfaceView {
             RuntimeLogger.event(
                     "GPU_STILL_FUSION",
                     String.format(java.util.Locale.US,
-                            "V2.15 immutable-SHORT GPU multipass start %dx%d ratio=%.3f scalar=%.3f brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
+                            "V2.16 LONG-body/SHORT-recovery GPU multipass start %dx%d ratio=%.3f scalar=%.3f brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
                             width, height, exposureRatio, scalarGain, brightnessEv, gamma,
                             dehaze, microContrast));
 
@@ -869,7 +869,7 @@ final class HdrGlView extends GLSurfaceView {
 
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shortTexture);
                 GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, shortBitmap, 0);
-                // Exact full-resolution SHORT samples are immutable source truth.
+                // SHORT recovery samples are immutable source truth when selected.
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST);
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, longTexture);
@@ -879,17 +879,17 @@ final class HdrGlView extends GLSurfaceView {
                         localRegistration.gridWidth,
                         localRegistration.gridHeight,
                         localRegistration.rgba);
-                // V2.15: LONG may influence only a deliberately low-frequency
-                // scalar envelope. At 3072x4096 this is 96x128 (1/32 per axis),
-                // so LONG can never carry grass/foliage/text/edge detail into FUSED.
-                int analysisWidth = Math.max(1, (width + 31) / 32);
-                int analysisHeight = Math.max(1, (height + 31) / 32);
+                // V2.16 source-loss analysis is a broad region prior only. At
+                // 3072x4096 this is 192x256 (1/16 per axis); full-resolution mode 5
+                // still makes the binary source decision from real LONG/SHORT data.
+                int analysisWidth = Math.max(1, (width + 15) / 16);
+                int analysisHeight = Math.max(1, (height + 15) / 16);
                 allocateRgbTexture(evidenceTexture, analysisWidth, analysisHeight);
                 allocateRgbTexture(supportTexture, analysisWidth, analysisHeight);
                 allocateRgbTexture(presentationTexture, width, height);
                 // Mode 6 is full-resolution pointwise presentation. Keep the
                 // mode-5 fused raster nearest-sampled so no post-fusion texture
-                // interpolation can soften or create a boundary absent from SHORT.
+                // interpolation can create a third source boundary.
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, presentationTexture);
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);
                 GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST);
@@ -899,11 +899,10 @@ final class HdrGlView extends GLSurfaceView {
                 JpegFusion.recycleBitmap(longBitmap);
                 longBitmap = null;
 
-                // V2.15 preserves the proven four-pass saved-still topology but
-                // changes ownership semantics completely. Mode 3 derives only a
-                // broad achromatic LONG/SHORT luminance correction, mode 4 smooths
-                // that correction, mode 5 applies it to untouched full-resolution
-                // SHORT RGB, and mode 6 remains pointwise presentation only.
+                // V2.16 preserves the proven four-pass saved-still topology. Mode 3
+                // derives LONG information-loss evidence, mode 4 enforces broad
+                // region coherence, mode 5 selects exactly aligned LONG or exact
+                // unwarped SHORT at full resolution, and mode 6 stays pointwise.
                 renderStillPass(
                         evidenceTexture, analysisWidth, analysisHeight,
                         3, longTexture, shortTexture, longTexture,
@@ -954,7 +953,7 @@ final class HdrGlView extends GLSurfaceView {
                 long elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L;
                 RuntimeLogger.event(
                         "GPU_STILL_FUSION",
-                        "V2.9 GPU-only multipass complete ms=" + elapsedMs
+                        "V2.16 GPU-only multipass complete ms=" + elapsedMs
                                 + " outputBytes=" + encoded.length);
                 return encoded;
             } finally {

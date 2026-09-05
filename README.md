@@ -1,33 +1,40 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.15
+# Iris HDR Viewfinder Test V1.4.11 V2.16
 
-V2.15 is the **immutable-SHORT fusion correction** derived from exact successful V2.14 Actions authority (`9a6b4dfc3885f32d5dffbbee3954392a35a2ab08`, run `33915396541`, artifact `9952986089`).
+V2.16 is the **LONG-owned body + immutable-SHORT HDR recovery correction** derived from exact successful V2.15 Actions authority (`b8996c649450ae1a19025d856e183aee609f16af`, run `33918963537`, artifact `9954318138`).
 
-## Primary evidence
+## What V2.15 proved
 
-The implementation is driven by the supplied original-resolution SHORT/LONG/FUSED captures and the 600–800% crops. The failure is explicit: FUSED still produced peach/orange blotchy speckles and previously produced disconnected gray/blue contour fragments even though SHORT already contained the correct ground, foliage, road, sign and border structure.
+The supplied SHORT/LONG/FUSED captures show that V2.15's reversed registration direction finally behaves much better: SHORT remains fixed and LONG is aligned into SHORT coordinates. But V2.15 then made SHORT the entire saved spatial/RGB image, so ordinary walls, shadows, carpet and other body regions inherited the much noisier lifted SHORT exposure.
 
-## Non-negotiable fusion contract
+Earlier LONG-owned builds were cleaner, but their fusion could warp SHORT, fragment the ownership mask and fractionally mix LONG/SHORT RGB, producing disconnected gray/blue borders, false contours and peach/orange fill.
 
-**SHORT is the immutable spatial, chromatic and high-frequency authority.** It is never globally translated, locally warped, flow-sampled, bilinear-resampled for fusion ownership, or fractionally mixed with LONG RGB.
+## V2.16 source contract
 
-LONG is aligned into SHORT coordinates. LONG may contribute only a deliberately low-frequency **single achromatic luminance scalar**. At 3072×4096 the envelope atlas is 96×128 (1/32 per axis), then neighborhood-smoothed before full-resolution presentation. The scalar is applied equally to SHORT R/G/B, so LONG cannot inject hue, texture, edge shape, peach/orange speckles, gray borders or displaced structure.
+V2.16 preserves the V2.15 registration direction but separates geometry from image ownership:
 
-If LONG alignment/radiometry is uncertain, envelope confidence collapses to zero and saved fusion fails closed to exposure-mapped SHORT. Honest clipping/noise from SHORT is preferable to invented content.
+- **SHORT is the immutable geometric reference.** It is never globally or locally warped.
+- **LONG is aligned into SHORT coordinates.** Aligned LONG is the default saved body/SNR/RGB/detail owner.
+- **SHORT owns only proven LONG information-loss regions.** Hard clipping or strict effective pre-clip detail collapse can qualify only when SHORT contains coherent recoverable detail, SHORT is valid, and registration is trustworthy. Smooth clipped illumination without recoverable detail remains LONG-owned.
+- **Source ownership is binary.** There is no high-frequency `mix(longScene, shortScene, ...)` or fractional RGB crossfade.
+- A SHORT-owned region uses complete exact SHORT RGB/detail. A LONG-owned region uses aligned LONG RGB/detail.
+- The 1/16 analysis atlas contains evidence/confidence only, never source RGB or fine texture.
+- Effective-loss proof uses fine and broad SHORT-vs-LONG structure dominance plus bright-LONG/radiometric/geometry checks so lifted SHORT noise cannot steal ordinary walls.
+- Synthetic radiance-floor fill and unsupported peach/orange/gray reconstruction remain forbidden.
+- Saved mode 6 remains pointwise; it cannot create spatial topology after source selection.
 
-Live HDR also fails closed to exposure-normalized SHORT rather than mixing LONG/SHORT RGB. SPLIT continues to show the independent sources.
+Live preview remains the successful V2.15 behavior; this build changes saved-still source ownership only.
 
-## Exposure contract
+## Exposure/capture contract is frozen
 
-Successful V2.14 `CameraController.java` and `CaptureSetSaver.java` are byte-protected. SHORT effective exposure may never exceed LONG in AUTO or MANUAL; Long ISO remains LONG-only; actual Camera2 result metadata must prove LONG/SHORT >= 1 before fusion.
+Successful V2.15 `CameraController.java` and `CaptureSetSaver.java` are byte-protected. AUTO retains meaningful bracket targeting up to **64× / 6 EV**, MANUAL retains at least **64× / 6 EV** legal control separation, Long ISO/shutter cannot re-solve SHORT, and requested/frozen/actual metadata must preserve **SHORT effective exposure ≤ LONG**.
 
 ## Runtime scope
 
-Exactly three runtime files change relative to successful V2.14:
+Exactly two runtime files change relative to successful V2.15:
 
 - `app/src/main/assets/shaders/hdr_display.frag`
 - `app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java`
-- `app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java`
 
-The other nine `app/src/**` runtime files are byte-protected, including `CameraController.java` and `CaptureSetSaver.java`.
+The other ten `app/src/**` runtime files are byte-protected, including `CameraController.java`, `CaptureSetSaver.java` and `JpegFusion.java`.
 
-V2.15 is **PREPARED / UPLOAD-READY only after clean-extract replay**. GitHub Actions remains authoritative for pinned real glslang, real project javac, full `:app:assembleDebug`, exactly-one-APK proof and post-build invariance.
+V2.16 is **PREPARED / UPLOAD-READY only after clean-extract replay**. GitHub Actions remains authoritative for pinned real glslang, real project javac, full `:app:assembleDebug`, exactly-one-APK proof and post-build invariance.

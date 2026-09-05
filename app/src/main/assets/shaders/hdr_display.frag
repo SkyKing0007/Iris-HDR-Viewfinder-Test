@@ -121,9 +121,10 @@ vec3 applyDisplayGamma(vec3 rgb, float gammaValue) {
     return rgb * min(requestedScale, gamutScale);
 }
 
-// IRIS_V215_IMMUTABLE_SHORT_PROVENANCE_BEGIN
-// SHORT is immutable output geometry and the sole spatial/chromatic/detail source.
-// The residual field addresses only aligned LONG, never SHORT.
+// IRIS_V216_LONG_BODY_SHORT_RECOVERY_BEGIN
+// SHORT remains the immutable geometric reference. LONG is the only source that is
+// moved into SHORT coordinates. Saved fusion is LONG-owned by default; exact SHORT
+// RGB/detail takes ownership only where LONG has proven information loss.
 vec4 stillLocalFlowAt(vec2 sampleUv) {
     if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) {
         return vec4(0.5, 0.5, 0.0, 1.0);
@@ -163,54 +164,185 @@ float alignedLongLinearLumaAt(vec2 sampleUv) {
     return linearLuma(srgbToLinear(stillLongRgbAt(sampleUv)));
 }
 
-float envelopeSampleConfidenceAt(vec2 sampleUv) {
-    vec3 shortRgb = stillShortRgbAt(sampleUv);
-    vec3 longRgb = stillLongRgbAt(sampleUv);
-    float shortSignal = smoothstep(0.015, 0.060, encodedLuma(shortRgb));
-    float longSignal = smoothstep(0.035, 0.120, encodedLuma(longRgb));
-    float shortHeadroom = 1.0 - smoothstep(0.92, 0.975, max3(shortRgb));
-    float longHeadroom = 1.0 - smoothstep(0.86, 0.955, max3(longRgb));
-    float geometry = smoothstep(0.32, 0.68, stillLocalRegistrationConfidenceAt(sampleUv));
-    return shortSignal * longSignal * shortHeadroom * longHeadroom * geometry;
+float shortCrossAverageAt(vec2 sampleUv, float radiusPixels) {
+    vec2 sourceTexel = 1.0 / vec2(textureSize(shortTex, 0));
+    vec2 radius = sourceTexel * radiusPixels;
+    float sumValue = mappedShortLinearLumaAt(sampleUv);
+    sumValue += mappedShortLinearLumaAt(clamp(sampleUv + vec2( radius.x, 0.0), vec2(0.0), vec2(1.0)));
+    sumValue += mappedShortLinearLumaAt(clamp(sampleUv + vec2(-radius.x, 0.0), vec2(0.0), vec2(1.0)));
+    sumValue += mappedShortLinearLumaAt(clamp(sampleUv + vec2(0.0,  radius.y), vec2(0.0), vec2(1.0)));
+    sumValue += mappedShortLinearLumaAt(clamp(sampleUv + vec2(0.0, -radius.y), vec2(0.0), vec2(1.0)));
+    return sumValue * 0.20;
 }
 
-vec2 lowFrequencyEnvelopeEvidenceAt(vec2 sampleUv) {
-    // The evidence is deliberately broad. Nine exact source samples span roughly
-    // 32 source pixels; the 1/32 atlas and mode-4 neighborhood smoothing expand
-    // this to a low-frequency field that cannot carry fine LONG structure.
-    vec2 texel = 1.0 / vec2(textureSize(shortTex, 0));
-    vec2 radius = texel * 16.0;
+float shortCoherentDetailAt(vec2 sampleUv) {
+    // A real recoverable feature survives two spatial scales. Random SHORT noise
+    // and smooth illumination gradients must not authorize a source switch merely
+    // because LONG is bright or clipped. The difference of the 1px and 4px cross
+    // averages is a compact band-pass in exposure-mapped SHORT scene space.
+    float fineAverage = shortCrossAverageAt(sampleUv, 1.0);
+    float broadAverage = shortCrossAverageAt(sampleUv, 4.0);
+    float bandPass = abs(fineAverage - broadAverage);
+    return smoothstep(0.025, 0.080, bandPass);
+}
+
+float shortRecoveryValidityAt(vec2 sampleUv) {
+    vec3 shortRgb = stillShortRgbAt(sampleUv);
+    float signal = smoothstep(0.018, 0.060, encodedLuma(shortRgb));
+    float headroom = 1.0 - smoothstep(0.940, 0.985, max3(shortRgb));
+    return signal * headroom;
+}
+
+float registrationNeighborhoodConfidenceAt(vec2 sampleUv) {
+    if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) return 0.0;
+    vec2 flowTexel = 1.0 / vec2(textureSize(localFlowTex, 0));
+    vec2 offsets[9] = vec2[9](
+        vec2(0.0),
+        vec2( flowTexel.x, 0.0), vec2(-flowTexel.x, 0.0),
+        vec2(0.0,  flowTexel.y), vec2(0.0, -flowTexel.y),
+        vec2( flowTexel.x,  flowTexel.y), vec2(-flowTexel.x,  flowTexel.y),
+        vec2( flowTexel.x, -flowTexel.y), vec2(-flowTexel.x, -flowTexel.y));
+    float sumConfidence = 0.0;
+    float maxConfidence = 0.0;
+    float strongVotes = 0.0;
+    for (int i = 0; i < 9; ++i) {
+        float c = stillLocalRegistrationConfidenceAt(
+            clamp(sampleUv + offsets[i], vec2(0.0), vec2(1.0)));
+        sumConfidence += c;
+        maxConfidence = max(maxConfidence, c);
+        strongVotes += step(0.16, c);
+    }
+    float averageConfidence = sumConfidence / 9.0;
+    float coherentNeighborhood = smoothstep(2.0, 5.0, strongVotes);
+    // A clipped LONG core may have no gradient of its own, but can inherit only
+    // coherent nearby camera-motion confidence; an isolated high-confidence cell
+    // cannot by itself authorize SHORT ownership.
+    return max(stillLocalRegistrationConfidenceAt(sampleUv),
+        averageConfidence * coherentNeighborhood * 0.90)
+        * smoothstep(0.18, 0.42, maxConfidence);
+}
+
+vec2 localLinearRangeAtRadius(vec2 sampleUv, float radiusPixels) {
+    vec2 sourceTexel = 1.0 / vec2(textureSize(shortTex, 0));
+    vec2 radius = sourceTexel * radiusPixels;
     vec2 offsets[9] = vec2[9](
         vec2(0.0),
         vec2( radius.x, 0.0), vec2(-radius.x, 0.0),
         vec2(0.0,  radius.y), vec2(0.0, -radius.y),
         vec2( radius.x,  radius.y), vec2(-radius.x,  radius.y),
         vec2( radius.x, -radius.y), vec2(-radius.x, -radius.y));
-    float shortSum = 0.0;
-    float longSum = 0.0;
-    float weightSum = 0.0;
+    float shortMin = 1.0e9;
+    float shortMax = 0.0;
+    float longMin = 1.0e9;
+    float longMax = 0.0;
     for (int i = 0; i < 9; ++i) {
         vec2 q = clamp(sampleUv + offsets[i], vec2(0.0), vec2(1.0));
-        float w = envelopeSampleConfidenceAt(q);
-        shortSum += mappedShortLinearLumaAt(q) * w;
-        longSum += alignedLongLinearLumaAt(q) * w;
-        weightSum += w;
+        float shortY = mappedShortLinearLumaAt(q);
+        float longY = alignedLongLinearLumaAt(q);
+        shortMin = min(shortMin, shortY);
+        shortMax = max(shortMax, shortY);
+        longMin = min(longMin, longY);
+        longMax = max(longMax, longY);
     }
-    if (weightSum < 1.5 || shortSum <= 0.000001 || longSum <= 0.000001) {
-        return vec2(0.5, 0.0);
-    }
-    float logCorrection = clamp(log2(longSum / shortSum), -0.50, 0.50);
-    float encodedCorrection = 0.5 + logCorrection;
-    float confidence = clamp(weightSum / 9.0, 0.0, 1.0);
-    return vec2(encodedCorrection, confidence);
+    return vec2(shortMax - shortMin, longMax - longMin);
 }
-// IRIS_V215_IMMUTABLE_SHORT_PROVENANCE_END
+
+float radiometricAgreementAt(vec2 sampleUv) {
+    float shortY = max(mappedShortLinearLumaAt(sampleUv), 0.00001);
+    float longY = max(alignedLongLinearLumaAt(sampleUv), 0.00001);
+    float errorEv = abs(log2(shortY / longY));
+    return 1.0 - smoothstep(0.18, 0.55, errorEv);
+}
+
+float longHardLossBaseAt(vec2 sampleUv) {
+    // Any clipped LONG channel has lost source information. Spatial coherence is
+    // imposed separately so an isolated hot/quantized pixel cannot switch ownership.
+    return smoothstep(0.975, 0.997, max3(stillLongRgbAt(sampleUv)));
+}
+
+float compactHardLossSupportAt(vec2 sampleUv) {
+    vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
+    vec2 radius = sourceTexel * 2.0;
+    vec2 offsets[9] = vec2[9](
+        vec2(0.0),
+        vec2( radius.x, 0.0), vec2(-radius.x, 0.0),
+        vec2(0.0,  radius.y), vec2(0.0, -radius.y),
+        vec2( radius.x,  radius.y), vec2(-radius.x,  radius.y),
+        vec2( radius.x, -radius.y), vec2(-radius.x, -radius.y));
+    float support = 0.0;
+    for (int i = 0; i < 9; ++i) {
+        support += longHardLossBaseAt(
+            clamp(sampleUv + offsets[i], vec2(0.0), vec2(1.0)));
+    }
+    return support / 9.0;
+}
+
+float longEffectiveLossAt(vec2 sampleUv) {
+    vec3 longRgb = stillLongRgbAt(sampleUv);
+    vec2 fineRanges = localLinearRangeAtRadius(sampleUv, 2.0);
+    vec2 broadRanges = localLinearRangeAtRadius(sampleUv, 6.0);
+    float shortFineRange = fineRanges.x;
+    float longFineRange = fineRanges.y;
+    float shortBroadRange = broadRanges.x;
+    float longBroadRange = broadRanges.y;
+    float nearHighlight = smoothstep(0.72, 0.90, max3(longRgb));
+    float fineStructure = smoothstep(0.006, 0.024, shortFineRange);
+    float fineDominance = smoothstep(
+        0.002, 0.020, shortFineRange - 1.12 * longFineRange);
+    float broadStructure = smoothstep(0.012, 0.060, shortBroadRange);
+    float broadDominance = smoothstep(
+        0.004, 0.040, shortBroadRange - 1.08 * longBroadRange);
+    float agreement = radiometricAgreementAt(sampleUv);
+    // Effective loss is intentionally stricter than literal clipping. Real SHORT
+    // structure must dominate LONG at both fine and broader scales near a highlight.
+    // This rejects lifted SHORT noise on ordinary smooth LONG walls while retaining
+    // washed foliage/ground/window texture whose average radiometry still agrees.
+    return nearHighlight * fineStructure * fineDominance
+        * broadStructure * broadDominance
+        * smoothstep(0.28, 0.72, agreement)
+        * shortCoherentDetailAt(sampleUv);
+}
+
+float shortRecoveryProofAt(vec2 sampleUv) {
+    float shortValid = shortRecoveryValidityAt(sampleUv);
+    float geometry = smoothstep(
+        0.18, 0.52, registrationNeighborhoodConfidenceAt(sampleUv));
+    float hardLoss = longHardLossBaseAt(sampleUv)
+        * smoothstep(0.06, 0.22, compactHardLossSupportAt(sampleUv))
+        * shortCoherentDetailAt(sampleUv);
+    float effectiveLoss = longEffectiveLossAt(sampleUv);
+    return max(hardLoss, effectiveLoss) * shortValid * geometry;
+}
+
+vec2 broadRecoveryEvidenceAt(vec2 sampleUv) {
+    // Broad evidence cannot carry source RGB/detail. Nine source probes span a
+    // 16-pixel neighborhood; the 1/16 atlas and mode-4 consensus then provide only
+    // a coherent recovery-region prior for the full-resolution binary decision.
+    vec2 sourceTexel = 1.0 / vec2(textureSize(shortTex, 0));
+    vec2 radius = sourceTexel * 8.0;
+    vec2 offsets[9] = vec2[9](
+        vec2(0.0),
+        vec2( radius.x, 0.0), vec2(-radius.x, 0.0),
+        vec2(0.0,  radius.y), vec2(0.0, -radius.y),
+        vec2( radius.x,  radius.y), vec2(-radius.x,  radius.y),
+        vec2( radius.x, -radius.y), vec2(-radius.x, -radius.y));
+    float sumProof = 0.0;
+    float strongVotes = 0.0;
+    for (int i = 0; i < 9; ++i) {
+        float proof = shortRecoveryProofAt(
+            clamp(sampleUv + offsets[i], vec2(0.0), vec2(1.0)));
+        sumProof += proof;
+        strongVotes += step(0.30, proof);
+    }
+    return vec2(sumProof / 9.0, strongVotes / 9.0);
+}
+// IRIS_V216_LONG_BODY_SHORT_RECOVERY_END
 
 // IRIS_V212_ADAPTIVE_CLARITY_BEGIN
 float presentationGuideLumaAt(vec2 sampleUv) {
     // Saved mode 6 guides clarity from the already source-proven FUSED image.
-    // Live mode 2 guides from immutable SHORT as well; LONG topology is never a
-    // spatial presentation guide in V2.15.
+    // Live mode 2 remains the byte-preserved V2.15 SHORT guide; V2.16 changes only
+    // saved-still source ownership after capture.
     vec3 encodedGuide = mode == 6
         ? texture(normalTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb
         : texture(shortTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;
@@ -324,7 +456,7 @@ void main() {
     }
 
     if (mode == 6) {
-        // IRIS_V215_TOPOLOGY_SAFE_PRESENTATION_BEGIN
+        // IRIS_V216_TOPOLOGY_SAFE_PRESENTATION_BEGIN
         // The V2.13 device failure contained disconnected gray/blue contour
         // fragments. Saved presentation is therefore pointwise and monotonic: it
         // cannot sample a neighbor, move an edge, or create a new spatial contour.
@@ -342,24 +474,28 @@ void main() {
         float gamutScale = 1.0 / max(max3(fusedLinear), 0.000001);
         vec3 presented = fusedLinear * min(requestedScale, gamutScale);
         outColor = vec4(clamp(linearToSrgb(presented), 0.0, 1.0), 1.0);
-        // IRIS_V215_TOPOLOGY_SAFE_PRESENTATION_END
+        // IRIS_V216_TOPOLOGY_SAFE_PRESENTATION_END
         return;
     }
 
-    // V2.15 saved fusion remains GPU-only and four-pass. mode==3 derives a broad
-    // LONG/SHORT scalar luminance correction, mode==4 smooths it, mode==5 applies
-    // it achromatically to immutable SHORT RGB, and mode==6 is pointwise display.
+    // V2.16 saved fusion remains GPU-only and four-pass. mode==3 derives only
+    // source-loss evidence, mode==4 enforces broad recovery-region coherence,
+    // mode==5 makes a full-resolution binary LONG-or-SHORT ownership decision,
+    // and mode==6 is pointwise presentation. No pass interpolates source RGB.
     if (mode == 3) {
-        // V2.15: produce only a low-frequency achromatic correction estimate.
-        // R encodes log2 correction in [-0.5,+0.5] as [0,1]; G is confidence.
-        vec2 evidenceValue = lowFrequencyEnvelopeEvidenceAt(uv);
-        outColor = vec4(evidenceValue.x, evidenceValue.y, 0.0, 1.0);
+        vec2 evidence = broadRecoveryEvidenceAt(uv);
+        outColor = vec4(
+            evidence.x,
+            evidence.y,
+            registrationNeighborhoodConfidenceAt(uv),
+            shortRecoveryValidityAt(uv));
         return;
     }
 
     if (mode == 4) {
-        // Smooth the already-low-resolution envelope. No source RGB, edge, hue or
-        // texture is stored in this atlas; only one scalar correction + confidence.
+        // The 1/16 atlas is a region prior only. It cannot carry a source edge,
+        // texture or hue. Requiring several neighboring votes prevents isolated
+        // LONG clip/noise pixels from producing a speckled SHORT ownership mask.
         vec2 atlasTexel = 1.0 / vec2(textureSize(normalTex, 0));
         vec2 offsets[9] = vec2[9](
             vec2(0.0),
@@ -367,54 +503,83 @@ void main() {
             vec2(0.0,  atlasTexel.y), vec2(0.0, -atlasTexel.y),
             vec2( atlasTexel.x,  atlasTexel.y), vec2(-atlasTexel.x,  atlasTexel.y),
             vec2( atlasTexel.x, -atlasTexel.y), vec2(-atlasTexel.x, -atlasTexel.y));
-        float weightedDeviation = 0.0;
-        float confidenceSum = 0.0;
+        float evidenceSum = 0.0;
+        float voteSum = 0.0;
+        float geometrySum = 0.0;
+        float shortValiditySum = 0.0;
+        float strongCells = 0.0;
         for (int i = 0; i < 9; ++i) {
             vec4 e = texture(normalTex, clamp(uv + offsets[i], vec2(0.0), vec2(1.0)));
-            weightedDeviation += (e.r - 0.5) * e.g;
-            confidenceSum += e.g;
+            evidenceSum += e.r;
+            voteSum += e.g;
+            geometrySum += e.b;
+            shortValiditySum += e.a;
+            strongCells += step(0.20, e.r);
         }
-        float meanDeviation = confidenceSum > 0.0001
-            ? weightedDeviation / confidenceSum
-            : 0.0;
-        float meanConfidence = clamp(confidenceSum / 9.0, 0.0, 1.0);
-        outColor = vec4(clamp(0.5 + meanDeviation, 0.0, 1.0), meanConfidence, 0.0, 1.0);
+        float evidenceAverage = evidenceSum / 9.0;
+        float voteAverage = voteSum / 9.0;
+        float geometryAverage = geometrySum / 9.0;
+        float shortValidityAverage = shortValiditySum / 9.0;
+        float coherentRegion = smoothstep(2.0, 5.0, strongCells);
+        float broadRecovery = smoothstep(0.10, 0.38, evidenceAverage)
+            * smoothstep(0.08, 0.34, voteAverage)
+            * coherentRegion;
+        outColor = vec4(
+            broadRecovery,
+            evidenceAverage,
+            geometryAverage,
+            shortValidityAverage);
         return;
     }
 
     if (mode == 5) {
-        // IRIS_V215_SHORT_SPATIAL_TRUTH_BEGIN
-        // There is no SHORT/LONG RGB mix in saved fusion. FUSED begins as exact
-        // full-resolution SHORT RGB in SHORT coordinates. LONG contributes only a
-        // spatially smooth *single scalar* luminance envelope derived by modes 3/4.
-        // Therefore LONG cannot introduce peach/orange chroma, gray edge fragments,
-        // displaced borders, foliage texture, road texture, or any other structure.
+        // IRIS_V216_BINARY_SOURCE_OWNERSHIP_BEGIN
+        // LONG owns the normal photograph and therefore its clean body/SNR/detail.
+        // SHORT owns only proven LONG information-loss regions. Fine RGB structure
+        // is selected from exactly one real source; there is no LONG/SHORT RGB mix.
         float ratio = clamp(exposureRatio, 1.0, 65536.0);
         float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
         vec3 shortRgb = stillShortRgbAt(uv);
+        vec3 longRgb = stillLongRgbAt(uv);
         vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;
-        vec4 envelope = texture(normalTex, uv);
-        float envelopeLog2 = clamp(envelope.r - 0.5, -0.50, 0.50);
-        float envelopeConfidence = smoothstep(0.18, 0.55, envelope.g);
-        float envelopeScale = mix(1.0, exp2(envelopeLog2), envelopeConfidence);
+        vec3 longScene = srgbToLinear(longRgb);
+        vec4 support = texture(normalTex, uv);
 
-        // Achromatic multiplication preserves SHORT RGB ratios and high-frequency
-        // topology. If LONG alignment/radiometry is uncertain, confidence collapses
-        // to zero and the result fails closed to exposure-mapped SHORT.
-        vec3 mergedScene = shortScene * envelopeScale;
+        float shortValid = shortRecoveryValidityAt(uv);
+        float geometry = smoothstep(
+            0.18, 0.52, registrationNeighborhoodConfidenceAt(uv));
+        // Even literal clipping is not enough by itself: the broad mode-3/4
+        // region must prove that SHORT contains coherent detail worth recovering.
+        // Smooth clipped light pools therefore stay LONG-owned instead of turning
+        // into noisy SHORT patches.
+        float hardLoss = longHardLossBaseAt(uv)
+            * smoothstep(0.06, 0.22, compactHardLossSupportAt(uv))
+            * smoothstep(0.18, 0.55, support.r);
+        float effectiveLoss = longEffectiveLossAt(uv)
+            * smoothstep(0.34, 0.70, support.r);
+
+        // Literal/highly compact clipping can recover without waiting for a broad
+        // region mask; effective pre-clip flattening must be region-coherent.
+        float recoveryProof = max(hardLoss, effectiveLoss) * shortValid * geometry;
+        float usableBracket = step(2.0, ratio);
+        float shortOwns = step(0.58, recoveryProof) * usableBracket;
+
+        // Ternary selection is intentional: no fractional source value can create
+        // a third edge, third hue, peach/orange fill or gray displaced contour.
+        vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;
 
         float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
         vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
         vec3 displayLinear = adaptiveHdrToneMap(bodyToned, ratio, bracketStops);
         displayLinear = applyDisplayGamma(displayLinear, displayGamma);
         outColor = vec4(clamp(linearToSrgb(displayLinear), 0.0, 1.0), 1.0);
-        // IRIS_V215_SHORT_SPATIAL_TRUTH_END
+        // IRIS_V216_BINARY_SOURCE_OWNERSHIP_END
         return;
     }
 
-    // V2.15 strict live contract: live HDR also preserves SHORT spatial/chromatic
-    // truth. The saved still has the extra low-frequency LONG luminance-envelope
-    // passes above; live mode fails closed to exposure-normalized SHORT.
+    // V2.16 leaves V2.15 live preview behavior unchanged. The source-ownership
+    // correction above is saved-still-only so the working capture/viewfinder path
+    // is not reopened while still fusion is being corrected.
     float ratio = clamp(exposureRatio, 1.0, 65536.0);
     float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
     vec3 shortRgb = texture(shortTex, uv).rgb;

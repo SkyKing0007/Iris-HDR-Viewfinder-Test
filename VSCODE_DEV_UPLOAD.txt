@@ -1,12 +1,12 @@
-V1.4.11 V2.15 — VSCODE.DEV UPLOAD
+V1.4.11 V2.16 — VSCODE.DEV UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: 9a6b4dfc3885f32d5dffbbee3954392a35a2ab08 (successful V2.14)
+Required direct parent / runtime authority: b8996c649450ae1a19025d856e183aee609f16af (successful V2.15)
 
-1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.14 parent before uploading.
+1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.15 parent before uploading.
 2. Upload/replace ALL files from this ZIP at repository root, preserving paths.
 3. Do not add extra files or folders.
-4. Source Control must show exactly 11 changed tracked files relative to V2.14:
+4. Source Control must show exactly 10 changed tracked files relative to V2.15:
    .github/workflows/build.yml
    BUILD_WORKFLOW_COPY.yml
    PACKAGE_INFO.txt
@@ -16,12 +16,11 @@ Required direct parent / runtime authority: 9a6b4dfc3885f32d5dffbbee3954392a35a2
    app/build.gradle.kts
    app/src/main/assets/shaders/hdr_display.frag
    app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-   app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
    scripts/verify_orientation.py
 5. Commit once and push once.
 
 Suggested commit message:
-V1.4.11 V2.15 immutable SHORT source-truth fusion
+V1.4.11 V2.16 LONG-owned body immutable SHORT recovery
 
 Do not commit the ZIP itself.
 Do not alter dev/main.
