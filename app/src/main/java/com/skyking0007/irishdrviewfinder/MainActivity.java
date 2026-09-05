@@ -386,8 +386,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
             Toast.makeText(
                     this,
                     autoHdrEnabled
-                            ? "AUTO HDR continuously meters the scene; manual sliders are locked"
-                            : "MANUAL SAFE: sliders set the target bracket; flicker-safe timing may use gain separation",
+                            ? "AUTO HDR uses MANUAL-calibrated LONG protection + automatic presentation; manual sliders are locked"
+                            : "MANUAL SAFE: sliders are user controls and snap to the actual flicker-safe values when required",
                     Toast.LENGTH_SHORT).show();
         });
 
@@ -649,8 +649,11 @@ public final class MainActivity extends Activity implements CameraController.Lis
             shortBar.setProgress(shortIndex);
             longBar.setProgress(longIndex);
             isoBar.setProgress(isoIndex);
-            shortLabel.setText("Short " + CameraController.exposureText(shortExposureNs));
-            longLabel.setText("Long " + CameraController.exposureText(longExposureNs));
+            // V2.18 callback values are the actual realizable MANUAL settings after
+            // 50/60-Hz safety. The bars therefore snap to what Camera2 will receive
+            // instead of displaying a faster SHORT request that was silently remapped.
+            shortLabel.setText("Short ACTUAL " + CameraController.exposureText(shortExposureNs));
+            longLabel.setText("Long ACTUAL " + CameraController.exposureText(longExposureNs));
             isoLabel.setText("Long ISO " + iso + "  Short=min  MANUAL");
             updatingControls = false;
             if (!autoHdrEnabled) setManualControlsEnabled(true);

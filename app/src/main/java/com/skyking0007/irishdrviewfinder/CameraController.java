@@ -106,13 +106,20 @@ final class CameraController {
     private static final long AUTO_LIVE_UPDATE_MIN_NS = 80_000_000L;
     private static final double AUTO_BRACKET_MIN_RATIO = 4.0;
     private static final double AUTO_BRACKET_MAX_RATIO = 64.0;
-    private static final double AUTO_SHORT_P50_LONG_TARGET = 0.12;
-    private static final double AUTO_SHORT_P90_LONG_TARGET = 0.42;
-    private static final double AUTO_SHORT_P98_LONG_HEADROOM = 0.85;
-    private static final float AUTO_PRESENT_BRIGHTNESS_MIN_EV = -1.25f;
-    private static final float AUTO_PRESENT_BRIGHTNESS_MAX_EV = 0.75f;
-    private static final float AUTO_PRESENT_GAMMA_MIN = 0.85f;
-    private static final float AUTO_PRESENT_GAMMA_MAX = 1.60f;
+    // V2.18 MANUAL-calibrated AUTO: the clean supplied MANUAL capture converged
+    // at 4x / 2 EV with a deliberately dark, intact LONG body. These targets
+    // preserve that operating point for similar HDR scenes while still allowing
+    // deeper 4x..64x brackets when SHORT body statistics genuinely require them.
+    private static final double AUTO_SHORT_P50_LONG_TARGET = 0.015;
+    private static final double AUTO_SHORT_P90_LONG_TARGET = 0.10;
+    private static final double AUTO_SHORT_P98_LONG_HEADROOM = 0.65;
+    private static final double AUTO_LONG_P95_BODY_TARGET = 0.24;
+    private static final double AUTO_LONG_P98_BODY_TARGET = 0.42;
+    private static final double AUTO_LONG_MAX_NEAR_CLIP_FRACTION = 0.005;
+    private static final float AUTO_PRESENT_BRIGHTNESS_MIN_EV = -4.00f;
+    private static final float AUTO_PRESENT_BRIGHTNESS_MAX_EV = 1.00f;
+    private static final float AUTO_PRESENT_GAMMA_MIN = 0.50f;
+    private static final float AUTO_PRESENT_GAMMA_MAX = 2.00f;
     private static final float AUTO_PRESENT_BRIGHTNESS_STEP_EV = 0.18f;
     private static final float AUTO_PRESENT_GAMMA_STEP = 0.05f;
     private static final float PRESENT_ENHANCEMENT_STEP = 0.06f;
@@ -344,7 +351,9 @@ final class CameraController {
             autoDesiredBracketRatio = HDR_BRACKET_RATIO;
             if (!enabled) {
                 recomputeManualFlickerSafetyLocked();
-                listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
+                listener.onManualSettings(
+                        manualEffectiveShortExposureNs, manualEffectiveLongExposureNs,
+                        manualEffectiveLongIso);
                 updateAdaptivePresentationLocked(latestSceneStats, false, true);
             } else {
                 updateAdaptivePresentationLocked(latestSceneStats, true, true);
@@ -372,7 +381,9 @@ final class CameraController {
                 }
             } else {
                 recomputeManualFlickerSafetyLocked();
-                listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
+                listener.onManualSettings(
+                        manualEffectiveShortExposureNs, manualEffectiveLongExposureNs,
+                        manualEffectiveLongIso);
             }
 
             if (previewMode != PreviewMode.NORMAL) {
@@ -408,7 +419,9 @@ final class CameraController {
             manualIso = clampIso(iso);
             recomputeManualFlickerSafetyLocked();
             if (!autoHdrExposure) {
-                listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
+                listener.onManualSettings(
+                        manualEffectiveShortExposureNs, manualEffectiveLongExposureNs,
+                        manualEffectiveLongIso);
                 RuntimeLogger.event("MANUAL_SETTINGS", manualSafetySummaryLocked());
                 applyPreviewRepeatingLocked();
             }
@@ -604,7 +617,9 @@ final class CameraController {
                                     srgbTonemapSupported);
                             resetCaptureResultFpsLocked();
                             if (!autoHdrExposure) {
-                                listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);
+                                listener.onManualSettings(
+                        manualEffectiveShortExposureNs, manualEffectiveLongExposureNs,
+                        manualEffectiveLongIso);
                             }
                             RuntimeLogger.event(
                                     "SESSION_CONFIGURED",
@@ -1591,20 +1606,34 @@ final class CameraController {
                 Math.max(1.0, stats.shortExposureProduct) / expectedShortProduct) / Math.log(2.0));
         if (staleLongEv > 0.30 || staleShortEv > 0.30 || stats.shortP98Linear <= 0.0005f) return;
 
-        // IRIS_V213_INDEPENDENT_HDR_EXPOSURE_BEGIN
-        // SHORT owns highlight protection; LONG independently owns body/shadow SNR.
-        // Do not let the brightest 1% veto HDR depth: P99 is allowed to trigger a
-        // SHORT reduction, but bracket learning comes from robust body + bright-tail
-        // evidence.  The requested ratio is scene-driven, never less than 4x in HDR,
-        // and can grow to 64x when the captured scene and sensor bounds support it.
+        // IRIS_V218_MANUAL_CALIBRATED_AUTO_BEGIN
+        // V2.18 makes the successful MANUAL behavior the semantic reference for AUTO.
+        // LONG is the V2.17 clean body, so AUTO may deepen the bracket only while the
+        // LONG body itself remains useful. SHORT robust body statistics request SNR;
+        // SHORT P98 protects source headroom; observed LONG P95/P98/clip pressure is
+        // closed-loop evidence that the requested body gain has gone too far.
+        double currentRatio = Math.max(1.0,
+                stats.longExposureProduct / Math.max(1.0, stats.shortExposureProduct));
         double ratioBody = Math.sqrt(
-                (AUTO_SHORT_P50_LONG_TARGET / Math.max(0.002, stats.shortP50Linear))
-                        * (AUTO_SHORT_P90_LONG_TARGET / Math.max(0.002, stats.shortP90Linear)));
+                (AUTO_SHORT_P50_LONG_TARGET / Math.max(0.00025, stats.shortP50Linear))
+                        * (AUTO_SHORT_P90_LONG_TARGET / Math.max(0.00025, stats.shortP90Linear)));
         double ratioHeadroom = AUTO_SHORT_P98_LONG_HEADROOM
                 / Math.max(0.002, stats.shortP98Linear);
+        double ratioLongP95 = currentRatio * AUTO_LONG_P95_BODY_TARGET
+                / Math.max(0.010, stats.longP95Linear);
+        double ratioLongP98 = currentRatio * AUTO_LONG_P98_BODY_TARGET
+                / Math.max(0.010, stats.longP98Linear);
+        double ratioLongBody = Math.min(ratioLongP95, ratioLongP98);
+        if (stats.longNearClipFraction > AUTO_LONG_MAX_NEAR_CLIP_FRACTION) {
+            double clipScale = AUTO_LONG_MAX_NEAR_CLIP_FRACTION
+                    / Math.max(0.000001, stats.longNearClipFraction);
+            ratioLongBody = Math.min(
+                    ratioLongBody,
+                    currentRatio * Math.max(0.25, Math.min(1.0, clipScale)));
+        }
         double desiredRatio = Math.max(AUTO_BRACKET_MIN_RATIO,
                 Math.min(AUTO_BRACKET_MAX_RATIO,
-                        Math.min(ratioBody, 2.0 * ratioHeadroom)));
+                        Math.min(ratioBody, Math.min(ratioHeadroom, ratioLongBody))));
 
         // P99/clip pressure changes SHORT itself, never collapses LONG onto SHORT.
         double shortScale = Math.min(1.0,
@@ -1650,17 +1679,18 @@ final class CameraController {
         RuntimeLogger.event(
                 "AUTO_SCENE_ADAPT",
                 String.format(Locale.US,
-                        "shortP50=%.4f shortP90=%.4f shortP98=%.4f shortP99=%.4f shortClip=%.3f longClip=%.3f targetRatio=%.2fx err=%+.2fEV step=%+.2fEV short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
+                        "shortP50=%.4f shortP90=%.4f shortP98=%.4f shortP99=%.4f shortClip=%.3f longP95=%.4f longP98=%.4f longClip=%.3f bodyRatio=%.2fx longBodyCap=%.2fx targetRatio=%.2fx err=%+.2fEV step=%+.2fEV short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
                         stats.shortP50Linear, stats.shortP90Linear, stats.shortP98Linear,
                         stats.shortP99Linear, stats.shortNearClipFraction,
-                        stats.longNearClipFraction, desiredRatio, errorEv, stepEv,
+                        stats.longP95Linear, stats.longP98Linear, stats.longNearClipFraction,
+                        ratioBody, ratioLongBody, desiredRatio, errorEv, stepEv,
                         exposureText(autoShortExposureNs), autoShortIso,
                         exposureText(autoLongExposureNs), autoLongIso, bracketEv, flickerStatusLocked()));
         listener.onAutoHdrSettings(
                 autoShortExposureNs, autoShortIso, autoLongExposureNs, autoLongIso,
                 flickerStatusLocked(), bracketEv);
         applyPreviewRepeatingLocked();
-        // IRIS_V213_INDEPENDENT_HDR_EXPOSURE_END
+        // IRIS_V218_MANUAL_CALIBRATED_AUTO_END
     }
 
     private void deriveAutoPairFromSceneTargetsLocked() {
@@ -1742,10 +1772,15 @@ final class CameraController {
                 / Math.max(1.0, stats.shortExposureProduct);
         boolean collapsedBracket = physicalRatio < 2.0;
         if (automatic) {
-            float highlightPressure = smoothstepFloat(0.45f, 0.75f, stats.fusedP95Linear);
-            float targetP90 = lerpFloat(0.18f, 0.16f, highlightPressure);
+            // V2.18 presentation is calibrated to the supplied clean MANUAL result:
+            // protect the upper body with negative display EV first, then recover
+            // midtones with gamma instead of physically overexposing LONG. For the
+            // reference shelf scene this converges near -2.4 EV / gamma 1.55, but
+            // both values remain continuously scene-derived rather than hard-coded.
+            float highlightPressure = smoothstepFloat(0.35f, 0.75f, stats.fusedP95Linear);
+            float targetP90 = lerpFloat(0.024f, 0.020f, highlightPressure);
             targetBrightness = clampFloat(
-                    (float) (Math.log(targetP90 / Math.max(0.010f, stats.fusedP90Linear)) / Math.log(2.0)),
+                    (float) (Math.log(targetP90 / Math.max(0.004f, stats.fusedP90Linear)) / Math.log(2.0)),
                     AUTO_PRESENT_BRIGHTNESS_MIN_EV,
                     AUTO_PRESENT_BRIGHTNESS_MAX_EV);
 
@@ -1754,7 +1789,7 @@ final class CameraController {
                     Math.max(0.001f, stats.fusedP90Linear)
                             / Math.max(0.001f, stats.fusedP50Linear)) / Math.log(2.0));
             float targetMedian = lerpFloat(
-                    0.075f, 0.055f, smoothstepFloat(2.0f, 4.0f, contrastStops));
+                    0.029f, 0.023f, smoothstepFloat(2.0f, 4.0f, contrastStops));
             if (brightMedian > 0.0005f && brightMedian < 0.98f && targetMedian < 0.98f) {
                 targetGamma = clampFloat(
                         (float) (Math.log(brightMedian) / Math.log(targetMedian)),

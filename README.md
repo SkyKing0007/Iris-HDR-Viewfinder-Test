@@ -1,40 +1,32 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.17
+# Iris HDR Viewfinder Test V1.4.11 V2.18
 
-V2.17 is the **reversed-V2.15 LONG-truth + aligned-SHORT coherent recovery correction** derived from exact successful V2.16 Actions authority (`ce514f3fd6d1b75092c4e3bb2fa395dadb359950`, run `33939811219`, artifact `9961436910`).
+V2.18 is the **MANUAL-calibrated AUTO HDR normalization correction** derived from exact successful V2.17 Actions authority (`e946baa2b8213d48263cdc0fdc1ed1436b5fdae2`, run `33942346596`, artifact `9962252229`).
 
-## What V2.16 proved
+## Device evidence
 
-The supplied V2.16 SHORT/LONG/FUSED shelf capture and zoom crops prove that the LONG-body direction is correct for overall SNR, but V2.16's full-resolution per-pixel recovery re-proof is not. The FUSED image contains gray/lavender holes, incomplete bright-wall pieces and blotchy missing SHORT structure even though the aligned SHORT source contains continuous valid highlight information.
+The supplied V2.17 shelf comparison isolates the remaining failure to AUTO policy rather than fusion geometry. MANUAL is clean at an actual 60-Hz-safe pair of approximately SHORT 1/120 ISO50 and LONG 1/120 ISO200 (4x / 2 EV), with user presentation near -2.4 EV / gamma 1.55. AUTO on the same scene drives LONG to about ISO1028 at the same shutter (about 20.6x / 4.36 EV), broadly clips the LONG body and forces much larger SHORT-owned regions, producing cyan/warm source-switch artifacts.
 
-V2.15 had the opposite quality tradeoff: its immutable SHORT body gave continuous source topology, but the whole saved image inherited lifted SHORT noise. V2.17 keeps V2.16's clean LONG body while reversing the V2.15 geometry/source-truth principle around LONG.
+## V2.18 AUTO contract
 
-## V2.17 fusion contract
+- Successful V2.17 LONG-truth fusion is byte-protected and unchanged. LONG remains immutable output geometry/body; aligned SHORT still owns only coherent LONG-information-loss regions.
+- AUTO uses the clean MANUAL result as a **behavioral calibration**, not as a fixed preset.
+- SHORT P50/P90 body targets are reduced to a MANUAL-like operating point, while a lower signal floor preserves meaningful 4x..64x / up-to-6-EV capability in genuinely dark scenes.
+- AUTO adds closed-loop LONG-body protection using observed LONG P95, P98 and near-clip fraction. AUTO may deepen the bracket only while LONG remains useful as the clean primary photograph.
+- The supplied clean MANUAL histogram regresses to a 4.0x target; the supplied bad AUTO histogram is driven from ~20.6x back toward 4.0x.
+- AUTO presentation now follows the successful MANUAL strategy: protect the upper body with negative display EV first, then recover midtones with gamma instead of physically overexposing LONG. The reference scene evaluates near -2.35 EV / gamma 1.55, but values remain scene-derived.
+- AUTO brightness range is no longer trapped at -1.25 EV; it can reach -4 EV when required. Gamma may use the same 0.50..2.00 mathematical range available to MANUAL.
 
-- **LONG is immutable output geometry and the default complete clean body.** LONG is never globally or locally moved in saved fusion.
-- **SHORT is the only aligned auxiliary.** SHORT is globally registered to LONG, then receives the same bounded, bidirectional, cycle-consistent local residual field already proven by the V2.15/V2.16 implementation.
-- The 1/16 GPU atlas establishes **coherent LONG-information-loss ownership regions**. It carries evidence/confidence only, never RGB or fine texture.
-- Literal LONG clipping no longer requires every SHORT pixel to contain band-pass texture. Smooth valid SHORT wall/lamp/cloud/skin highlight shading is legitimate recoverable information.
-- Effective pre-clip loss still requires bright-LONG context, aligned SHORT response superiority, radiometric agreement and trustworthy registration.
-- Mode 4 performs seeded 5x5 atlas-region closure so weak smooth pixels cannot punch internal LONG holes through one valid SHORT recovery region.
-- **Mode 5 does not re-prove ownership per pixel.** The V2.16 `step(0.58, recoveryProof)` path and `shortCoherentDetailAt` requirement are removed.
-- Outside a coherent recovery region, exact LONG RGB/detail owns the output. Inside a recovery region, complete **aligned SHORT RGB/detail** owns the output.
-- High-frequency source ownership remains binary. Fractional `mix(longScene, shortScene, ...)`, synthetic radiance fill and third-source RGB are forbidden.
-- LONG texture is nearest-sampled as immutable output detail; aligned SHORT keeps linear sampling for bounded subpixel residual registration.
-- Saved mode 6 remains pointwise and cannot synthesize spatial topology after source selection.
+## MANUAL / flicker control truth
 
-Live preview remains the successful V2.15/V2.16 behavior. V2.17 changes saved-still fusion geometry/ownership only.
-
-## Exposure/capture contract is frozen
-
-Successful V2.16 `CameraController.java` and `CaptureSetSaver.java` are byte-protected. AUTO retains meaningful bracket targeting up to **64× / 6 EV**, MANUAL retains at least **64× / 6 EV** legal control separation, Long ISO/shutter cannot re-solve SHORT, and requested/frozen/actual metadata must preserve **SHORT effective exposure ≤ LONG**.
+The physical 50/60-Hz safety solver is unchanged. When SAFE timing remaps a requested shutter/ISO, the MANUAL callback now reports the **effective realizable values**, and the UI sliders snap to those actual values. For example, a 60-Hz-safe SHORT request faster than one 1/120-s cycle no longer remains displayed as a hidden 1/240 request while Camera2 receives 1/120. MANUAL remains the user adjustment path.
 
 ## Runtime scope
 
-Exactly two runtime files change relative to successful V2.16:
+Exactly two runtime files change relative to successful V2.17:
 
-- `app/src/main/assets/shaders/hdr_display.frag`
-- `app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java`
+- `app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java`
+- `app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java`
 
-The other ten `app/src/**` runtime files are byte-protected, including `CameraController.java`, `CaptureSetSaver.java` and `JpegFusion.java`.
+`hdr_display.frag`, `HdrGlView.java`, `JpegFusion.java`, `CaptureSetSaver.java`, DNG ownership and all other runtime files are byte-protected from successful V2.17.
 
-V2.17 is **PREPARED / UPLOAD-READY only after clean-extract replay**. GitHub Actions remains authoritative for pinned real glslang, real project javac, full `:app:assembleDebug`, exactly-one-APK proof and post-build invariance.
+V2.18 is **PREPARED / UPLOAD-READY only after clean-extract replay**. GitHub Actions remains authoritative for real project javac and full `:app:assembleDebug`; unchanged GLSL inherits the exact successful V2.17 compiled bytes and is rechecked by the unchanged Actions procedure.

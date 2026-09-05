@@ -21,7 +21,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.17 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.18 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -51,7 +51,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.17 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.18 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -602,13 +602,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.17 - Exact successful V2.16 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.16' in workflow
-        and 'run-id: 33939811219' in workflow
-        and "authority='ce514f3fd6d1b75092c4e3bb2fa395dadb359950'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.16 Actions authority")
-require("authority='b8996c649450ae1a19025d856e183aee609f16af'" not in workflow,
-        "V2.17 must not seed runtime from V2.15 after successful V2.16")
+# 038 / 042 / V2.18 - Exact successful V2.17 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.17' in workflow
+        and 'run-id: 33942346596' in workflow
+        and "authority='e946baa2b8213d48263cdc0fdc1ed1436b5fdae2'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.17 Actions authority")
+require("authority='ce514f3fd6d1b75092c4e3bb2fa395dadb359950'" not in workflow,
+        "V2.18 must not seed runtime from V2.16 after successful V2.17")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -645,10 +645,13 @@ require('DISPLAY_GAMMA_MIN = 0.50f' in main
         "Gamma slider must remain 0.50..2.00 in 0.05 increments")
 require('AUTO_BRACKET_MIN_RATIO = 4.0' in camera
         and 'AUTO_BRACKET_MAX_RATIO = 64.0' in camera
-        and 'AUTO_SHORT_P50_LONG_TARGET = 0.12' in camera
-        and 'AUTO_SHORT_P90_LONG_TARGET = 0.42' in camera
-        and 'AUTO_SHORT_P98_LONG_HEADROOM = 0.85' in camera,
-        "V2.13 scene bracket bounds/targets missing")
+        and 'AUTO_SHORT_P50_LONG_TARGET = 0.015' in camera
+        and 'AUTO_SHORT_P90_LONG_TARGET = 0.10' in camera
+        and 'AUTO_SHORT_P98_LONG_HEADROOM = 0.65' in camera
+        and 'AUTO_LONG_P95_BODY_TARGET = 0.24' in camera
+        and 'AUTO_LONG_P98_BODY_TARGET = 0.42' in camera
+        and 'AUTO_LONG_MAX_NEAR_CLIP_FRACTION = 0.005' in camera,
+        "V2.18 MANUAL-calibrated AUTO bracket/body targets missing")
 
 # 092 - Exact javac failure from failed V2.13 run 33900980849: CameraController
 # consumed stats.shortP90Linear while SceneStats did not publish that field. Preserve
@@ -668,9 +671,12 @@ require(not missing_scene_stats,
         f"CameraController SceneStats consumer fields missing from producer: {missing_scene_stats}")
 require('autoLiveTargetMedianLinear' not in camera,
         "AUTO must not restore HAL-median brightness ownership")
-require('Math.min(ratioBody, 2.0 * ratioHeadroom)' in camera
+require('Math.min(ratioBody, Math.min(ratioHeadroom, ratioLongBody))' in camera
+        and 'stats.longP95Linear' in camera
+        and 'stats.longP98Linear' in camera
+        and 'stats.longNearClipFraction' in camera
         and 'targetShortProduct * AUTO_BRACKET_MIN_RATIO' in camera,
-        "AUTO must learn robust body/headroom bracket and enforce real HDR separation")
+        "AUTO must use MANUAL-calibrated body/headroom plus closed-loop LONG-body protection")
 require('autoShortExposureNs = autoLongExposureNs;' not in camera[camera.index('private void deriveAutoPairFromAnchorLocked()'):camera.index('private void processHdrSceneStatsLocked')],
         "AUTO unknown/PWM flicker must never collapse SHORT exposure onto LONG")
 require('FLICKER UNSAFE' in camera and 'autoFlickerSafetySatisfied = false;' in camera,
@@ -687,24 +693,69 @@ require('safeLong' not in short_call and 'manualIso' not in short_call
         and 'shortExposureNs' in short_call and 'minIso' in short_call,
         "Long ISO/LONG solution must have no path into MANUAL SHORT")
 
-# Source-domain exact office regression from V2.12: SHORT/LONG were effectively
-# identical (~1/156 ISO50), while FUSED produced peach/orange pastel fill.  The
-# corrected scene rule must learn a real bracket from robust 32x24 SHORT statistics.
-def desired_ratio_v213(p50, p90, p98):
-    ratio_body = math.sqrt((0.12 / max(0.002, p50)) * (0.42 / max(0.002, p90)))
-    ratio_headroom = 0.85 / max(0.002, p98)
-    return max(4.0, min(64.0, min(ratio_body, 2.0 * ratio_headroom)))
+# V2.18 changes only what MANUAL reports to UI; physical 50/60-Hz safety math is
+# byte-equivalent to successful V2.17. This prevents a cosmetic slider fix from
+# weakening SAFE timing.
+flicker_solver_slice = camera[camera.index('    private ExposureSetting solveMinimumIsoFlickerSettingLocked('):
+                              camera.index('    private static final class ExposureSetting')]
+manual_flicker_slice = camera[camera.index('    private boolean recomputeManualFlickerSafetyLocked()'):
+                              camera.index('    private int effectiveFlickerLocked()')]
+require(hashlib.sha256(flicker_solver_slice.encode()).hexdigest() ==
+        '70338617bf724bf03f96f2ab25c50e2b21bc06c920329df9561ac297dbc1c29f',
+        "V2.17 physical minimum-ISO flicker solver changed")
+require(hashlib.sha256(manual_flicker_slice.encode()).hexdigest() ==
+        '735edbb4317c0cbf6b003b46e45247bd8d37a1b780c510eed6877e142c009214',
+        "V2.17 MANUAL flicker safety/order math changed")
+require(camera.count('manualEffectiveShortExposureNs, manualEffectiveLongExposureNs') == 4
+        and camera.count('manualEffectiveLongIso);') >= 4
+        and 'listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);' not in camera,
+        "MANUAL callbacks must expose effective realizable SAFE values")
+require('Short ACTUAL ' in main and 'Long ACTUAL ' in main,
+        "MANUAL UI must label effective shutter values as actual")
 
-office_ratio = desired_ratio_v213(0.0146, 0.0458, 0.1804)
-desk_ratio = desired_ratio_v213(0.0095, 0.1133, 0.1732)
-require(8.0 <= office_ratio <= 9.5,
-        "exact V2.12 office SHORT must learn a meaningful ~3EV bracket, not 1x")
-require(6.0 <= desk_ratio <= 8.0,
-        "desk scene must retain a meaningful adaptive bracket")
-require(desired_ratio_v213(0.001, 0.003, 0.010) >= 32.0,
-        "very dark scenes must be allowed to approach the 64x HDR ceiling")
-require(desired_ratio_v213(0.20, 0.70, 0.85) >= 4.0,
-        "HDR mode must never silently collapse below the 4x minimum target")
+# V2.18 exact MANUAL/AUTO device regression from the supplied shelf scene.
+# Saved-JPEG linear statistics are used only as a deterministic behavioral calibration:
+# AUTO remains scene-derived and is not a fixed 4x/-2.4/1.55 preset.
+def desired_ratio_v218(p50, p90, p98, long_p95, long_p98, long_clip, current_ratio):
+    ratio_body = math.sqrt((0.015 / max(0.00025, p50)) * (0.10 / max(0.00025, p90)))
+    ratio_headroom = 0.65 / max(0.002, p98)
+    ratio_long_p95 = current_ratio * 0.24 / max(0.010, long_p95)
+    ratio_long_p98 = current_ratio * 0.42 / max(0.010, long_p98)
+    ratio_long_body = min(ratio_long_p95, ratio_long_p98)
+    if long_clip > 0.005:
+        clip_scale = 0.005 / max(0.000001, long_clip)
+        ratio_long_body = min(ratio_long_body, current_ratio * max(0.25, min(1.0, clip_scale)))
+    return max(4.0, min(64.0, ratio_body, ratio_headroom, ratio_long_body))
+
+def presentation_v218(fused_p50, fused_p90, fused_p95):
+    pressure = smoothstep_math(0.35, 0.75, fused_p95)
+    target_p90 = 0.024 + (0.020 - 0.024) * pressure
+    brightness = max(-4.0, min(1.0, math.log(target_p90 / max(0.004, fused_p90), 2.0)))
+    bright_median = fused_p50 * (2.0 ** brightness)
+    contrast_stops = math.log(max(0.001, fused_p90) / max(0.001, fused_p50), 2.0)
+    t = smoothstep_math(2.0, 4.0, contrast_stops)
+    target_median = 0.029 + (0.023 - 0.029) * t
+    if 0.0005 < bright_median < 0.98 and target_median < 0.98:
+        gamma = max(0.50, min(2.00, math.log(bright_median) / math.log(target_median)))
+    else:
+        gamma = 1.0
+    return brightness, gamma
+
+manual_ratio = desired_ratio_v218(0.0030643, 0.0306402, 0.0822136,
+                                  0.2051309, 0.3373257, 0.0007289, 4.0)
+bad_auto_ratio = desired_ratio_v218(0.0031255, 0.0306025, 0.0828143,
+                                    0.9559018, 1.0, 0.0705973, 20.56)
+manual_brightness, manual_gamma = presentation_v218(0.0193274, 0.1224013, 0.2051309)
+require(math.isclose(manual_ratio, 4.0, abs_tol=0.01),
+        "clean supplied MANUAL scene must remain a 4x / 2EV AUTO operating point")
+require(math.isclose(bad_auto_ratio, 4.0, abs_tol=0.01),
+        "bad supplied V2.17 AUTO scene must be driven back from ~20.6x toward 4x")
+require(-2.45 <= manual_brightness <= -2.25 and 1.50 <= manual_gamma <= 1.60,
+        "AUTO presentation must reproduce the clean MANUAL strategy near -2.4EV / gamma1.55")
+require(desired_ratio_v218(0.00025, 0.00025, 0.003, 0.010, 0.010, 0.0, 4.0) >= 64.0,
+        "genuinely dark feasible scenes must retain the 64x / 6EV AUTO ceiling")
+require(desired_ratio_v218(0.20, 0.70, 0.85, 0.90, 0.95, 0.10, 4.0) >= 4.0,
+        "HDR AUTO must never collapse below the 4x minimum")
 
 # Presentation remains adaptive, but a failed physical bracket is restrained rather
 # than disguised with strong brightness/gamma/dehaze/microcontrast.
@@ -728,11 +779,16 @@ require(math.isclose(live_step(+0.50), +0.30) and math.isclose(live_step(-0.50),
 require(math.isclose(live_step(+0.05), 0.0) and math.isclose(live_step(-0.05), 0.0),
         "small scene-stat jitter must remain inside exposure hysteresis")
 
-# Presentation controller ownership and capture freeze.
+# Presentation controller ownership and capture freeze. V2.18 uses the same
+# Brightness/Gamma mathematical domain as MANUAL and the supplied MANUAL strategy.
 require('private void updateAdaptivePresentationLocked(' in camera
-        and 'float targetP90 = lerpFloat(0.18f, 0.16f, highlightPressure);' in camera
-        and 'float targetMedian = lerpFloat(' in camera,
-        "AUTO adaptive Brightness/Gamma solver missing")
+        and 'AUTO_PRESENT_BRIGHTNESS_MIN_EV = -4.00f' in camera
+        and 'AUTO_PRESENT_BRIGHTNESS_MAX_EV = 1.00f' in camera
+        and 'AUTO_PRESENT_GAMMA_MIN = 0.50f' in camera
+        and 'AUTO_PRESENT_GAMMA_MAX = 2.00f' in camera
+        and 'float targetP90 = lerpFloat(0.024f, 0.020f, highlightPressure);' in camera
+        and '0.029f, 0.023f' in camera,
+        "V2.18 MANUAL-calibrated AUTO Brightness/Gamma solver missing")
 require('if (automatic) {' in camera[camera.index('private void updateAdaptivePresentationLocked'):camera.index('private void publishPresentationLocked')],
         "AUTO-only Brightness/Gamma authority boundary missing")
 manual_pres = camera[camera.index('private void updateAdaptivePresentationLocked'):camera.index('private void publishPresentationLocked')]
@@ -975,6 +1031,21 @@ require('return Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));' 
 require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kts').read_text().lower(),
         "OpenCV must remain simulation-only and absent from runtime")
 
+# V2.18 does not reopen fusion. Successful V2.17 source-selection/fusion bytes are
+# verification authority and must remain exact while AUTO/control policy changes.
+require(hashlib.sha256(hdr_shader.encode()).hexdigest() ==
+        '79c4064390a78ef55103d2603f2f5a63ea35c44c31e8f64998bb36d91120c88a',
+        "successful V2.17 hdr_display.frag bytes changed")
+require(hashlib.sha256(gl.encode()).hexdigest() ==
+        '2ede490800aa9743cbe8e8428646ce94d5a52c7c55f4de7beb2cbf8778d6e826',
+        "successful V2.17 HdrGlView bytes changed")
+require(hashlib.sha256(fusion.encode()).hexdigest() ==
+        '7aa3f4956f28a48b204375c0123195c020d57c8d8edd774946dccb39d42f7434',
+        "successful V2.17 JpegFusion bytes changed")
+require(hashlib.sha256(saver.encode()).hexdigest() ==
+        '60cfa6d09db46d2af8fc1917e5ebf1e3c580102e1b07fe6bfea8e683c8372248',
+        "successful V2.17 CaptureSetSaver bytes changed")
+
 # V2.17 permanent visual/source regressions include the exact V2.16 device failure:
 # valid SHORT highlight pieces may not be dropped by a per-pixel re-proof inside one
 # coherent LONG-loss region. LONG remains global/default body; SHORT is aligned to it.
@@ -1059,9 +1130,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 34' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.17"' in Path('app/build.gradle.kts').read_text(),
-        "V2.17 version/build marker must be exact")
+require('versionCode = 35' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.18"' in Path('app/build.gradle.kts').read_text(),
+        "V2.18 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1169,4 +1240,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.17 REGRESSION PASS: exact successful V2.16 authority, AUTO/MANUAL 64x capability and SHORT<=LONG ordering protected, LONG immutable output geometry, SHORT-only global/local alignment, coherent region-owned SHORT recovery, no V2.16 per-pixel holes, no RGB interpolation or synthetic fill")
+print("V1.4.11 V2.18 REGRESSION PASS: exact successful V2.17 authority, MANUAL-calibrated AUTO converges clean shelf toward 4x/-2.35EV/gamma1.55, 64x dark capability preserved, MANUAL exposes actual flicker-safe values, successful V2.17 LONG-truth fusion bytes protected")
