@@ -21,7 +21,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.19 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.20 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -51,7 +51,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.19 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.20 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -602,13 +602,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.19 - Exact successful V2.18 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.18' in workflow
-        and 'run-id: 33945509036' in workflow
-        and "authority='f70e85bc3ca8a5ce0fcf0e0c4634ec786e141d73'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.18 Actions authority")
-require("authority='e946baa2b8213d48263cdc0fdc1ed1436b5fdae2'" not in workflow,
-        "V2.19 must not seed runtime from V2.17 after successful V2.18")
+# 038 / 042 / V2.20 - Exact successful V2.19 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.19' in workflow
+        and 'run-id: 33947113826' in workflow
+        and "authority='13393e945e7313d981b38ce5a44e31eceff7dc79'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.19 Actions authority")
+require("authority='f70e85bc3ca8a5ce0fcf0e0c4634ec786e141d73'" not in workflow,
+        "V2.20 must not seed runtime from V2.18 after successful V2.19")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -931,18 +931,20 @@ require('unsharp' not in v217_mode6.lower() and 'clahe' not in v217_mode6.lower(
 require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
         "V2.17 must reuse the successful shader-file universe")
 
-# Production still fusion remains the exact four-pass GPU topology inherited from
-# successful V2.13 V1.2. Only the payload/ownership math changes.
+# Production still fusion remains GPU-only and preserves the successful mode
+# ordering. V2.20 intentionally repeats only mode 4 on the small topology atlas
+# until connected-region reconstruction converges; modes 3/5/6 remain one-shot.
 require('controller.setStillFusionView(glView);' in main
         and 'renderStillPass(' in gl
         and '3, longTexture, shortTexture, longTexture' in gl
-        and '4, evidenceTexture, shortTexture, longTexture' in gl
-        and '5, supportTexture, shortTexture, longTexture' in gl
+        and '4, readTopologyTexture, shortTexture, longTexture' in gl
+        and '5, readTopologyTexture, shortTexture, longTexture' in gl
         and '6, presentationTexture, shortTexture, longTexture' in gl
+        and 'while (propagationPasses < maxPropagationPasses)' in gl
         and 'stillFusionProgram' not in gl
         and 'still_fusion.frag' not in gl
         and 'GPU_STILL_FUSION' in gl,
-        "saved HDR must remain GPU-only with the proven four-pass topology")
+        "saved HDR must remain GPU-only with mode-4-only convergent topology reconstruction")
 require('submitCpuFusionFallback' not in saver
         and 'JpegFusion.fuse(' not in saver
         and 'GPU_STILL_FUSION_REQUIRED' in saver
@@ -1001,16 +1003,20 @@ require(gl.count('GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST') >= 2
 require('presentationTexture);\n                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);' in gl,
         "mode-6 must not bilinear-resample the selected-source fused raster")
 
-# V2.17 source-loss atlas authorizes coherent SHORT ownership but never carries RGB.
+# V2.20 source-loss atlas separates strict seeds from the physically allowed
+# propagation domain. The atlas still never carries source RGB.
 require('IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN' in hdr_shader
         and 'float shortRecoveryValidityAt(vec2 sampleUv)' in hdr_shader
         and 'float registrationNeighborhoodConfidenceAt(vec2 sampleUv)' in hdr_shader
+        and 'vec2 registrationNeighborhoodFlowAt(vec2 sampleUv)' in hdr_shader
         and 'float longHardLossBaseAt(vec2 sampleUv)' in hdr_shader
         and 'float compactHardLossSupportAt(vec2 sampleUv)' in hdr_shader
         and 'float longEffectiveLossAt(vec2 sampleUv)' in hdr_shader
         and 'float shortRecoveryEvidenceAt(vec2 sampleUv)' in hdr_shader
-        and 'vec2 broadRecoveryEvidenceAt(vec2 sampleUv)' in hdr_shader,
-        "V2.17 coherent source-loss evidence chain is incomplete")
+        and 'float longLossRecoveryDomainAt(vec2 sampleUv)' in hdr_shader
+        and 'vec3 broadRecoverySeedStatsAt(vec2 sampleUv)' in hdr_shader
+        and 'float broadRecoveryDomainAt(vec2 sampleUv)' in hdr_shader,
+        "V2.20 seed/domain source-loss evidence chain is incomplete")
 require('localLinearRangeAtRadius(sampleUv, 4.0)' in hdr_shader
         and 'localLinearRangeAtRadius(sampleUv, 12.0)' in hdr_shader
         and 'smoothstep(0.68, 0.90, max3(longRgb))' in hdr_shader
@@ -1026,23 +1032,38 @@ require('int analysisWidth = Math.max(1, (width + 15) / 16);' in gl
         "V2.17 ownership atlas must preserve the proven 1/16 allocation")
 require(math.ceil(4096 / 16) == 256 and math.ceil(3072 / 16) == 192,
         "3072x4096 device captures must map to a 192x256 ownership atlas")
-require('for (int oy = -2; oy <= 2; ++oy)' in hdr_shader
-        and 'for (int ox = -2; ox <= 2; ++ox)' in hdr_shader
-        and 'float seededRegion = max(' in hdr_shader
-        and 'float coherentSupport = seededRegion' in hdr_shader,
-        "mode 4 must perform broad seeded region closure rather than per-pixel ownership")
+v220_recon = hdr_shader[hdr_shader.index('// IRIS_V220_RATIO_INVARIANT_REGION_RECONSTRUCTION_BEGIN'):
+                         hdr_shader.index('// IRIS_V220_RATIO_INVARIANT_REGION_RECONSTRUCTION_END')]
+require('float seed = step(0.30, seedStrength);' in v220_recon
+        and 'float recoveryDomain = step(0.30, broadRecoveryDomainAt(uv));' in v220_recon
+        and 'float currentOwned = step(0.5, centerState.r);' in v220_recon
+        and 'if (currentOwned > 0.5 || recoveryDomain < 0.5)' in v220_recon
+        and 'float propagate = step(0.35, coherentFlow) * recoveryDomain;' in v220_recon,
+        "V2.20 mode 3/4 must implement strict-seed, mask-constrained monotonic reconstruction")
+require('for (int oy = -2; oy <= 2; ++oy)' not in v220_recon
+        and 'float coherentSupport = seededRegion' not in v220_recon,
+        "retired finite-radius one-pass V2.19 closure returned")
+require('exposureRatio' not in v220_recon,
+        "ownership reconstruction topology must be exposure-ratio invariant")
+require('meanFlowPixels' in v220_recon
+        and 'flowRms' in v220_recon
+        and 'smoothstep(0.85, 1.25, flowRms)' in v220_recon
+        and 'registrationNeighborhoodFlowAt(uv)' in v220_recon,
+        "wide clipped regions must inherit coherent residual geometry from proven seeds")
 
 # Saved mode 5 is reversed-V2.15 source truth: LONG by default, aligned SHORT as a
 # complete source only when the already-established ownership atlas selects it.
 require('IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN' in hdr_shader
-        and 'vec3 shortRgb = stillShortRgbAt(uv);' in hdr_shader
+        and 'vec2 propagatedResidualPixels = (support.ba * 2.0 - vec2(1.0))' in hdr_shader
+        and 'vec2 shortOwnedUv = clamp(' in hdr_shader
+        and 'vec3 shortRgb = texture(shortTex, shortOwnedUv).rgb;' in hdr_shader
         and 'vec3 longRgb = stillLongRgbAt(uv);' in hdr_shader
         and 'vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;' in hdr_shader
         and 'vec3 longScene = srgbToLinear(longRgb);' in hdr_shader,
-        "V2.17 mode 5 must expose aligned SHORT and immutable LONG source candidates")
+        "V2.20 mode 5 must use propagated SHORT residual geometry and immutable LONG candidates")
 v217_mode5 = hdr_shader[hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN'):
                          hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_END')]
-require('float shortOwns = step(0.30, support.r) * usableBracket;' in v217_mode5
+require('float shortOwns = step(0.50, support.r) * usableBracket;' in v217_mode5
         and 'vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;' in v217_mode5,
         "V2.17 must default to LONG and switch discretely by coherent atlas ownership")
 require('shortRecoveryValidityAt(uv)' not in v217_mode5
@@ -1130,23 +1151,20 @@ require('return Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));' 
 require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kts').read_text().lower(),
         "OpenCV must remain simulation-only and absent from runtime")
 
-# V2.18 does not reopen fusion. Successful V2.17 source-selection/fusion bytes are
-# verification authority and must remain exact while AUTO/control policy changes.
-require(hashlib.sha256(hdr_shader.encode()).hexdigest() ==
-        '79c4064390a78ef55103d2603f2f5a63ea35c44c31e8f64998bb36d91120c88a',
-        "successful V2.17 hdr_display.frag bytes changed")
-require(hashlib.sha256(gl.encode()).hexdigest() ==
-        '2ede490800aa9743cbe8e8428646ce94d5a52c7c55f4de7beb2cbf8778d6e826',
-        "successful V2.17 HdrGlView bytes changed")
+# V2.20 changes topology only. Successful V2.19 exposure/tone/capture owners and
+# JpegFusion registration/calibration utility remain exact.
+require(hashlib.sha256(camera.encode()).hexdigest() ==
+        '032b90942199b400d2ea8ac91de27e49af6d3e0eaa92560865ae0edc2803673c',
+        "successful V2.19 CameraController bytes changed")
 require(hashlib.sha256(fusion.encode()).hexdigest() ==
         '7aa3f4956f28a48b204375c0123195c020d57c8d8edd774946dccb39d42f7434',
-        "successful V2.17 JpegFusion bytes changed")
+        "successful V2.19 JpegFusion bytes changed")
 require(hashlib.sha256(saver.encode()).hexdigest() ==
         '60cfa6d09db46d2af8fc1917e5ebf1e3c580102e1b07fe6bfea8e683c8372248',
-        "successful V2.17 CaptureSetSaver bytes changed")
+        "successful V2.19 CaptureSetSaver bytes changed")
 require(hashlib.sha256(main.encode()).hexdigest() ==
         'b142084c33bb2482ad60113bb66653b9c3efeff55c9bdcdd84082d3345a4be3b',
-        "successful V2.18 MainActivity bytes changed")
+        "successful V2.19 MainActivity bytes changed")
 
 # V2.17 permanent visual/source regressions include the exact V2.16 device failure:
 # valid SHORT highlight pieces may not be dropped by a per-pixel re-proof inside one
@@ -1164,8 +1182,10 @@ require('step(0.58, recoveryProof)' not in hdr_shader
         and 'shortCoherentDetailAt' not in hdr_shader,
         "exact V2.16 fragmented pixel-gate regression returned")
 require('(width + 15) / 16' in gl
-        and 'float coherentSupport = seededRegion' in hdr_shader,
-        "broad ownership topology regressed to a fine/detail mask")
+        and 'while (propagationPasses < maxPropagationPasses)' in gl
+        and 'counts[0] == previousOwned' in gl
+        and 'readTopologyTexture = writeTopologyTexture;' in gl,
+        "V2.20 connected ownership topology/convergence loop disappeared")
 require('aligned auxiliary' in hdr_shader and 'immutable LONG body' in hdr_shader,
         "LONG-body / aligned-SHORT source contract markers disappeared")
 require('radianceFloorWeight' not in hdr_shader and 'radianceRaised' not in hdr_shader,
@@ -1232,9 +1252,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 36' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.19"' in Path('app/build.gradle.kts').read_text(),
-        "V2.19 version/build marker must be exact")
+require('versionCode = 37' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.20"' in Path('app/build.gradle.kts').read_text(),
+        "V2.20 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1281,6 +1301,92 @@ require('int[] shortPixels = new int[width * rowsPerStrip];' in fusion
         and 'int[] outPixels = new int[width * rowsPerStrip];' in fusion
         and 'supportEvidence' not in fusion,
         "byte-preserved CPU utility must use bounded strip buffers and no LONG support mask")
+
+# V2.20 exact wide-bracket topology regression. The supplied MANUAL failure used
+# SHORT 1/1000 ISO50 and LONG 1/100 ISO100 = 20x / 4.32 EV. At the production
+# 1/16 atlas, its large hard-loss components contain interior cells roughly 14 cells
+# from a valid boundary, far beyond the retired radius-2 one-pass closure.
+require('int maxPropagationPasses = Math.min(1024, Math.max(64, analysisWidth * analysisHeight));' in gl
+        and 'final int convergenceBatch = 8;' in gl
+        and 'int[] counts = countAtlasMasks(' in gl
+        and 'if (counts[0] == previousOwned)' in gl,
+        "GPU topology must iterate in bounded batches until monotonic occupancy converges")
+require('setTextureFilter(evidenceTexture, GLES30.GL_NEAREST);' in gl
+        and 'setTextureFilter(supportTexture, GLES30.GL_NEAREST);' in gl
+        and 'setTextureFilter(readTopologyTexture, GLES30.GL_LINEAR);' in gl,
+        "topology propagation must be nearest/discrete; only final binary boundary lookup may be linear")
+count_masks = gl[gl.index('        private int[] countAtlasMasks('):
+                 gl.index('        private static void setTextureFilter(')]
+require('shortTexture' not in count_masks and 'longTexture' not in count_masks
+        and 'glReadPixels' in count_masks,
+        "convergence readback may inspect only the small ownership atlas, never CPU-fuse source RGB")
+
+# Mathematical replay of the shader's monotonic geodesic reconstruction. Ratio is
+# deliberately not an argument: 4x/20x/64x affect the physical domain size only.
+def reconstruct_mask(seed, domain, max_passes=1024):
+    h = len(domain)
+    w = len(domain[0])
+    owned = [row[:] for row in seed]
+    previous_count = sum(sum(1 for value in row if value) for row in owned)
+    for pass_index in range(max_passes):
+        nxt = [row[:] for row in owned]
+        for y in range(h):
+            for x in range(w):
+                if owned[y][x] or not domain[y][x]:
+                    continue
+                found = False
+                for oy in (-1, 0, 1):
+                    for ox in (-1, 0, 1):
+                        if ox == 0 and oy == 0:
+                            continue
+                        ny, nx = y + oy, x + ox
+                        if 0 <= ny < h and 0 <= nx < w and owned[ny][nx]:
+                            found = True
+                            break
+                    if found:
+                        break
+                if found:
+                    nxt[y][x] = True
+        owned = nxt
+        current_count = sum(sum(1 for value in row if value) for row in owned)
+        if current_count == previous_count:
+            return owned, pass_index + 1
+        previous_count = current_count
+    return owned, max_passes
+
+def enclosed_component(radius):
+    side = 2 * radius + 5
+    domain = [[False] * side for _ in range(side)]
+    seed = [[False] * side for _ in range(side)]
+    lo, hi = 2, side - 3
+    for y in range(lo, hi + 1):
+        for x in range(lo, hi + 1):
+            domain[y][x] = True
+            if y in (lo, hi) or x in (lo, hi):
+                seed[y][x] = True
+    return seed, domain
+
+for ratio, radius in ((4.0, 2), (20.0, 14), (64.0, 64)):
+    seed, domain = enclosed_component(radius)
+    owned, passes = reconstruct_mask(seed, domain)
+    require(all((not domain[y][x]) or owned[y][x]
+                for y in range(len(domain)) for x in range(len(domain[0]))),
+            f"{ratio:g}x connected LONG-loss component retained an internal LONG hole")
+    require(passes <= radius + 2,
+            f"{ratio:g}x reconstruction did not converge with one-cell geodesic growth")
+
+# The exact 20x failure must be impossible under the new topology: a radius-14
+# component cannot be completed by the retired radius-2 closure, but reconstruction
+# reaches its center without changing any exposure/ratio-specific threshold.
+seed20, domain20 = enclosed_component(14)
+center = len(domain20) // 2
+require(not any(seed20[y][x]
+                for y in range(center - 2, center + 3)
+                for x in range(center - 2, center + 3)),
+        "20x regression fixture must exceed the retired finite closure radius")
+owned20, _ = reconstruct_mask(seed20, domain20)
+require(owned20[center][center],
+        "exact 20x wide-plateau center must inherit SHORT ownership after convergence")
 
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
@@ -1342,4 +1448,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.19 REGRESSION PASS: exact successful V2.18 authority, physical 4x-64x AUTO/flicker/fusion preserved, Photon-normalized final P50/P90 scene key fixes V2.18 ~2.3-2.8EV underexposure, AUTO second-pass darkening neutralized")
+print("V1.4.11 V2.20 REGRESSION PASS: exact successful V2.19 authority, V2.18/V2.19 capture+tone preserved, finite-radius closure replaced by convergent LONG-loss-constrained GPU reconstruction with coherent residual-flow inheritance and 4x/20x/64x topology invariance")

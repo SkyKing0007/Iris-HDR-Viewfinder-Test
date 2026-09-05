@@ -202,6 +202,30 @@ float registrationNeighborhoodConfidenceAt(vec2 sampleUv) {
         * smoothstep(0.16, 0.40, maximumConfidence);
 }
 
+vec2 registrationNeighborhoodFlowAt(vec2 sampleUv) {
+    if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) return vec2(0.5);
+    float centerConfidence = stillLocalRegistrationConfidenceAt(sampleUv);
+    if (centerConfidence >= 0.16) return stillLocalFlowAt(sampleUv).rg;
+
+    vec2 flowTexel = 1.0 / vec2(textureSize(localFlowTex, 0));
+    vec2 offsets[9] = vec2[9](
+        vec2(0.0),
+        vec2( flowTexel.x, 0.0), vec2(-flowTexel.x, 0.0),
+        vec2(0.0,  flowTexel.y), vec2(0.0, -flowTexel.y),
+        vec2( flowTexel.x,  flowTexel.y), vec2(-flowTexel.x,  flowTexel.y),
+        vec2( flowTexel.x, -flowTexel.y), vec2(-flowTexel.x, -flowTexel.y));
+    vec2 flowSum = vec2(0.0);
+    float weightSum = 0.0;
+    for (int i = 0; i < 9; ++i) {
+        vec2 q = clamp(sampleUv + offsets[i], vec2(0.0), vec2(1.0));
+        float confidenceValue = stillLocalRegistrationConfidenceAt(q);
+        if (confidenceValue <= 0.0) continue;
+        flowSum += stillLocalFlowAt(q).rg * confidenceValue;
+        weightSum += confidenceValue;
+    }
+    return weightSum > 0.0001 ? flowSum / weightSum : vec2(0.5);
+}
+
 vec2 localLinearRangeAtRadius(vec2 sampleUv, float radiusPixels) {
     vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
     vec2 radius = sourceTexel * radiusPixels;
@@ -291,10 +315,33 @@ float shortRecoveryEvidenceAt(vec2 sampleUv) {
     return max(hardLoss, effectiveLoss) * shortValid * geometry;
 }
 
-vec2 broadRecoveryEvidenceAt(vec2 sampleUv) {
-    // This broad atlas controls ownership topology only; it never carries RGB/detail.
-    // Evidence spans a 16px source neighborhood before the 1/16 atlas and mode-4
-    // closure, so one weak smooth pixel cannot punch a LONG hole into a SHORT region.
+float longLossRecoveryDomainAt(vec2 sampleUv) {
+    // V2.20 separates strict seed proof from the domain through which an already
+    // proven SHORT-owned component may propagate. Literal LONG clipping is allowed
+    // to inherit geometry from its trustworthy boundary because a clipped plateau
+    // cannot provide a local gradient in its interior by definition.
+    vec3 longRgb = stillLongRgbAt(sampleUv);
+    float shortValid = shortRecoveryValidityAt(sampleUv);
+    float hardLoss = longHardLossBaseAt(sampleUv);
+    float hardSupport = compactHardLossSupportAt(sampleUv);
+    float nearHardBoundary = smoothstep(0.90, 0.975, max3(longRgb))
+        * smoothstep(0.08, 0.30, hardSupport);
+    float effectiveLoss = longEffectiveLossAt(sampleUv);
+    float globalGeometry = smoothstep(0.08, 0.32, stillRegistrationConfidence);
+    float localGeometry = smoothstep(
+        0.08, 0.32, registrationNeighborhoodConfidenceAt(sampleUv));
+
+    float hardDomain = max(hardLoss, nearHardBoundary) * globalGeometry;
+    float effectiveDomain = effectiveLoss
+        * max(localGeometry,
+              0.65 * globalGeometry * smoothstep(0.30, 0.70, hardSupport));
+    return shortValid * max(hardDomain, effectiveDomain);
+}
+
+vec3 broadRecoverySeedStatsAt(vec2 sampleUv) {
+    // A seed remains deliberately strict: real LONG loss, valid SHORT and locally
+    // trustworthy registration. The broader propagation domain is computed
+    // separately and never turns an unsupported cell into a seed by itself.
     vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
     vec2 radius = sourceTexel * 8.0;
     vec2 offsets[9] = vec2[9](
@@ -305,13 +352,40 @@ vec2 broadRecoveryEvidenceAt(vec2 sampleUv) {
         vec2( radius.x, -radius.y), vec2(-radius.x, -radius.y));
     float evidenceSum = 0.0;
     float strongVotes = 0.0;
+    float maximumEvidence = 0.0;
     for (int i = 0; i < 9; ++i) {
         float evidenceValue = shortRecoveryEvidenceAt(
             clamp(sampleUv + offsets[i], vec2(0.0), vec2(1.0)));
         evidenceSum += evidenceValue;
         strongVotes += step(0.22, evidenceValue);
+        maximumEvidence = max(maximumEvidence, evidenceValue);
     }
-    return vec2(evidenceSum / 9.0, strongVotes / 9.0);
+    return vec3(evidenceSum / 9.0, strongVotes, maximumEvidence);
+}
+
+float broadRecoveryDomainAt(vec2 sampleUv) {
+    vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
+    vec2 radius = sourceTexel * 8.0;
+    vec2 offsets[9] = vec2[9](
+        vec2(0.0),
+        vec2( radius.x, 0.0), vec2(-radius.x, 0.0),
+        vec2(0.0,  radius.y), vec2(0.0, -radius.y),
+        vec2( radius.x,  radius.y), vec2(-radius.x,  radius.y),
+        vec2( radius.x, -radius.y), vec2(-radius.x, -radius.y));
+    float domainSum = 0.0;
+    float domainVotes = 0.0;
+    float maximumDomain = 0.0;
+    for (int i = 0; i < 9; ++i) {
+        float domainValue = longLossRecoveryDomainAt(
+            clamp(sampleUv + offsets[i], vec2(0.0), vec2(1.0)));
+        domainSum += domainValue;
+        domainVotes += step(0.20, domainValue);
+        maximumDomain = max(maximumDomain, domainValue);
+    }
+    float domainAverage = domainSum / 9.0;
+    return max(
+        smoothstep(0.10, 0.40, domainAverage) * smoothstep(1.0, 5.0, domainVotes),
+        smoothstep(0.35, 0.70, maximumDomain) * smoothstep(1.0, 3.0, domainVotes));
 }
 // IRIS_V217_REVERSED_V215_LONG_TRUTH_END
 
@@ -455,63 +529,92 @@ void main() {
         return;
     }
 
-    // V2.17 keeps the exact four-pass saved-fusion topology. mode==3 derives only
-    // broad LONG-loss/SHORT-valid evidence, mode==4 closes and propagates coherent
-    // ownership, mode==5 selects immutable LONG or aligned SHORT at full resolution,
-    // and mode==6 remains pointwise presentation. No pass fractionally mixes RGB.
+    // IRIS_V220_RATIO_INVARIANT_REGION_RECONSTRUCTION_BEGIN
+    // Mode 3 creates two distinct masks: R is a strict, locally registered seed;
+    // G is the broader physical recovery domain. BA carry the residual SHORT flow
+    // owned by the seed. Mode 4 then performs one monotonic geodesic reconstruction
+    // step; HdrGlView ping-pongs mode 4 until the R occupancy stops growing.
     if (mode == 3) {
-        vec2 evidence = broadRecoveryEvidenceAt(uv);
-        outColor = vec4(
-            evidence.x,
-            evidence.y,
-            registrationNeighborhoodConfidenceAt(uv),
-            shortRecoveryValidityAt(uv));
+        vec3 seedStats = broadRecoverySeedStatsAt(uv);
+        float seedStrength = max(
+            smoothstep(0.08, 0.30, seedStats.x) * smoothstep(2.0, 7.0, seedStats.y),
+            smoothstep(0.22, 0.52, seedStats.z) * smoothstep(1.0, 4.0, seedStats.y));
+        float seed = step(0.30, seedStrength);
+        float recoveryDomain = step(0.30, broadRecoveryDomainAt(uv));
+        vec2 localFlow = registrationNeighborhoodFlowAt(uv);
+        vec2 seedFlow = mix(vec2(0.5), localFlow, seed);
+        outColor = vec4(seed, recoveryDomain, seedFlow);
         return;
     }
 
     if (mode == 4) {
-        // Region ownership, not per-pixel re-proof. A 5x5 atlas neighborhood closes
-        // internal holes and lets a strong LONG-loss seed propagate only through
-        // neighborhoods that still have aligned/valid SHORT support.
+        // Morphological reconstruction by dilation under a mask, not finite-radius
+        // closing. Ownership can advance exactly one atlas cell per pass and only
+        // through G==recoveryDomain. The operation is monotonic; already owned cells
+        // can never revert to LONG. The propagated BA residual lets a featureless
+        // clipped interior inherit coherent boundary geometry instead of reverting to
+        // a different global-only SHORT sample in the middle of a large plateau.
         vec2 atlasTexel = 1.0 / vec2(textureSize(normalTex, 0));
-        float weightedEvidence = 0.0;
-        float weightSum = 0.0;
-        float maximumEvidence = 0.0;
-        float strongCells = 0.0;
-        float geometrySum = 0.0;
-        float validitySum = 0.0;
-        for (int oy = -2; oy <= 2; ++oy) {
-            for (int ox = -2; ox <= 2; ++ox) {
+        vec4 centerState = texture(normalTex, uv);
+        float currentOwned = step(0.5, centerState.r);
+        float recoveryDomain = step(0.5, centerState.g);
+        if (currentOwned > 0.5 || recoveryDomain < 0.5) {
+            outColor = vec4(currentOwned, recoveryDomain, centerState.ba);
+            return;
+        }
+
+        float flowWeightSum = 0.0;
+        vec2 flowSumPixels = vec2(0.0);
+        float ownedNeighbors = 0.0;
+        for (int oy = -1; oy <= 1; ++oy) {
+            for (int ox = -1; ox <= 1; ++ox) {
+                if (ox == 0 && oy == 0) continue;
                 vec2 offset = vec2(float(ox), float(oy)) * atlasTexel;
-                vec4 evidenceValue = texture(
+                vec4 neighborState = texture(
                     normalTex, clamp(uv + offset, vec2(0.0), vec2(1.0)));
+                if (neighborState.r < 0.5) continue;
                 float distanceWeight = 1.0 / (1.0 + float(ox * ox + oy * oy));
-                weightedEvidence += evidenceValue.r * distanceWeight;
-                weightSum += distanceWeight;
-                maximumEvidence = max(maximumEvidence, evidenceValue.r);
-                strongCells += step(0.12, evidenceValue.r);
-                geometrySum += evidenceValue.b;
-                validitySum += evidenceValue.a;
+                vec2 neighborFlowPixels = (neighborState.ba * 2.0 - vec2(1.0))
+                    * localFlowMaxPixels;
+                flowSumPixels += neighborFlowPixels * distanceWeight;
+                flowWeightSum += distanceWeight;
+                ownedNeighbors += 1.0;
             }
         }
-        float evidenceAverage = weightedEvidence / max(weightSum, 0.0001);
-        float geometryAverage = geometrySum / 25.0;
-        float validityAverage = validitySum / 25.0;
-        float seededRegion = max(
-            smoothstep(0.08, 0.30, evidenceAverage)
-                * smoothstep(2.0, 7.0, strongCells),
-            smoothstep(0.22, 0.52, maximumEvidence)
-                * smoothstep(1.0, 4.0, strongCells));
-        float coherentSupport = seededRegion
-            * smoothstep(0.10, 0.38, geometryAverage)
-            * smoothstep(0.12, 0.42, validityAverage);
-        outColor = vec4(
-            coherentSupport,
-            evidenceAverage,
-            geometryAverage,
-            validityAverage);
+        if (ownedNeighbors < 0.5 || flowWeightSum <= 0.0) {
+            outColor = vec4(0.0, recoveryDomain, centerState.ba);
+            return;
+        }
+
+        vec2 meanFlowPixels = flowSumPixels / flowWeightSum;
+        float disagreementSum = 0.0;
+        float disagreementWeight = 0.0;
+        for (int oy = -1; oy <= 1; ++oy) {
+            for (int ox = -1; ox <= 1; ++ox) {
+                if (ox == 0 && oy == 0) continue;
+                vec2 offset = vec2(float(ox), float(oy)) * atlasTexel;
+                vec4 neighborState = texture(
+                    normalTex, clamp(uv + offset, vec2(0.0), vec2(1.0)));
+                if (neighborState.r < 0.5) continue;
+                float distanceWeight = 1.0 / (1.0 + float(ox * ox + oy * oy));
+                vec2 neighborFlowPixels = (neighborState.ba * 2.0 - vec2(1.0))
+                    * localFlowMaxPixels;
+                vec2 delta = neighborFlowPixels - meanFlowPixels;
+                disagreementSum += dot(delta, delta) * distanceWeight;
+                disagreementWeight += distanceWeight;
+            }
+        }
+        float flowRms = sqrt(disagreementSum / max(disagreementWeight, 0.0001));
+        float coherentFlow = 1.0 - smoothstep(0.85, 1.25, flowRms);
+        float propagate = step(0.35, coherentFlow) * recoveryDomain;
+        vec2 encodedFlow = localFlowMaxPixels > 0.0
+            ? clamp(vec2(0.5) + 0.5 * meanFlowPixels / localFlowMaxPixels,
+                    vec2(0.0), vec2(1.0))
+            : vec2(0.5);
+        outColor = vec4(propagate, recoveryDomain, mix(centerState.ba, encodedFlow, propagate));
         return;
     }
+    // IRIS_V220_RATIO_INVARIANT_REGION_RECONSTRUCTION_END
 
     if (mode == 5) {
         // IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN
@@ -521,13 +624,18 @@ void main() {
         // can punch gray/lavender LONG holes back through a valid SHORT highlight.
         float ratio = clamp(exposureRatio, 1.0, 65536.0);
         float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
-        vec3 shortRgb = stillShortRgbAt(uv);
+        vec4 support = texture(normalTex, uv);
+        vec2 propagatedResidualPixels = (support.ba * 2.0 - vec2(1.0))
+            * localFlowMaxPixels;
+        vec2 shortOwnedUv = clamp(
+            uv + propagatedResidualPixels / max(stillImageSize, vec2(1.0)),
+            vec2(0.0), vec2(1.0));
+        vec3 shortRgb = texture(shortTex, shortOwnedUv).rgb;
         vec3 longRgb = stillLongRgbAt(uv);
         vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;
         vec3 longScene = srgbToLinear(longRgb);
-        vec4 support = texture(normalTex, uv);
         float usableBracket = step(2.0, ratio);
-        float shortOwns = step(0.30, support.r) * usableBracket;
+        float shortOwns = step(0.50, support.r) * usableBracket;
 
         // Exactly one aligned real source owns high-frequency RGB at each output
         // coordinate. Atlas interpolation affects only the location of the binary

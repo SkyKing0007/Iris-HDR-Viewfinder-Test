@@ -845,7 +845,7 @@ final class HdrGlView extends GLSurfaceView {
             RuntimeLogger.event(
                     "GPU_STILL_FUSION",
                     String.format(java.util.Locale.US,
-                            "V2.17 reversed-V2.15 LONG-truth/SHORT-recovery GPU multipass start %dx%d ratio=%.3f scalar=%.3f brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
+                            "V2.20 ratio-invariant connected-region GPU fusion start %dx%d ratio=%.3f scalar=%.3f brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
                             width, height, exposureRatio, scalarGain, brightnessEv, gamma,
                             dehaze, microContrast));
 
@@ -886,6 +886,11 @@ final class HdrGlView extends GLSurfaceView {
                 int analysisHeight = Math.max(1, (height + 15) / 16);
                 allocateRgbTexture(evidenceTexture, analysisWidth, analysisHeight);
                 allocateRgbTexture(supportTexture, analysisWidth, analysisHeight);
+                // V2.20 topology passes are discrete mask reconstruction. Sampling must
+                // remain exact during ping-pong propagation so bilinear filtering cannot
+                // jump a LONG-valid barrier or create a synthetic half-owned atlas cell.
+                setTextureFilter(evidenceTexture, GLES30.GL_NEAREST);
+                setTextureFilter(supportTexture, GLES30.GL_NEAREST);
                 allocateRgbTexture(presentationTexture, width, height);
                 // Mode 6 is full-resolution pointwise presentation. Keep the
                 // mode-5 fused raster nearest-sampled so no post-fusion texture
@@ -899,10 +904,10 @@ final class HdrGlView extends GLSurfaceView {
                 JpegFusion.recycleBitmap(longBitmap);
                 longBitmap = null;
 
-                // V2.17 preserves the exact four-pass saved-still topology. Mode 3
-                // derives LONG-loss/aligned-SHORT evidence, mode 4 closes coherent
-                // ownership regions, mode 5 selects immutable LONG or aligned SHORT
-                // at full resolution, and mode 6 remains pointwise.
+                // V2.20 keeps the existing GPU-only saved-still source ownership but
+                // replaces finite-radius closure with true mask-constrained geodesic
+                // reconstruction. Mode 3 creates a strict seed + allowed LONG-loss
+                // domain; mode 4 ping-pongs until ownership occupancy stops growing.
                 renderStillPass(
                         evidenceTexture, analysisWidth, analysisHeight,
                         3, longTexture, shortTexture, longTexture,
@@ -910,16 +915,63 @@ final class HdrGlView extends GLSurfaceView {
                         registration.confidence, scalarGain,
                         localFlowTexture, width, height,
                         localRegistration.maxResidualPixels);
-                renderStillPass(
-                        supportTexture, analysisWidth, analysisHeight,
-                        4, evidenceTexture, shortTexture, longTexture,
-                        exposureRatio, brightnessEv, gamma, dehaze, microContrast,
-                        registration.confidence, scalarGain,
-                        localFlowTexture, width, height,
-                        localRegistration.maxResidualPixels);
+                int[] initialCounts = countAtlasMasks(evidenceTexture, analysisWidth, analysisHeight);
+                int previousOwned = initialCounts[0];
+                int domainCells = initialCounts[1];
+                int readTopologyTexture = evidenceTexture;
+                int writeTopologyTexture = supportTexture;
+                int propagationPasses = 0;
+                boolean propagationConverged = false;
+                int maxPropagationPasses = Math.min(1024, Math.max(64, analysisWidth * analysisHeight));
+                final int convergenceBatch = 8;
+                while (propagationPasses < maxPropagationPasses) {
+                    int batchEnd = Math.min(
+                            maxPropagationPasses, propagationPasses + convergenceBatch);
+                    while (propagationPasses < batchEnd) {
+                        renderStillPass(
+                                writeTopologyTexture, analysisWidth, analysisHeight,
+                                4, readTopologyTexture, shortTexture, longTexture,
+                                exposureRatio, brightnessEv, gamma, dehaze, microContrast,
+                                registration.confidence, scalarGain,
+                                localFlowTexture, width, height,
+                                localRegistration.maxResidualPixels);
+                        int swap = readTopologyTexture;
+                        readTopologyTexture = writeTopologyTexture;
+                        writeTopologyTexture = swap;
+                        propagationPasses++;
+                    }
+                    int[] counts = countAtlasMasks(
+                            readTopologyTexture, analysisWidth, analysisHeight);
+                    if (counts[0] == previousOwned) {
+                        propagationConverged = true;
+                        break;
+                    }
+                    previousOwned = counts[0];
+                }
+                if (!propagationConverged) {
+                    RuntimeLogger.event(
+                            "GPU_STILL_TOPOLOGY_LIMIT",
+                            "passes=" + propagationPasses
+                                    + " owned=" + previousOwned
+                                    + " domain=" + domainCells
+                                    + " atlas=" + analysisWidth + "x" + analysisHeight);
+                }
+                RuntimeLogger.event(
+                        "GPU_STILL_TOPOLOGY",
+                        "V2.20 seed=" + initialCounts[0]
+                                + " owned=" + previousOwned
+                                + " domain=" + domainCells
+                                + " passes=" + propagationPasses
+                                + " converged=" + propagationConverged
+                                + " atlas=" + analysisWidth + "x" + analysisHeight);
+
+                // Reconstruction sampling is exact while iterating. Restore LINEAR only
+                // for the final atlas lookup so the binary 0.5 source boundary retains
+                // the proven sub-cell placement without ever mixing source RGB.
+                setTextureFilter(readTopologyTexture, GLES30.GL_LINEAR);
                 renderStillPass(
                         presentationTexture, width, height,
-                        5, supportTexture, shortTexture, longTexture,
+                        5, readTopologyTexture, shortTexture, longTexture,
                         exposureRatio, brightnessEv, gamma, dehaze, microContrast,
                         registration.confidence, scalarGain,
                         localFlowTexture, width, height,
@@ -953,7 +1005,7 @@ final class HdrGlView extends GLSurfaceView {
                 long elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L;
                 RuntimeLogger.event(
                         "GPU_STILL_FUSION",
-                        "V2.17 GPU-only multipass complete ms=" + elapsedMs
+                        "V2.20 GPU-only connected-region complete ms=" + elapsedMs
                                 + " outputBytes=" + encoded.length);
                 return encoded;
             } finally {
@@ -1054,6 +1106,41 @@ final class HdrGlView extends GLSurfaceView {
                     GLES30.glGetUniformLocation(displayProgram, "localFlowMaxPixels"),
                     Math.max(0.0f, localFlowMaxPixels));
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+        }
+
+        private int[] countAtlasMasks(int texture, int width, int height) {
+            ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4)
+                    .order(ByteOrder.nativeOrder());
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+            GLES30.glFramebufferTexture2D(
+                    GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                    GLES30.GL_TEXTURE_2D, texture, 0);
+            int fbStatus = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
+            if (fbStatus != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                throw new IllegalStateException(
+                        "V2.20 topology readback framebuffer incomplete: 0x"
+                                + Integer.toHexString(fbStatus));
+            }
+            GLES30.glReadPixels(
+                    0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, rgba);
+            rgba.rewind();
+            int owned = 0;
+            int domain = 0;
+            for (int i = 0; i < width * height; i++) {
+                int r = rgba.get() & 0xFF;
+                int g = rgba.get() & 0xFF;
+                rgba.get();
+                rgba.get();
+                if (r >= 128) owned++;
+                if (g >= 128) domain++;
+            }
+            return new int[] {owned, domain};
+        }
+
+        private static void setTextureFilter(int texture, int filter) {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, filter);
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, filter);
         }
 
         private static float median3(float a, float b, float c) {

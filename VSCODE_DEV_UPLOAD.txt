@@ -1,12 +1,12 @@
-V1.4.11 V2.19 — VSCODE.DEV UPLOAD
+V1.4.11 V2.20 — VSCODE.DEV UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: f70e85bc3ca8a5ce0fcf0e0c4634ec786e141d73 (successful V2.18)
+Required direct parent / runtime authority: 13393e945e7313d981b38ce5a44e31eceff7dc79 (successful V2.19)
 
-1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.18 parent before uploading.
+1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.19 parent before uploading.
 2. Upload/replace ALL files from this ZIP at repository root, preserving paths.
 3. Do not add extra files or folders.
-4. Source Control must show exactly 9 changed tracked files relative to V2.18:
+4. Source Control must show exactly 10 changed tracked files relative to V2.19:
    .github/workflows/build.yml
    BUILD_WORKFLOW_COPY.yml
    PACKAGE_INFO.txt
@@ -14,13 +14,14 @@ Required direct parent / runtime authority: f70e85bc3ca8a5ce0fcf0e0c4634ec786e14
    README.md
    VSCODE_DEV_UPLOAD.txt
    app/build.gradle.kts
-   app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+   app/src/main/assets/shaders/hdr_display.frag
+   app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
    scripts/verify_orientation.py
 5. Commit once and push once.
 
 Suggested commit message:
-V1.4.11 V2.19 Photon-normalized post-fusion exposure
+V1.4.11 V2.20 ratio-invariant connected-region fusion
 
 Do not commit the ZIP itself.
 Do not alter dev/main.
-GitHub Actions is the authoritative real Java / full Android build proof.
+GitHub Actions is the authoritative pinned GLSL / real Java / full Android build proof.
