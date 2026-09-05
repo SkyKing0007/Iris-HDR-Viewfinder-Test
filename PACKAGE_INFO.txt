@@ -1,4 +1,4 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.16 LONG-BODY / IMMUTABLE-SHORT RECOVERY PACKAGE INFO
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.17 REVERSED-V2.15 LONG-TRUTH / ALIGNED-SHORT COHERENT RECOVERY PACKAGE INFO
 
 STATUS
 PREPARED / UPLOAD-READY only after packaged proof completes; NOT BUILD-PROVEN until GitHub Actions succeeds.
@@ -7,45 +7,46 @@ No backup branch requested or created.
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 33
-Target versionName: 1.0-v1.4.11-v2.16
+Target versionCode: 34
+Target versionName: 1.0-v1.4.11-v2.17
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: b8996c649450ae1a19025d856e183aee609f16af
-Tree: c71f612ef205f5cad76a6b8695a67ccc925e90a4
-GitHub Actions run: 33918963537 — SUCCESS
-Artifact ID: 9954318138
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.15
-Artifact ZIP digest: sha256:e2a80f7bb894a6c11cece8ae6d0c594c622b0871bef028db98bd3eeeb419f98a
-V2.15 APK SHA-256: e576effee5b845ce47148d2077fee8418d60ac24ab01189aa9490867f71283bd
-V2.15 source-candidate TAR SHA-256: 18218efb929fdf4961aa569cc39c7db2f7f1e306cbd6f3184cd77a6ad2e87c76
-V2.15 runtime manifest SHA-256: 3ff1b186ef80e954314a034b263f4bccae26a8c4772f6625c2c9de26f1c5c6cb
-V2.15 repository manifest SHA-256: 64b26b2466efda64ba794609dac3ed3a188f5b0a955557b3efd7af93da9e65ca
-V2.15 regressions SHA-256: 860b4b724886f1af67040697ecd4d54d77b6f75ecd42a85de4a5d998d6f6f8d5
+Commit: ce514f3fd6d1b75092c4e3bb2fa395dadb359950
+Tree: 5bfdb02fc28dc7f2833a61aa18ffe3f36c4c20d9
+GitHub Actions run: 33939811219 — SUCCESS
+Artifact ID: 9961436910
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.16
+Artifact ZIP digest: sha256:51a79d62a917c5e05d09c49273ab9ed83924148a617d7aedccf5e99294fc921b
+V2.16 APK SHA-256: 92cc5181b6136af980badc520c8c77beed6386c9b71e3e12721daae726dc9e07
+V2.16 source-candidate TAR SHA-256: 69b1a2bd6fb3cc29a29dc82648dd280a5570be6cd5f55a2e9a5e382e900c5c59
+V2.16 runtime manifest SHA-256: c6a5bba0f2328d0bdeb70d40456d5c263369622e4098e9d889e3a9c10fc885ef
+V2.16 repository manifest SHA-256: f59c6485472a867be3ad987d120c2b1e74e8cf94033ad9ff349b7ba2945ef796
+V2.16 regressions SHA-256: 101e1de79ae8dad5b95c53c42e942821cb9c08ebe0aef37ffc331ec5a80f4acd
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.15 workflow/build implementation inherited from V2.14. Step order, action versions, pinned real glslang commands, real Java compiler, full :app:assembleDebug, deterministic patch proof, candidate freeze, exactly-one-APK proof and artifact export remain unchanged.
+Exact successful V2.16 workflow/build implementation inherited unchanged. Step order, action versions, pinned real glslang commands, real Java compiler, full :app:assembleDebug, deterministic patch proof, candidate freeze, exactly-one-APK proof and artifact export remain unchanged.
 
-PRIMARY V2.16 DESIGN EVIDENCE
-The supplied V2.15 SHORT/LONG/FUSED sets prove that V2.15 finally improved registration but made SHORT the global saved image owner, so FUSED inherited lifted SHORT noise. Earlier LONG-owned builds were much cleaner but allowed warped/fragmented/fractional SHORT fusion that produced gray/blue broken contours and unsupported peach/orange fill. V2.16 keeps the successful V2.15 LONG-to-SHORT registration direction while restoring aligned LONG as the normal image/SNR owner and using exact unwarped SHORT only where LONG has genuinely lost information.
+PRIMARY V2.17 DESIGN EVIDENCE
+The supplied successful V2.16 test capture proves LONG-body SNR is desirable but V2.16's per-pixel SHORT recovery re-proof creates incomplete fusion: gray/lavender holes and missing pieces remain where SHORT contains valid continuous source data. V2.17 keeps LONG as the clean default body but reverses V2.15 geometry ownership: LONG becomes immutable output geometry and only SHORT is aligned. SHORT recovery ownership is established at coherent region level, then complete aligned SHORT RGB/detail owns that region without a second per-pixel proof.
 
-STRICT V2.16 FUSION CONTRACT
-- SHORT remains immutable geometric reference and is never globally translated or locally flow-warped.
-- LONG alone receives global/local registration into SHORT coordinates.
-- Aligned LONG is the default saved RGB/body/SNR/detail owner.
-- SHORT may own a saved region only after strict hard/effective LONG information-loss proof, valid SHORT signal/headroom and trustworthy registration.
-- High-frequency source ownership is binary LONG or SHORT. `mix(longScene, shortScene, ...)` and any fractional RGB crossfade are forbidden.
-- A SHORT-owned region uses complete exact unwarped SHORT RGB/detail/high-frequency truth.
-- Effective pre-clip recovery requires multi-scale SHORT structure dominance over LONG, bright LONG context and radiometric agreement; lifted SHORT noise alone may not steal normal walls/body.
-- Hard clipping requires compact neighborhood support, coherent SHORT band-pass detail, and broad region authorization; smooth clipped light pools remain LONG-owned rather than turning into noisy SHORT patches.
-- The 1/16 analysis atlas carries only recovery evidence/confidence, never source RGB or fine texture.
-- Synthetic radiance-floor/fill, unsupported peach/orange/gray content and third-source topology remain forbidden.
+STRICT V2.17 FUSION CONTRACT
+- LONG is immutable output geometry and complete default body/SNR/RGB/detail owner.
+- SHORT alone receives global and bounded local registration into LONG coordinates.
+- The existing four-pass GPU saved-fusion topology is unchanged.
+- The 1/16 atlas carries only LONG-loss/SHORT-valid/registration ownership evidence, never source RGB.
+- Smooth recoverable SHORT highlight shading is valid; per-pixel texture is not required.
+- Mode-4 seeded 5x5 atlas closure prevents internal ownership holes.
+- Mode 5 uses only coherent atlas ownership + valid bracket to choose source; direct per-pixel short-valid/geometry/hard-loss/effective-loss re-proof is forbidden.
+- A SHORT-owned region uses complete aligned SHORT RGB/detail/high-frequency truth.
+- A LONG-owned region uses exact immutable LONG RGB/detail.
+- Fractional LONG/SHORT RGB interpolation and synthetic radiance fill remain forbidden.
+- LONG source uses nearest sampling; aligned SHORT uses linear sampling for bounded subpixel residual registration.
 - Saved final presentation remains pointwise and cannot spatially synthesize source boundaries.
-- Live preview remains the successful V2.15 behavior; V2.16 changes saved-still ownership only.
+- Live preview remains the successful V2.15/V2.16 behavior.
 
-HARD EXPOSURE/CAPTURE CONTRACT — BYTE-PROTECTED FROM SUCCESSFUL V2.15
-- CameraController.java and CaptureSetSaver.java are byte-identical to successful V2.15.
+HARD EXPOSURE/CAPTURE CONTRACT — BYTE-PROTECTED FROM SUCCESSFUL V2.16
+- CameraController.java and CaptureSetSaver.java are byte-identical to successful V2.16.
 - AUTO keeps meaningful 4x..64x bracket targeting; 64x / 6 EV remains available when feasible.
 - MANUAL controls retain at least 64x / 6 EV legal separation capability.
 - SHORT and LONG remain independent captures.
@@ -75,18 +76,18 @@ INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-YES, PAYLOAD/REGRESSION CONTRACT ONLY. Authority/version/hash/allowlist/artifact payloads advance to V2.16. The successful V2.15 compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, deterministic patch replay, freeze and one-APK proof remain unchanged.
+YES, PAYLOAD/REGRESSION CONTRACT ONLY. Authority/version/hash/allowlist/artifact payloads advance to V2.17. The successful V2.16 compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, deterministic patch replay, freeze and one-APK proof remain unchanged.
 
-V2.16 RUNTIME DIGEST
-c6a5bba0f2328d0bdeb70d40456d5c263369622e4098e9d889e3a9c10fc885ef
+V2.17 RUNTIME DIGEST
+941c2e8696f4b579a8f295ad89fb3f66825868a95fc4891a4ae2a1b5ba166ae6
 Runtime universe remains exactly 12 files.
 
 COMPILER STATUS BEFORE ACTIONS
 GLSL reserved-identifier scan: PASS.
-V2.16 semantic/ownership/regression verifier: PASS.
+V2.17 semantic/ownership/regression verifier: PASS.
 REAL pinned glslang compile: NOT RUN locally.
 REAL project Java compiler: NOT RUN locally.
 FULL :app:assembleDebug: NOT RUN locally.
 
 FINAL ACTIONS AUTHORITY
-Until V2.16 succeeds, final authority remains V2.15 commit b8996c649450ae1a19025d856e183aee609f16af / run 33918963537 / artifact 9954318138.
+Until V2.17 succeeds, final authority remains V2.16 commit ce514f3fd6d1b75092c4e3bb2fa395dadb359950 / run 33939811219 / artifact 9961436910.

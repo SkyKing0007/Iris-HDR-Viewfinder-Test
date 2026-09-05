@@ -21,7 +21,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.16 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.17 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -51,7 +51,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.16 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.17 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -602,17 +602,17 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.16 - Exact successful V2.15 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.15' in workflow
-        and 'run-id: 33918963537' in workflow
-        and "authority='b8996c649450ae1a19025d856e183aee609f16af'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.15 Actions authority")
-require("authority='9a6b4dfc3885f32d5dffbbee3954392a35a2ab08'" not in workflow,
-        "V2.16 must not seed runtime from V2.14 after successful V2.15")
+# 038 / 042 / V2.17 - Exact successful V2.16 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.16' in workflow
+        and 'run-id: 33939811219' in workflow
+        and "authority='ce514f3fd6d1b75092c4e3bb2fa395dadb359950'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.16 Actions authority")
+require("authority='b8996c649450ae1a19025d856e183aee609f16af'" not in workflow,
+        "V2.17 must not seed runtime from V2.15 after successful V2.16")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
-# 039 / 043 / V2.16 - Saved fusion may select exactly LONG or SHORT RGB, but it
+# 039 / 043 / V2.17 - Saved fusion may select exactly LONG or SHORT RGB, but it
 # must never interpolate RGB between sources. Live preview remains V2.15 SHORT-owned.
 require('mix(longScene, shortScene' not in hdr_shader,
         "production shader must not interpolate LONG/SHORT RGB")
@@ -758,23 +758,23 @@ require('brightnessBar.setEnabled(enabled)' in main and 'gammaBar.setEnabled(ena
 require('Brightness AUTO' in main and 'Dehaze' in main and 'Micro' in main,
         "UI must expose the learned presentation state without adding extra required sliders")
 
-# V2.16 topology-safe saved presentation (math inherited from V2.15). Saved mode 6 is pointwise/monotonic only:
+# V2.17 topology-safe saved presentation (math inherited unchanged). Saved mode 6 is pointwise/monotonic only:
 # it may reshape luma but can never sample a neighbor or create spatial topology.
-require('IRIS_V216_TOPOLOGY_SAFE_PRESENTATION_BEGIN' in hdr_shader
+require('IRIS_V217_TOPOLOGY_SAFE_PRESENTATION_BEGIN' in hdr_shader
         and 'vec3 fusedLinear = srgbToLinear(texture(normalTex, uv).rgb);' in hdr_shader
         and 'float exponent = 1.0' in hdr_shader
         and 'vec3 presented = fusedLinear * min(requestedScale, gamutScale);' in hdr_shader,
-        "V2.16 saved presentation must remain pointwise, luminance-only and RGB-ratio preserving")
-v216_mode6 = hdr_shader[hdr_shader.index('// IRIS_V216_TOPOLOGY_SAFE_PRESENTATION_BEGIN'):
-                         hdr_shader.index('// IRIS_V216_TOPOLOGY_SAFE_PRESENTATION_END')]
-require('presentationGuideLumaAt' not in v216_mode6
-        and 'applyAdaptiveClarity' not in v216_mode6
-        and v216_mode6.count('texture(') == 2,
-        "V2.16 saved mode 6 must not sample neighbors or reintroduce source contours")
-require('unsharp' not in v216_mode6.lower() and 'clahe' not in v216_mode6.lower(),
-        "V2.16 must not substitute sharpening/CLAHE")
+        "V2.17 saved presentation must remain pointwise, luminance-only and RGB-ratio preserving")
+v217_mode6 = hdr_shader[hdr_shader.index('// IRIS_V217_TOPOLOGY_SAFE_PRESENTATION_BEGIN'):
+                         hdr_shader.index('// IRIS_V217_TOPOLOGY_SAFE_PRESENTATION_END')]
+require('presentationGuideLumaAt' not in v217_mode6
+        and 'applyAdaptiveClarity' not in v217_mode6
+        and v217_mode6.count('texture(') == 2,
+        "V2.17 saved mode 6 must not sample neighbors or reintroduce source contours")
+require('unsharp' not in v217_mode6.lower() and 'clahe' not in v217_mode6.lower(),
+        "V2.17 must not substitute sharpening/CLAHE")
 require(not (ROOT / 'app/src/main/assets/shaders/still_fusion.frag').exists(),
-        "V2.16 must reuse the successful shader-file universe")
+        "V2.17 must reuse the successful shader-file universe")
 
 # Production still fusion remains the exact four-pass GPU topology inherited from
 # successful V2.13 V1.2. Only the payload/ownership math changes.
@@ -798,22 +798,22 @@ require(not (ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrF
         and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_fusion.frag').exists(),
         "V2.14 must remain on the successful JPEG-source architecture")
 
-# V2.16 preserves the successful V2.15 registration direction: SHORT is immutable
-# reference geometry and only LONG is transformed into it. This geometry is protected
-# while saved-still RGB ownership changes back to LONG-by-default.
+# V2.17 reverses V2.15 geometry ownership around the clean LONG body. LONG is the
+# immutable reference and only SHORT is globally/local-residual aligned into it.
 require('static Registration estimateRegistration(Bitmap movingBitmap, Bitmap referenceBitmap)' in fusion
         and 'estimateOneWayRegistration(movingBitmap, referenceBitmap)' in fusion
         and 'estimateOneWayRegistration(referenceBitmap, movingBitmap)' in fusion
         and 'cycleConfidence = 1.0f - smoothstep(0.45f, 1.50f, cycleError)' in fusion,
         "bidirectional global registration with cycle consistency is missing")
 require('static Bitmap alignLongToShort(Bitmap longBitmap, Registration registration)' in fusion
-        and 'canvas.drawBitmap(longBitmap, matrix, paint);' in fusion
-        and 'alignShortToLong' not in fusion,
-        "V2.16 must resample LONG into SHORT coordinates and never warp SHORT")
-require('JpegFusion.estimateRegistration(longBitmap, shortBitmap)' in gl
-        and 'JpegFusion.alignLongToShort(longBitmap, registration)' in gl
-        and 'JpegFusion.estimateLocalRegistration(longBitmap, shortBitmap)' in gl,
-        "GPU saved path must treat LONG as moving and SHORT as reference")
+        and 'canvas.drawBitmap(longBitmap, matrix, paint);' in fusion,
+        "byte-protected generic moving-frame alignment helper changed")
+require('JpegFusion.estimateRegistration(shortBitmap, longBitmap)' in gl
+        and 'JpegFusion.alignLongToShort(shortBitmap, registration)' in gl
+        and 'JpegFusion.estimateLocalRegistration(shortBitmap, longBitmap)' in gl,
+        "GPU saved path must treat SHORT as moving and LONG as immutable reference")
+require('JpegFusion.estimateRegistration(longBitmap, shortBitmap)' not in gl,
+        "V2.16 LONG-moving geometry direction survived into V2.17")
 require('final int maxDimension = 1024;' in fusion
         and 'final int cell = 32;' in fusion
         and 'final int searchRadius = 2;' in fusion
@@ -821,101 +821,83 @@ require('final int maxDimension = 1024;' in fusion
         and 'final float maxResidualPixels = 4.0f;' in fusion
         and 'LocalMatch backward = localGradientMatch(' in fusion
         and 'cycleConfidence = 1.0f - smoothstep(0.20f, 0.90f, cycleError)' in fusion,
-        "bounded bidirectional local LONG residual registration is incomplete")
+        "bounded bidirectional local SHORT residual registration is incomplete")
 require('if (confidence < 0.28f)' in fusion
         and 'if (neighbors < 5 || weightSum <= 0.0f) continue;' in fusion
         and 'if (coherent >= 5 && rms <= 0.75f)' in fusion
         and 'if (disagreement > 1.0f) continue;' in fusion,
-        "local LONG residual field must fail closed and regularize only coherent camera motion")
+        "local residual field must fail closed and regularize only coherent camera motion")
 require('GPU_STILL_LOCAL_REGISTRATION' in gl
         and 'uploadRgba8Texture(' in gl
         and 'localRegistration.rgba);' in gl
         and gl.count('localFlowTexture, width, height,') == 4
         and 'haveLocalFlow' in gl and 'localFlowMaxPixels' in gl
         and 'stillImageSize' in gl,
-        "GPU saved path must carry bounded LONG residual flow into the four inherited passes")
+        "GPU saved path must carry bounded SHORT residual flow into the four inherited passes")
 require('uniform sampler2D localFlowTex;' in hdr_shader
-        and 'vec2 stillLongUvAt(vec2 sampleUv)' in hdr_shader
-        and 'return texture(longTex, stillLongUvAt(sampleUv)).rgb;' in hdr_shader
-        and 'stillShortUvAt' not in hdr_shader
-        and 'return texture(shortTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;' in hdr_shader,
-        "shader must flow only LONG and sample SHORT at immutable coordinates")
+        and 'vec2 stillShortUvAt(vec2 sampleUv)' in hdr_shader
+        and 'return texture(shortTex, stillShortUvAt(sampleUv)).rgb;' in hdr_shader
+        and 'stillLongUvAt' not in hdr_shader
+        and 'return texture(longTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;' in hdr_shader,
+        "shader must flow only SHORT and sample LONG at immutable coordinates")
 require(gl.count('GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST') >= 2
         and gl.count('GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST') >= 2,
-        "SHORT source and full-resolution mode-5 raster must both use nearest sampling")
+        "immutable LONG source and full-resolution mode-5 raster must both use nearest sampling")
 require('presentationTexture);\n                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);' in gl,
         "mode-6 must not bilinear-resample the selected-source fused raster")
 
-# V2.16 source-loss evidence may authorize SHORT ownership but may not carry RGB.
-require('IRIS_V216_LONG_BODY_SHORT_RECOVERY_BEGIN' in hdr_shader
+# V2.17 source-loss atlas authorizes coherent SHORT ownership but never carries RGB.
+require('IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN' in hdr_shader
         and 'float shortRecoveryValidityAt(vec2 sampleUv)' in hdr_shader
         and 'float registrationNeighborhoodConfidenceAt(vec2 sampleUv)' in hdr_shader
-        and 'float shortCrossAverageAt(vec2 sampleUv, float radiusPixels)' in hdr_shader
-        and 'float shortCoherentDetailAt(vec2 sampleUv)' in hdr_shader
         and 'float longHardLossBaseAt(vec2 sampleUv)' in hdr_shader
         and 'float compactHardLossSupportAt(vec2 sampleUv)' in hdr_shader
         and 'float longEffectiveLossAt(vec2 sampleUv)' in hdr_shader
+        and 'float shortRecoveryEvidenceAt(vec2 sampleUv)' in hdr_shader
         and 'vec2 broadRecoveryEvidenceAt(vec2 sampleUv)' in hdr_shader,
-        "V2.16 strict source-loss evidence chain is incomplete")
-require('localLinearRangeAtRadius(sampleUv, 2.0)' in hdr_shader
-        and 'localLinearRangeAtRadius(sampleUv, 6.0)' in hdr_shader
-        and 'smoothstep(0.72, 0.90, max3(longRgb))' in hdr_shader
-        and 'shortFineRange - 1.12 * longFineRange' in hdr_shader
-        and 'shortBroadRange - 1.08 * longBroadRange' in hdr_shader,
-        "effective LONG information-loss proof must be multi-scale and near-highlight gated")
-require('smoothstep(0.06, 0.22, compactHardLossSupportAt(sampleUv))' in hdr_shader
-        and 'float bandPass = abs(fineAverage - broadAverage);' in hdr_shader
-        and 'smoothstep(0.025, 0.080, bandPass)' in hdr_shader,
-        "literal LONG clipping must require compact support plus coherent SHORT detail")
-loss_slice = hdr_shader[hdr_shader.index('float longEffectiveLossAt(vec2 sampleUv)'):
-                        hdr_shader.index('float shortRecoveryProofAt(vec2 sampleUv)')]
-proof_slice = hdr_shader[hdr_shader.index('float shortRecoveryProofAt(vec2 sampleUv)'):
-                         hdr_shader.index('vec2 broadRecoveryEvidenceAt(vec2 sampleUv)')]
-require('* shortCoherentDetailAt(sampleUv);' in loss_slice
-        and '* shortCoherentDetailAt(sampleUv);' in proof_slice,
-        "both hard and effective LONG-loss admission must reject smooth/noise-only SHORT evidence")
-
-def v216_detail_gate(band_pass):
-    return smoothstep_math(0.025, 0.080, abs(band_pass))
-
-require(math.isclose(v216_detail_gate(0.0), 0.0, abs_tol=1e-9)
-        and v216_detail_gate(0.010) < 0.02,
-        "smooth clipped illumination must not authorize SHORT ownership")
-require(v216_detail_gate(0.060) > 0.69,
-        "real coherent SHORT detail must remain eligible for recovery")
+        "V2.17 coherent source-loss evidence chain is incomplete")
+require('localLinearRangeAtRadius(sampleUv, 4.0)' in hdr_shader
+        and 'localLinearRangeAtRadius(sampleUv, 12.0)' in hdr_shader
+        and 'smoothstep(0.68, 0.90, max3(longRgb))' in hdr_shader
+        and 'shortMediumRange - 1.06 * longMediumRange' in hdr_shader
+        and 'shortBroadRange - 1.04 * longBroadRange' in hdr_shader,
+        "effective LONG information-loss proof must retain smooth medium/broad response evidence")
+require('shortCoherentDetailAt' not in hdr_shader
+        and 'float recoveryProof =' not in hdr_shader
+        and 'step(0.58, recoveryProof)' not in hdr_shader,
+        "V2.16 per-pixel detail/recovery gate must be completely removed")
 require('int analysisWidth = Math.max(1, (width + 15) / 16);' in gl
         and 'int analysisHeight = Math.max(1, (height + 15) / 16);' in gl,
-        "V2.16 region-evidence atlas must be exactly 1/16 linear resolution")
+        "V2.17 ownership atlas must preserve the proven 1/16 allocation")
 require(math.ceil(4096 / 16) == 256 and math.ceil(3072 / 16) == 192,
-        "3072x4096 device captures must map to a 192x256 region-evidence atlas")
-require('float strongCells = 0.0;' in hdr_shader
-        and 'float coherentRegion = smoothstep(2.0, 5.0, strongCells);' in hdr_shader
-        and 'float broadRecovery = smoothstep(0.10, 0.38, evidenceAverage)' in hdr_shader,
-        "mode 4 must reject isolated evidence and publish only broad region support")
+        "3072x4096 device captures must map to a 192x256 ownership atlas")
+require('for (int oy = -2; oy <= 2; ++oy)' in hdr_shader
+        and 'for (int ox = -2; ox <= 2; ++ox)' in hdr_shader
+        and 'float seededRegion = max(' in hdr_shader
+        and 'float coherentSupport = seededRegion' in hdr_shader,
+        "mode 4 must perform broad seeded region closure rather than per-pixel ownership")
 
-# Saved mode 5 is binary source ownership: LONG by default, exact SHORT only when
-# LONG is information-lost and SHORT+geometry are valid. No high-frequency crossfade.
-require('IRIS_V216_BINARY_SOURCE_OWNERSHIP_BEGIN' in hdr_shader
+# Saved mode 5 is reversed-V2.15 source truth: LONG by default, aligned SHORT as a
+# complete source only when the already-established ownership atlas selects it.
+require('IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN' in hdr_shader
         and 'vec3 shortRgb = stillShortRgbAt(uv);' in hdr_shader
         and 'vec3 longRgb = stillLongRgbAt(uv);' in hdr_shader
         and 'vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;' in hdr_shader
         and 'vec3 longScene = srgbToLinear(longRgb);' in hdr_shader,
-        "V2.16 mode 5 must expose both exact source candidates in SHORT coordinates")
-v216_mode5 = hdr_shader[hdr_shader.index('// IRIS_V216_BINARY_SOURCE_OWNERSHIP_BEGIN'):
-                         hdr_shader.index('// IRIS_V216_BINARY_SOURCE_OWNERSHIP_END')]
-require('float shortOwns = step(0.58, recoveryProof) * usableBracket;' in v216_mode5
-        and 'vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;' in v216_mode5,
-        "V2.16 must default to LONG and switch discretely to SHORT only on proven loss")
-require('mix(longScene, shortScene' not in v216_mode5
-        and 'mix(shortScene, longScene' not in v216_mode5,
+        "V2.17 mode 5 must expose aligned SHORT and immutable LONG source candidates")
+v217_mode5 = hdr_shader[hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN'):
+                         hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_END')]
+require('float shortOwns = step(0.30, support.r) * usableBracket;' in v217_mode5
+        and 'vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;' in v217_mode5,
+        "V2.17 must default to LONG and switch discretely by coherent atlas ownership")
+require('shortRecoveryValidityAt(uv)' not in v217_mode5
+        and 'registrationNeighborhoodConfidenceAt(uv)' not in v217_mode5
+        and 'longHardLossBaseAt(uv)' not in v217_mode5
+        and 'longEffectiveLossAt(uv)' not in v217_mode5,
+        "mode 5 must not re-prove ownership per pixel and recreate V2.16 holes")
+require('mix(longScene, shortScene' not in v217_mode5
+        and 'mix(shortScene, longScene' not in v217_mode5,
         "mode 5 must never create a fractional LONG/SHORT RGB sample")
-require('float effectiveLoss = longEffectiveLossAt(uv)' in v216_mode5
-        and 'smoothstep(0.34, 0.70, support.r)' in v216_mode5,
-        "effective pre-clip recovery must require the broad region prior")
-require('float hardLoss = longHardLossBaseAt(uv)' in v216_mode5
-        and 'compactHardLossSupportAt(uv)' in v216_mode5
-        and 'smoothstep(0.18, 0.55, support.r)' in v216_mode5,
-        "hard-clipped highlights must require broad coherent-detail authorization before SHORT can own")
 require('radianceFloorWeight' not in hdr_shader and 'radianceRaised' not in hdr_shader
         and 'recoveredSourceDisplay' not in hdr_shader,
         "synthetic radiance/color fill paths must remain absent")
@@ -934,17 +916,17 @@ require('bitmap.compress(Bitmap.CompressFormat.JPEG, 100, bytes)' in fusion,
 # Mathematical provenance: a full-resolution output sample is one complete source
 # vector, never an RGB interpolation. The default branch is LONG; SHORT wins only
 # when the binary ownership proof is true.
-def v216_select(long_rgb, short_rgb, short_owns):
+def v217_select(long_rgb, short_rgb, short_owns):
     return short_rgb if short_owns else long_rgb
 
 long_rgb = (0.61, 0.55, 0.49)
 short_rgb = (0.44, 0.31, 0.17)
-require(v216_select(long_rgb, short_rgb, False) == long_rgb,
-        "healthy/default V2.16 source must be LONG")
-require(v216_select(long_rgb, short_rgb, True) == short_rgb,
+require(v217_select(long_rgb, short_rgb, False) == long_rgb,
+        "healthy/default V2.17 source must be LONG")
+require(v217_select(long_rgb, short_rgb, True) == short_rgb,
         "proven LONG information loss must retain exact SHORT RGB")
 for owns in (False, True):
-    out = v216_select(long_rgb, short_rgb, owns)
+    out = v217_select(long_rgb, short_rgb, owns)
     require(out in (long_rgb, short_rgb),
             "binary source selector manufactured a third RGB sample")
 
@@ -993,25 +975,28 @@ require('return Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));' 
 require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kts').read_text().lower(),
         "OpenCV must remain simulation-only and absent from runtime")
 
-# V2.16 permanent visual/source regressions from the V2.13-V2.15 device failures.
-# Preserve the successful V2.15 alignment direction, but never make SHORT global again.
+# V2.17 permanent visual/source regressions include the exact V2.16 device failure:
+# valid SHORT highlight pieces may not be dropped by a per-pixel re-proof inside one
+# coherent LONG-loss region. LONG remains global/default body; SHORT is aligned to it.
 require('mix(longScene, shortScene' not in hdr_shader,
         "gray/blue third-edge RGB interpolation returned")
-require('stillShortUvAt' not in hdr_shader and 'alignShortToLong' not in fusion,
-        "SHORT warp/resampling regression returned")
-require('vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;' in v216_mode5,
-        "V2.16 binary LONG-default/SHORT-recovery ownership disappeared")
+require('vec2 stillShortUvAt(vec2 sampleUv)' in hdr_shader
+        and 'stillLongUvAt' not in hdr_shader,
+        "reversed V2.15 geometry ownership disappeared")
+require('vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;' in v217_mode5,
+        "V2.17 binary LONG-default/aligned-SHORT ownership disappeared")
 require('vec3 mergedScene = shortScene * envelopeScale;' not in hdr_shader,
         "V2.15 global SHORT ownership regression returned")
-require('return texture(shortTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;' in hdr_shader,
-        "SHORT recovery sampling must remain direct and unwarped")
+require('step(0.58, recoveryProof)' not in hdr_shader
+        and 'shortCoherentDetailAt' not in hdr_shader,
+        "exact V2.16 fragmented pixel-gate regression returned")
+require('(width + 15) / 16' in gl
+        and 'float coherentSupport = seededRegion' in hdr_shader,
+        "broad ownership topology regressed to a fine/detail mask")
+require('aligned auxiliary' in hdr_shader and 'immutable LONG body' in hdr_shader,
+        "LONG-body / aligned-SHORT source contract markers disappeared")
 require('radianceFloorWeight' not in hdr_shader and 'radianceRaised' not in hdr_shader,
         "unsupported peach/orange radiance fill returned")
-require('(width + 15) / 16' in gl and 'float coherentRegion = smoothstep(2.0, 5.0, strongCells);' in hdr_shader,
-        "broad region-coherence protection returned to a fine/detail ownership map")
-require('Smooth clipped light pools therefore stay LONG-owned' in v216_mode5
-        and 'shortCoherentDetailAt(sampleUv)' in hdr_shader,
-        "smooth clipped-light regression protection disappeared")
 
 # Appearance calibration remains byte-identical to successful V2.14. Registration
 # matching math is preserved conceptually, but alignment direction intentionally
@@ -1036,7 +1021,7 @@ require('applyPhotographicBodyTone' in hdr_shader
         and 'smoothstep(0.45, 0.68, y)' in hdr_shader
         and 'targetBodyY = bodyY + 0.45f * toe * highlightProtect' in fusion,
         "GPU/CPU photographic body tone curve missing or mismatched")
-live_mode_start = hdr_shader.index('// V2.16 leaves V2.15 live preview behavior unchanged.')
+live_mode_start = hdr_shader.index('// V2.17 leaves the successful live preview path unchanged.')
 require(hdr_shader.index('applyPhotographicBodyTone(mergedScene * brightnessGain)', live_mode_start)
         < hdr_shader.index('adaptiveHdrToneMap(bodyToned, ratio, bracketStops)', live_mode_start)
         < hdr_shader.index('applyDisplayGamma(displayLinear, displayGamma)', live_mode_start),
@@ -1074,9 +1059,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 33' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.16"' in Path('app/build.gradle.kts').read_text(),
-        "V2.16 version/build marker must be exact")
+require('versionCode = 34' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.17"' in Path('app/build.gradle.kts').read_text(),
+        "V2.17 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1184,4 +1169,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.16 REGRESSION PASS: exact successful V2.15 authority, AUTO/MANUAL 64x capability and SHORT<=LONG ordering protected, V2.15 LONG-to-SHORT geometry preserved, LONG default body/SNR ownership restored, exact SHORT recovery is binary/source-faithful, no RGB interpolation or synthetic fill")
+print("V1.4.11 V2.17 REGRESSION PASS: exact successful V2.16 authority, AUTO/MANUAL 64x capability and SHORT<=LONG ordering protected, LONG immutable output geometry, SHORT-only global/local alignment, coherent region-owned SHORT recovery, no V2.16 per-pixel holes, no RGB interpolation or synthetic fill")

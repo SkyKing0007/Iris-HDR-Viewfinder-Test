@@ -800,17 +800,16 @@ final class HdrGlView extends GLSurfaceView {
                 throw new IllegalStateException("Short/long JPEG dimensions do not match for GPU fusion");
             }
 
-            // V2.16 keeps the successful V2.15 geometry contract: SHORT defines
-            // output coordinates and is never translated/flow-warped. Only LONG is
-            // globally and locally aligned into SHORT coordinates. Ownership changes
-            // later: aligned LONG is the default body/SNR source and exact SHORT is
-            // selected only where LONG has proven information loss.
-            JpegFusion.Registration registration = JpegFusion.estimateRegistration(longBitmap, shortBitmap);
-            Bitmap alignedLong = JpegFusion.alignLongToShort(longBitmap, registration);
-            JpegFusion.recycleBitmap(longBitmap);
-            longBitmap = alignedLong;
+            // V2.17 reverses V2.15 geometry ownership: LONG is the immutable clean
+            // output body and is never globally or locally moved. SHORT is the only
+            // source aligned into LONG coordinates, first by the proven bidirectional
+            // global registration and then by the same bounded residual field.
+            JpegFusion.Registration registration = JpegFusion.estimateRegistration(shortBitmap, longBitmap);
+            Bitmap alignedShort = JpegFusion.alignLongToShort(shortBitmap, registration);
+            JpegFusion.recycleBitmap(shortBitmap);
+            shortBitmap = alignedShort;
             JpegFusion.LocalRegistrationField localRegistration =
-                    JpegFusion.estimateLocalRegistration(longBitmap, shortBitmap);
+                    JpegFusion.estimateLocalRegistration(shortBitmap, longBitmap);
             JpegFusion.AppearanceGain appearanceGain =
                     JpegFusion.estimateAppearanceGain(shortBitmap, longBitmap, exposureRatio);
             float scalarGain = median3(appearanceGain.r, appearanceGain.g, appearanceGain.b);
@@ -846,7 +845,7 @@ final class HdrGlView extends GLSurfaceView {
             RuntimeLogger.event(
                     "GPU_STILL_FUSION",
                     String.format(java.util.Locale.US,
-                            "V2.16 LONG-body/SHORT-recovery GPU multipass start %dx%d ratio=%.3f scalar=%.3f brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
+                            "V2.17 reversed-V2.15 LONG-truth/SHORT-recovery GPU multipass start %dx%d ratio=%.3f scalar=%.3f brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
                             width, height, exposureRatio, scalarGain, brightnessEv, gamma,
                             dehaze, microContrast));
 
@@ -869,19 +868,20 @@ final class HdrGlView extends GLSurfaceView {
 
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shortTexture);
                 GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, shortBitmap, 0);
-                // SHORT recovery samples are immutable source truth when selected.
-                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);
-                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST);
+                // SHORT is the aligned auxiliary, so retain the texture's proven LINEAR
+                // filtering for bounded subpixel residual sampling. LONG is immutable
+                // output detail and therefore remains exact/nearest-sampled.
                 GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, longTexture);
                 GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, longBitmap, 0);
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);
+                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST);
                 uploadRgba8Texture(
                         localFlowTexture,
                         localRegistration.gridWidth,
                         localRegistration.gridHeight,
                         localRegistration.rgba);
-                // V2.16 source-loss analysis is a broad region prior only. At
-                // 3072x4096 this is 192x256 (1/16 per axis); full-resolution mode 5
-                // still makes the binary source decision from real LONG/SHORT data.
+                // V2.17 keeps the same 1/16 analysis allocation. The atlas owns only
+                // recovery topology; it never contains source RGB/detail.
                 int analysisWidth = Math.max(1, (width + 15) / 16);
                 int analysisHeight = Math.max(1, (height + 15) / 16);
                 allocateRgbTexture(evidenceTexture, analysisWidth, analysisHeight);
@@ -899,10 +899,10 @@ final class HdrGlView extends GLSurfaceView {
                 JpegFusion.recycleBitmap(longBitmap);
                 longBitmap = null;
 
-                // V2.16 preserves the proven four-pass saved-still topology. Mode 3
-                // derives LONG information-loss evidence, mode 4 enforces broad
-                // region coherence, mode 5 selects exactly aligned LONG or exact
-                // unwarped SHORT at full resolution, and mode 6 stays pointwise.
+                // V2.17 preserves the exact four-pass saved-still topology. Mode 3
+                // derives LONG-loss/aligned-SHORT evidence, mode 4 closes coherent
+                // ownership regions, mode 5 selects immutable LONG or aligned SHORT
+                // at full resolution, and mode 6 remains pointwise.
                 renderStillPass(
                         evidenceTexture, analysisWidth, analysisHeight,
                         3, longTexture, shortTexture, longTexture,
@@ -953,7 +953,7 @@ final class HdrGlView extends GLSurfaceView {
                 long elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L;
                 RuntimeLogger.event(
                         "GPU_STILL_FUSION",
-                        "V2.16 GPU-only multipass complete ms=" + elapsedMs
+                        "V2.17 GPU-only multipass complete ms=" + elapsedMs
                                 + " outputBytes=" + encoded.length);
                 return encoded;
             } finally {
