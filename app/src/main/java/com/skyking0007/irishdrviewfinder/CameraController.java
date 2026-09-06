@@ -1772,31 +1772,53 @@ final class CameraController {
                 / Math.max(1.0, stats.shortExposureProduct);
         boolean collapsedBracket = physicalRatio < 2.0;
         if (automatic) {
-            // V2.19 Photon-normalized scene key: V2.18 correctly protected the
-            // physical LONG body, but then rendered the already-fused scene roughly
-            // 2.3-2.8 EV too dark. Keep capture/fusion untouched and solve the final
-            // display key from the fused scene itself. High body contrast lowers the
-            // median while retaining bright upper mids; isolated specular pressure
-            // lowers both median and P90 so bulbs stay photographic rather than forcing
-            // the whole image dark. The resulting targets match the supplied Photon
-            // shelf/chandelier/kitchen references without being fixed scene presets.
+            // V2.21 full-distribution photographic key. V2.19 optimized only P50/P90,
+            // so a high-dynamic window could satisfy those two anchors with a large
+            // Gamma lift while collapsing P10/P25 into a gray veil. Keep the physical
+            // bracket and fusion untouched, but fit four robust anchors. The fused
+            // source's P10/P25 ratios preserve scene-native shadow structure; LONG
+            // highlight pressure decides how much upper-body contrast can be retained.
             float contrastStops = (float) (Math.log(
                     Math.max(0.001f, stats.fusedP90Linear)
                             / Math.max(0.001f, stats.fusedP50Linear)) / Math.log(2.0));
-            float contrastPressure = smoothstepFloat(1.20f, 2.60f, contrastStops);
-            float baseMedian = 0.18f * (float) Math.pow(
-                    2.0, -0.45 * Math.max(0.0f, contrastStops - 1.0f));
-            baseMedian = clampFloat(baseMedian, 0.105f, 0.18f);
-            float specularPressure = Math.max(
+            float highlightPressure = Math.max(
                     smoothstepFloat(0.50f, 0.85f, stats.longP98Linear),
                     smoothstepFloat(0.003f, 0.015f, stats.longNearClipFraction));
-            specularPressure *= 1.0f - 0.75f * contrastPressure;
-            float targetMedian = clampFloat(
-                    baseMedian * (1.0f - 0.25f * specularPressure), 0.10f, 0.18f);
-            float targetContrastStops = clampFloat(contrastStops, 1.0f, 2.0f);
+            float contrastPressure = smoothstepFloat(1.20f, 2.60f, contrastStops);
+            float isolatedSpecularPressure = highlightPressure
+                    * (1.0f - 0.75f * contrastPressure);
+
+            // Upper-body key remains Photon-calibrated: ordinary scenes sit near
+            // P90=0.40, while isolated bulbs/speculars lower the body toward 0.28.
+            // A broad high-contrast window keeps a higher P90 but is allowed up to
+            // 2.6 stops of body contrast instead of V2.19's hard 2-stop flattening.
             float targetP90 = clampFloat(
-                    targetMedian * (float) Math.pow(2.0, targetContrastStops),
-                    0.26f, 0.42f);
+                    0.40f - 0.12f * isolatedSpecularPressure, 0.26f, 0.42f);
+            float contrastCeiling = lerpFloat(2.00f, 2.60f, highlightPressure);
+            float targetContrastStops = clampFloat(
+                    contrastStops, 1.00f, contrastCeiling);
+            float targetMedian = clampFloat(
+                    targetP90 / (float) Math.pow(2.0, targetContrastStops),
+                    0.055f, 0.18f);
+
+            // Preserve the scene's own low-end ordering instead of inventing a fixed
+            // black level. These ratios come from the pre-presentation fused scene;
+            // they prevent AUTO gamma from making P10/P25 approach the median.
+            float sourceP10Ratio = clampFloat(
+                    stats.fusedP10Linear / Math.max(0.001f, stats.fusedP50Linear),
+                    0.04f, 0.65f);
+            float sourceP25Ratio = clampFloat(
+                    stats.fusedP25Linear / Math.max(0.001f, stats.fusedP50Linear),
+                    0.15f, 0.85f);
+            float targetP10 = clampFloat(
+                    targetMedian * sourceP10Ratio, 0.003f, targetMedian * 0.85f);
+            float targetP25 = clampFloat(
+                    targetMedian * sourceP25Ratio,
+                    targetP10 * 1.40f, targetMedian * 0.90f);
+            float shadowCompressionPressure = smoothstepFloat(
+                    0.12f, 0.35f, sourceP10Ratio);
+            float p10Weight = 0.45f * shadowCompressionPressure;
+            float p25Weight = 0.65f * shadowCompressionPressure;
 
             float bestScore = Float.POSITIVE_INFINITY;
             float bestBrightness = 0.0f;
@@ -1807,14 +1829,22 @@ final class CameraController {
                 for (float candidateGamma = 0.80f;
                         candidateGamma <= AUTO_PRESENT_GAMMA_MAX + 0.001f;
                         candidateGamma += 0.05f) {
+                    float predictedP10 = predictAutoPresentedLuma(
+                            stats.fusedP10Linear, candidateBrightness, candidateGamma, physicalRatio);
+                    float predictedP25 = predictAutoPresentedLuma(
+                            stats.fusedP25Linear, candidateBrightness, candidateGamma, physicalRatio);
                     float predictedMedian = predictAutoPresentedLuma(
                             stats.fusedP50Linear, candidateBrightness, candidateGamma, physicalRatio);
                     float predictedP90 = predictAutoPresentedLuma(
                             stats.fusedP90Linear, candidateBrightness, candidateGamma, physicalRatio);
+                    float p10Error = log2RatioFloat(predictedP10, targetP10);
+                    float p25Error = log2RatioFloat(predictedP25, targetP25);
                     float medianError = log2RatioFloat(predictedMedian, targetMedian);
                     float p90Error = log2RatioFloat(predictedP90, targetP90);
-                    float score = 1.20f * medianError * medianError
-                            + p90Error * p90Error
+                    float score = p10Weight * p10Error * p10Error
+                            + p25Weight * p25Error * p25Error
+                            + 2.00f * medianError * medianError
+                            + 1.20f * p90Error * p90Error
                             + 0.01f * candidateBrightness * candidateBrightness
                             + 0.01f * (candidateGamma - 1.20f) * (candidateGamma - 1.20f);
                     if (score < bestScore) {
@@ -1842,9 +1872,8 @@ final class CameraController {
                     displayGamma, targetGamma,
                     immediate ? 2.0f : AUTO_PRESENT_GAMMA_STEP);
 
-            // V2.18's mode-6 Dehaze/Micro pass is a global exponent (>1), so in AUTO
-            // it darkens the already normalized JPEG a second time. Keep it exactly
-            // neutral in AUTO. MANUAL retains the existing adaptive clarity behavior.
+            // Keep mode-6 enhancement neutral in AUTO. V2.21 restores contrast in
+            // the actual scene-key fit rather than by adding a second hidden exponent.
             displayDehaze = stepToward(
                     displayDehaze, 0.0f, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
             displayMicroContrast = stepToward(

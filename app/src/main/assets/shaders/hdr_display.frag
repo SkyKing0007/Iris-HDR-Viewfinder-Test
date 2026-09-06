@@ -168,9 +168,22 @@ float longLinearLumaAt(vec2 sampleUv) {
 }
 
 float shortRecoveryValidityAt(vec2 sampleUv) {
+    // Strict seed validity: a seed must have comfortable signal and highlight
+    // headroom of its own before it is allowed to start SHORT ownership.
     vec3 shortRgb = stillShortRgbAt(sampleUv);
     float signal = smoothstep(0.015, 0.055, encodedLuma(shortRgb));
     float headroom = 1.0 - smoothstep(0.955, 0.992, max3(shortRgb));
+    return signal * headroom;
+}
+
+float shortRecoveryDomainValidityAt(vec2 sampleUv) {
+    // V2.21 domain validity is deliberately broader than seed validity. Once a
+    // connected LONG-loss component has a strict seed, a low-texture interior only
+    // needs usable real SHORT signal; it must not punch a LONG hole merely because
+    // it does not satisfy the stricter seed thresholds at every atlas cell.
+    vec3 shortRgb = stillShortRgbAt(sampleUv);
+    float signal = smoothstep(0.006, 0.025, encodedLuma(shortRgb));
+    float headroom = 1.0 - smoothstep(0.985, 0.999, max3(shortRgb));
     return signal * headroom;
 }
 
@@ -316,26 +329,21 @@ float shortRecoveryEvidenceAt(vec2 sampleUv) {
 }
 
 float longLossRecoveryDomainAt(vec2 sampleUv) {
-    // V2.20 separates strict seed proof from the domain through which an already
-    // proven SHORT-owned component may propagate. Literal LONG clipping is allowed
-    // to inherit geometry from its trustworthy boundary because a clipped plateau
-    // cannot provide a local gradient in its interior by definition.
+    // V2.21 makes the recovery domain PHYSICAL rather than confidence-shaped.
+    // Geometry remains mandatory for a strict seed and is enforced as a real
+    // motion/disocclusion barrier during reconstruction, but it may not carve
+    // random holes through the featureless interior of an already-proven clipped
+    // LONG component. This is the key distinction between component topology and
+    // local registration confidence.
     vec3 longRgb = stillLongRgbAt(sampleUv);
-    float shortValid = shortRecoveryValidityAt(sampleUv);
+    float shortUsable = shortRecoveryDomainValidityAt(sampleUv);
     float hardLoss = longHardLossBaseAt(sampleUv);
     float hardSupport = compactHardLossSupportAt(sampleUv);
-    float nearHardBoundary = smoothstep(0.90, 0.975, max3(longRgb))
-        * smoothstep(0.08, 0.30, hardSupport);
+    float nearHardInterior = smoothstep(0.86, 0.965, max3(longRgb))
+        * smoothstep(0.05, 0.24, hardSupport);
     float effectiveLoss = longEffectiveLossAt(sampleUv);
-    float globalGeometry = smoothstep(0.08, 0.32, stillRegistrationConfidence);
-    float localGeometry = smoothstep(
-        0.08, 0.32, registrationNeighborhoodConfidenceAt(sampleUv));
-
-    float hardDomain = max(hardLoss, nearHardBoundary) * globalGeometry;
-    float effectiveDomain = effectiveLoss
-        * max(localGeometry,
-              0.65 * globalGeometry * smoothstep(0.30, 0.70, hardSupport));
-    return shortValid * max(hardDomain, effectiveDomain);
+    float physicalLoss = max(hardLoss, max(nearHardInterior, effectiveLoss));
+    return shortUsable * physicalLoss;
 }
 
 vec3 broadRecoverySeedStatsAt(vec2 sampleUv) {
@@ -364,28 +372,30 @@ vec3 broadRecoverySeedStatsAt(vec2 sampleUv) {
 }
 
 float broadRecoveryDomainAt(vec2 sampleUv) {
+    // Cover the complete 16x16 ownership cell with a dense 5x5 physical-domain
+    // probe. A single strong hard-loss sample may keep the cell connected; vote/
+    // average support handles smoother effective-loss plateaus. No registration
+    // confidence participates here, so confidence dropouts cannot create gray LONG
+    // islands inside one physically connected clipped component.
     vec2 sourceTexel = 1.0 / vec2(textureSize(longTex, 0));
-    vec2 radius = sourceTexel * 8.0;
-    vec2 offsets[9] = vec2[9](
-        vec2(0.0),
-        vec2( radius.x, 0.0), vec2(-radius.x, 0.0),
-        vec2(0.0,  radius.y), vec2(0.0, -radius.y),
-        vec2( radius.x,  radius.y), vec2(-radius.x,  radius.y),
-        vec2( radius.x, -radius.y), vec2(-radius.x, -radius.y));
     float domainSum = 0.0;
     float domainVotes = 0.0;
     float maximumDomain = 0.0;
-    for (int i = 0; i < 9; ++i) {
-        float domainValue = longLossRecoveryDomainAt(
-            clamp(sampleUv + offsets[i], vec2(0.0), vec2(1.0)));
-        domainSum += domainValue;
-        domainVotes += step(0.20, domainValue);
-        maximumDomain = max(maximumDomain, domainValue);
+    for (int oy = -2; oy <= 2; ++oy) {
+        for (int ox = -2; ox <= 2; ++ox) {
+            vec2 offset = vec2(float(ox), float(oy)) * sourceTexel * 4.0;
+            float domainValue = longLossRecoveryDomainAt(
+                clamp(sampleUv + offset, vec2(0.0), vec2(1.0)));
+            domainSum += domainValue;
+            domainVotes += step(0.16, domainValue);
+            maximumDomain = max(maximumDomain, domainValue);
+        }
     }
-    float domainAverage = domainSum / 9.0;
-    return max(
-        smoothstep(0.10, 0.40, domainAverage) * smoothstep(1.0, 5.0, domainVotes),
-        smoothstep(0.35, 0.70, maximumDomain) * smoothstep(1.0, 3.0, domainVotes));
+    float domainAverage = domainSum / 25.0;
+    float supportedInterior = smoothstep(0.045, 0.24, domainAverage)
+        * smoothstep(1.0, 7.0, domainVotes);
+    float hardConnectedCell = smoothstep(0.42, 0.78, maximumDomain);
+    return max(supportedInterior, hardConnectedCell);
 }
 // IRIS_V217_REVERSED_V215_LONG_TRUTH_END
 
@@ -529,11 +539,12 @@ void main() {
         return;
     }
 
-    // IRIS_V220_RATIO_INVARIANT_REGION_RECONSTRUCTION_BEGIN
+    // IRIS_V221_TOPOLOGY_COMPLETE_REGION_RECONSTRUCTION_BEGIN
     // Mode 3 creates two distinct masks: R is a strict, locally registered seed;
-    // G is the broader physical recovery domain. BA carry the residual SHORT flow
-    // owned by the seed. Mode 4 then performs one monotonic geodesic reconstruction
-    // step; HdrGlView ping-pongs mode 4 until the R occupancy stops growing.
+    // G is a topology-complete PHYSICAL LONG-loss + usable-SHORT domain. BA carry
+    // residual SHORT flow owned by the seed. Mode 4 reconstructs to convergence;
+    // local flow confidence is used only as a supported motion/disocclusion barrier,
+    // never as a hole-punching requirement for a featureless clipped interior.
     if (mode == 3) {
         vec3 seedStats = broadRecoverySeedStatsAt(uv);
         float seedStrength = max(
@@ -606,15 +617,33 @@ void main() {
         }
         float flowRms = sqrt(disagreementSum / max(disagreementWeight, 0.0001));
         float coherentFlow = 1.0 - smoothstep(0.85, 1.25, flowRms);
-        float propagate = step(0.35, coherentFlow) * recoveryDomain;
+
+        // A target cell with its own trustworthy local measurement is a genuine
+        // geometric authority. It may join the component only when that measured
+        // residual agrees with the residual propagated from already-owned neighbors.
+        // An unsupported clipped cell has no such authority and therefore inherits
+        // the coherent component flow instead of becoming a false barrier.
+        float targetConfidence = stillLocalRegistrationConfidenceAt(uv);
+        vec2 targetFlowPixels = (stillLocalFlowAt(uv).rg * 2.0 - vec2(1.0))
+            * localFlowMaxPixels;
+        float targetFlowError = length(targetFlowPixels - meanFlowPixels);
+        float targetMeasured = smoothstep(0.16, 0.36, targetConfidence);
+        float targetAgreement = 1.0 - smoothstep(0.75, 1.25, targetFlowError);
+        float geometryBarrier = mix(1.0, targetAgreement, targetMeasured);
+        float propagate = step(0.35, coherentFlow * geometryBarrier) * recoveryDomain;
+
+        vec2 propagatedFlowPixels = mix(
+            meanFlowPixels,
+            targetFlowPixels,
+            targetMeasured * targetAgreement);
         vec2 encodedFlow = localFlowMaxPixels > 0.0
-            ? clamp(vec2(0.5) + 0.5 * meanFlowPixels / localFlowMaxPixels,
+            ? clamp(vec2(0.5) + 0.5 * propagatedFlowPixels / localFlowMaxPixels,
                     vec2(0.0), vec2(1.0))
             : vec2(0.5);
         outColor = vec4(propagate, recoveryDomain, mix(centerState.ba, encodedFlow, propagate));
         return;
     }
-    // IRIS_V220_RATIO_INVARIANT_REGION_RECONSTRUCTION_END
+    // IRIS_V221_TOPOLOGY_COMPLETE_REGION_RECONSTRUCTION_END
 
     if (mode == 5) {
         // IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN

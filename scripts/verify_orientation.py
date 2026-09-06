@@ -21,7 +21,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.20 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.21 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -51,7 +51,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.20 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.21 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -602,13 +602,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.20 - Exact successful V2.19 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.19' in workflow
-        and 'run-id: 33947113826' in workflow
-        and "authority='13393e945e7313d981b38ce5a44e31eceff7dc79'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.19 Actions authority")
-require("authority='f70e85bc3ca8a5ce0fcf0e0c4634ec786e141d73'" not in workflow,
-        "V2.20 must not seed runtime from V2.18 after successful V2.19")
+# 038 / 042 / V2.21 - Exact successful V2.20 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.20' in workflow
+        and 'run-id: 33980347593' in workflow
+        and "authority='b0fb984d31ea8204f89160db2f3f7c1e885624a6'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.20 Actions authority")
+require("authority='13393e945e7313d981b38ce5a44e31eceff7dc79'" not in workflow,
+        "V2.21 must not seed runtime from V2.19 after successful V2.20")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -731,16 +731,18 @@ require(hashlib.sha256(physical_anchor_slice.encode()).hexdigest() ==
         '306add9a9eed6e80d14555c24c8a37f35b93a79f4af7cf6d7d0e939cec6e9e7d',
         "successful V2.18 clean-AE anchor solver changed")
 
-# V2.19 exact post-fusion exposure regression from the supplied V2.18/Photon pairs.
-# The physical bracket remains V2.18-owned. V2.19 solves only the final scene key.
-def body_tone_v219(y):
+# V2.21 full-distribution presentation regression. V2.19 matched only P50/P90;
+# the real V2.20 4x window sample therefore solved to -1.3 EV / Gamma 1.80 and
+# flattened P10/P25 into a gray veil. V2.21 fits P10/P25/P50/P90 together while
+# preserving deep-shadow scenes that already have strong source contrast.
+def body_tone_v221(y):
     if y <= 0.000001:
         return y
     toe = smoothstep_math(0.015, 0.090, y)
     protect = 1.0 - smoothstep_math(0.45, 0.68, y)
     return y + 0.45 * toe * protect * y * (1.0 - max(0.0, min(1.0, y)))
 
-def hdr_fit_v219(y, ratio):
+def hdr_fit_v221(y, ratio):
     bracket_stops = max(1.0, min(6.0, math.log(max(ratio, 1.0001), 2.0)))
     if y <= 0.70:
         return y
@@ -753,77 +755,113 @@ def hdr_fit_v219(y, ratio):
     t = max(0.0, min(1.0, math.log(max(y, 0.000001), 2.0) / headroom))
     return white_anchor + (display_ceiling - white_anchor) * t
 
-def predict_presented_v219(scene_y, brightness_ev, gamma, ratio):
+def predict_presented_v221(scene_y, brightness_ev, gamma, ratio):
     y = max(0.0, scene_y) * (2.0 ** brightness_ev)
-    y = body_tone_v219(y)
-    y = hdr_fit_v219(y, ratio)
+    y = body_tone_v221(y)
+    y = hdr_fit_v221(y, ratio)
     return max(0.0, min(1.0, y)) ** (1.0 / max(0.50, min(2.00, gamma)))
 
-def targets_v219(fused_p50, fused_p90, long_p98, long_clip):
-    contrast_stops = math.log(max(0.001, fused_p90) / max(0.001, fused_p50), 2.0)
-    contrast_pressure = smoothstep_math(1.20, 2.60, contrast_stops)
-    base_median = 0.18 * (2.0 ** (-0.45 * max(0.0, contrast_stops - 1.0)))
-    base_median = max(0.105, min(0.18, base_median))
-    specular_pressure = max(
+def targets_v221(f10, f25, f50, f90, long_p98, long_clip):
+    contrast_stops = math.log(max(0.001, f90) / max(0.001, f50), 2.0)
+    highlight_pressure = max(
         smoothstep_math(0.50, 0.85, long_p98),
         smoothstep_math(0.003, 0.015, long_clip))
-    specular_pressure *= 1.0 - 0.75 * contrast_pressure
-    target_median = max(0.10, min(0.18, base_median * (1.0 - 0.25 * specular_pressure)))
-    target_contrast = max(1.0, min(2.0, contrast_stops))
-    target_p90 = max(0.26, min(0.42, target_median * (2.0 ** target_contrast)))
-    return target_median, target_p90
+    contrast_pressure = smoothstep_math(1.20, 2.60, contrast_stops)
+    isolated_specular = highlight_pressure * (1.0 - 0.75 * contrast_pressure)
+    target_p90 = max(0.26, min(0.42, 0.40 - 0.12 * isolated_specular))
+    contrast_ceiling = 2.00 + 0.60 * highlight_pressure
+    target_contrast = max(1.00, min(contrast_ceiling, contrast_stops))
+    target_p50 = max(0.055, min(0.18, target_p90 / (2.0 ** target_contrast)))
+    source_p10_ratio = max(0.04, min(0.65, f10 / max(0.001, f50)))
+    source_p25_ratio = max(0.15, min(0.85, f25 / max(0.001, f50)))
+    target_p10 = max(0.003, min(target_p50 * 0.85, target_p50 * source_p10_ratio))
+    target_p25 = max(target_p10 * 1.40,
+                     min(target_p50 * 0.90, target_p50 * source_p25_ratio))
+    shadow_pressure = smoothstep_math(0.12, 0.35, source_p10_ratio)
+    return (target_p10, target_p25, target_p50, target_p90,
+            0.45 * shadow_pressure, 0.65 * shadow_pressure)
 
-def solve_presentation_v219(fused_p50, fused_p90, long_p98, long_clip, ratio=4.0):
-    target_median, target_p90 = targets_v219(fused_p50, fused_p90, long_p98, long_clip)
+def solve_presentation_v221(f10, f25, f50, f90, long_p98, long_clip, ratio=4.0):
+    t10, t25, t50, t90, w10, w25 = targets_v221(
+        f10, f25, f50, f90, long_p98, long_clip)
     best = None
     brightness = -4.0
     while brightness <= 1.0001:
         gamma = 0.80
         while gamma <= 2.0001:
-            predicted_median = predict_presented_v219(fused_p50, brightness, gamma, ratio)
-            predicted_p90 = predict_presented_v219(fused_p90, brightness, gamma, ratio)
-            median_error = math.log(max(0.0001, predicted_median) / max(0.0001, target_median), 2.0)
-            p90_error = math.log(max(0.0001, predicted_p90) / max(0.0001, target_p90), 2.0)
-            score = (1.20 * median_error * median_error + p90_error * p90_error
-                     + 0.01 * brightness * brightness + 0.01 * (gamma - 1.20) * (gamma - 1.20))
+            p10 = predict_presented_v221(f10, brightness, gamma, ratio)
+            p25 = predict_presented_v221(f25, brightness, gamma, ratio)
+            p50 = predict_presented_v221(f50, brightness, gamma, ratio)
+            p90 = predict_presented_v221(f90, brightness, gamma, ratio)
+            e10 = math.log(max(0.0001, p10) / max(0.0001, t10), 2.0)
+            e25 = math.log(max(0.0001, p25) / max(0.0001, t25), 2.0)
+            e50 = math.log(max(0.0001, p50) / max(0.0001, t50), 2.0)
+            e90 = math.log(max(0.0001, p90) / max(0.0001, t90), 2.0)
+            score = (w10 * e10 * e10 + w25 * e25 * e25
+                     + 2.00 * e50 * e50 + 1.20 * e90 * e90
+                     + 0.01 * brightness * brightness
+                     + 0.01 * (gamma - 1.20) * (gamma - 1.20))
             if best is None or score < best[0]:
-                best = (score, brightness, gamma, predicted_median, predicted_p90)
+                best = (score, brightness, gamma, p10, p25, p50, p90)
             gamma += 0.05
         brightness += 0.10
-    return target_median, target_p90, best
+    return (t10, t25, t50, t90, w10, w25, best)
 
-# Exact V2.18 shelf final was ~2.27 EV dark at median and ~2.33 EV dark at P90
-# versus the supplied Photon reference. Recovered pre-presentation fused statistics
-# from that exact JPEG must solve to a Photon-like key, not the V2.18 -2.4 EV key.
-shelf_target50, shelf_target90, shelf_solution = solve_presentation_v219(
-    0.01972576, 0.12988126, 0.3373257, 0.0007289, 4.0)
-require(0.100 <= shelf_target50 <= 0.110 and 0.410 <= shelf_target90 <= 0.420,
-        "V2.19 shelf scene-key targets moved away from supplied Photon reference")
-require(0.40 <= shelf_solution[1] <= 0.70 and 1.50 <= shelf_solution[2] <= 1.65,
-        "V2.19 shelf solver must replace V2.18 negative exposure with a bright Photon-like key")
-require(abs(math.log(shelf_solution[3] / 0.10583283, 2.0)) < 0.08
-        and abs(math.log(shelf_solution[4] / 0.39880091, 2.0)) < 0.12,
-        "V2.19 shelf predicted P50/P90 no longer track supplied Photon reference")
+# Recovered pre-presentation V2.18 shelf statistics. Its very deep source P10 must
+# not dominate the fit; P50/P90 remain close to the supplied Photon shelf reference.
+shelf = solve_presentation_v221(
+    0.0014976449, 0.0051540911, 0.0197257439, 0.1298812415,
+    0.3373257, 0.0007289, 4.0)
+require(0.095 <= shelf[2] <= 0.105 and 0.395 <= shelf[3] <= 0.405,
+        "V2.21 shelf target key moved away from Photon-calibrated body")
+require(shelf[4] < 0.05 and shelf[5] < 0.05,
+        "already-deep shelf shadows must not dominate the AUTO fit")
+require(0.20 <= shelf[6][1] <= 0.45 and 1.50 <= shelf[6][2] <= 1.70,
+        "V2.21 shelf solution must retain the bright photographic body without haze")
+require(abs(math.log(shelf[6][5] / 0.10583283, 2.0)) < 0.30
+        and abs(math.log(shelf[6][6] / 0.39880091, 2.0)) < 0.18,
+        "V2.21 shelf P50/P90 drifted materially from supplied Photon reference")
 
-# Exact V2.18 chandelier was ~2.65 EV dark at median and ~2.74 EV dark at P90.
-# A specular-heavy scene must brighten the body while keeping bulb pressure lower.
-ch_target50, ch_target90, ch_solution = solve_presentation_v219(
-    0.05279177, 0.10876445, 0.80, 0.020, 4.0)
-require(0.125 <= ch_target50 <= 0.140 and 0.265 <= ch_target90 <= 0.285,
-        "V2.19 chandelier specular scene-key targets changed")
-require(0.80 <= ch_solution[1] <= 1.01 and 0.90 <= ch_solution[2] <= 1.05,
-        "V2.19 chandelier solver must brighten the body without flattening bulbs")
-require(abs(math.log(ch_solution[3] / 0.13369069, 2.0)) < 0.08
-        and abs(math.log(ch_solution[4] / 0.26844543, 2.0)) < 0.10,
-        "V2.19 chandelier predicted P50/P90 no longer track supplied Photon reference")
+# Chandelier: isolated highlight pressure lowers P90 while its naturally moderate
+# shadow ratio activates four-anchor fitting instead of V2.19's gamma-heavy shortcut.
+chandelier = solve_presentation_v221(
+    0.0135062163, 0.0338126582, 0.0527917832, 0.1087644859,
+    0.80, 0.020, 4.0)
+require(0.130 <= chandelier[2] <= 0.140 and 0.275 <= chandelier[3] <= 0.285,
+        "V2.21 chandelier target key/upper body changed")
+require(0.30 <= chandelier[6][1] <= 0.50 and 1.10 <= chandelier[6][2] <= 1.30,
+        "V2.21 chandelier must not return to a high-gamma veil")
+require(abs(math.log(chandelier[6][5] / 0.13369069, 2.0)) < 0.12
+        and abs(math.log(chandelier[6][6] / 0.26844543, 2.0)) < 0.12,
+        "V2.21 chandelier P50/P90 no longer track supplied Photon reference")
 
-# Ordinary lower-contrast scenes remain brighter, matching the supplied Photon kitchen
-# reference rather than inheriting the dark high-contrast shelf key.
-k_target50, k_target90, k_solution = solve_presentation_v219(0.080, 0.180, 0.35, 0.001, 4.0)
-require(0.165 <= k_target50 <= 0.180 and 0.375 <= k_target90 <= 0.410,
-        "ordinary-scene V2.19 key must remain kitchen-bright")
-require(k_solution[1] > 0.50 and k_solution[3] > 0.16 and k_solution[4] > 0.36,
-        "ordinary V2.19 scenes must use preserved HDR headroom instead of remaining dim")
+# Exact V2.20 device failure: AUTO 4x selected -1.3 EV / Gamma 1.80. The supplied
+# final Iris P10/P25/P50/P90 were ~0.050/0.080/0.098/0.379 while Photon was
+# ~0.009/0.044/0.066/0.356. Inverting the exact V2.20 pointwise tone gives these
+# source anchors. V2.21 must materially deepen P10/P25 and lower Gamma without
+# throwing away the already-correct upper body.
+window = solve_presentation_v221(
+    0.0111906788, 0.0258683423, 0.0378244887, 0.3078418471,
+    0.9936363, 0.0358775, 4.0)
+require(0.055 <= window[2] <= 0.065 and 0.365 <= window[3] <= 0.375,
+        "V2.21 high-dynamic window target must retain deep body contrast")
+require(window[4] > 0.35 and window[5] > 0.50,
+        "V2.20 gray-veil scene must activate four-anchor shadow constraints")
+require(-0.45 <= window[6][1] <= -0.15 and 1.10 <= window[6][2] <= 1.30,
+        "V2.21 window solution must replace -1.3EV/Gamma1.80 haze with photographic contrast")
+require(window[6][3] < 0.025 and window[6][4] < 0.050
+        and 0.050 <= window[6][5] <= 0.070
+        and 0.36 <= window[6][6] <= 0.42,
+        "V2.21 window final distribution must deepen shadows while preserving upper body")
+
+# Ordinary lower-contrast scene remains bright and clean rather than inheriting the
+# high-contrast window key.
+kitchen = solve_presentation_v221(0.020, 0.045, 0.080, 0.180, 0.35, 0.001, 4.0)
+require(0.17 <= kitchen[2] <= 0.18 and 0.395 <= kitchen[3] <= 0.405,
+        "V2.21 ordinary-scene target must remain kitchen-bright")
+require(kitchen[6][1] > 0.35 and 1.00 <= kitchen[6][2] <= 1.20
+        and kitchen[6][5] > 0.17 and kitchen[6][6] > 0.35,
+        "V2.21 ordinary scene must remain bright without shadow flattening")
 
 # V2.18 physical exposure behavior remains mandatory.
 def desired_ratio_v218(p50, p90, p98, long_p95, long_p98, long_clip, current_ratio):
@@ -870,19 +908,23 @@ require(math.isclose(live_step(+0.50), +0.30) and math.isclose(live_step(-0.50),
 require(math.isclose(live_step(+0.05), 0.0) and math.isclose(live_step(-0.05), 0.0),
         "small scene-stat jitter must remain inside exposure hysteresis")
 
-# Presentation controller ownership and capture freeze. V2.19 retains the same
-# MANUAL domains but AUTO now closes the loop on predicted final P50/P90.
+# Presentation controller ownership and capture freeze. V2.21 keeps MANUAL domains
+# unchanged but AUTO now closes the loop on P10/P25/P50/P90 rather than two anchors.
 require('private void updateAdaptivePresentationLocked(' in camera
         and 'AUTO_PRESENT_BRIGHTNESS_MIN_EV = -4.00f' in camera
         and 'AUTO_PRESENT_BRIGHTNESS_MAX_EV = 1.00f' in camera
         and 'AUTO_PRESENT_GAMMA_MIN = 0.50f' in camera
         and 'AUTO_PRESENT_GAMMA_MAX = 2.00f' in camera
-        and 'float contrastPressure = smoothstepFloat(1.20f, 2.60f, contrastStops);' in camera
-        and 'float targetMedian = clampFloat(' in camera
-        and 'float targetP90 = clampFloat(' in camera
-        and 'predictAutoPresentedLuma' in camera
-        and 'log2RatioFloat' in camera,
-        "V2.19 Photon-normalized AUTO scene-key solver missing")
+        and 'float highlightPressure = Math.max(' in camera
+        and 'float contrastCeiling = lerpFloat(2.00f, 2.60f, highlightPressure);' in camera
+        and 'float sourceP10Ratio = clampFloat(' in camera
+        and 'float sourceP25Ratio = clampFloat(' in camera
+        and 'float shadowCompressionPressure = smoothstepFloat(' in camera
+        and 'float predictedP10 = predictAutoPresentedLuma(' in camera
+        and 'float predictedP25 = predictAutoPresentedLuma(' in camera
+        and 'float predictedMedian = predictAutoPresentedLuma(' in camera
+        and 'float predictedP90 = predictAutoPresentedLuma(' in camera,
+        "V2.21 four-anchor AUTO scene-key solver missing")
 require('float targetP90 = lerpFloat(0.024f, 0.020f, highlightPressure);' not in camera
         and '0.029f, 0.023f' not in camera,
         "V2.18 dark MANUAL-calibrated final-render targets survived")
@@ -1003,7 +1045,7 @@ require(gl.count('GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST') >= 2
 require('presentationTexture);\n                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);' in gl,
         "mode-6 must not bilinear-resample the selected-source fused raster")
 
-# V2.20 source-loss atlas separates strict seeds from the physically allowed
+# V2.21 source-loss atlas separates strict seeds from the topology-complete physical
 # propagation domain. The atlas still never carries source RGB.
 require('IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN' in hdr_shader
         and 'float shortRecoveryValidityAt(vec2 sampleUv)' in hdr_shader
@@ -1013,10 +1055,11 @@ require('IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN' in hdr_shader
         and 'float compactHardLossSupportAt(vec2 sampleUv)' in hdr_shader
         and 'float longEffectiveLossAt(vec2 sampleUv)' in hdr_shader
         and 'float shortRecoveryEvidenceAt(vec2 sampleUv)' in hdr_shader
+        and 'float shortRecoveryDomainValidityAt(vec2 sampleUv)' in hdr_shader
         and 'float longLossRecoveryDomainAt(vec2 sampleUv)' in hdr_shader
         and 'vec3 broadRecoverySeedStatsAt(vec2 sampleUv)' in hdr_shader
         and 'float broadRecoveryDomainAt(vec2 sampleUv)' in hdr_shader,
-        "V2.20 seed/domain source-loss evidence chain is incomplete")
+        "V2.21 seed/domain source-loss evidence chain is incomplete")
 require('localLinearRangeAtRadius(sampleUv, 4.0)' in hdr_shader
         and 'localLinearRangeAtRadius(sampleUv, 12.0)' in hdr_shader
         and 'smoothstep(0.68, 0.90, max3(longRgb))' in hdr_shader
@@ -1032,23 +1075,36 @@ require('int analysisWidth = Math.max(1, (width + 15) / 16);' in gl
         "V2.17 ownership atlas must preserve the proven 1/16 allocation")
 require(math.ceil(4096 / 16) == 256 and math.ceil(3072 / 16) == 192,
         "3072x4096 device captures must map to a 192x256 ownership atlas")
-v220_recon = hdr_shader[hdr_shader.index('// IRIS_V220_RATIO_INVARIANT_REGION_RECONSTRUCTION_BEGIN'):
-                         hdr_shader.index('// IRIS_V220_RATIO_INVARIANT_REGION_RECONSTRUCTION_END')]
-require('float seed = step(0.30, seedStrength);' in v220_recon
-        and 'float recoveryDomain = step(0.30, broadRecoveryDomainAt(uv));' in v220_recon
-        and 'float currentOwned = step(0.5, centerState.r);' in v220_recon
-        and 'if (currentOwned > 0.5 || recoveryDomain < 0.5)' in v220_recon
-        and 'float propagate = step(0.35, coherentFlow) * recoveryDomain;' in v220_recon,
-        "V2.20 mode 3/4 must implement strict-seed, mask-constrained monotonic reconstruction")
-require('for (int oy = -2; oy <= 2; ++oy)' not in v220_recon
-        and 'float coherentSupport = seededRegion' not in v220_recon,
+v221_recon = hdr_shader[hdr_shader.index('// IRIS_V221_TOPOLOGY_COMPLETE_REGION_RECONSTRUCTION_BEGIN'):
+                         hdr_shader.index('// IRIS_V221_TOPOLOGY_COMPLETE_REGION_RECONSTRUCTION_END')]
+require('float seed = step(0.30, seedStrength);' in v221_recon
+        and 'float recoveryDomain = step(0.30, broadRecoveryDomainAt(uv));' in v221_recon
+        and 'float currentOwned = step(0.5, centerState.r);' in v221_recon
+        and 'if (currentOwned > 0.5 || recoveryDomain < 0.5)' in v221_recon
+        and 'float propagate = step(0.35, coherentFlow * geometryBarrier) * recoveryDomain;' in v221_recon,
+        "V2.21 mode 3/4 must implement strict-seed, mask-constrained monotonic reconstruction")
+require('for (int oy = -2; oy <= 2; ++oy)' not in v221_recon
+        and 'float coherentSupport = seededRegion' not in v221_recon,
         "retired finite-radius one-pass V2.19 closure returned")
-require('exposureRatio' not in v220_recon,
+require('exposureRatio' not in v221_recon,
         "ownership reconstruction topology must be exposure-ratio invariant")
-require('meanFlowPixels' in v220_recon
-        and 'flowRms' in v220_recon
-        and 'smoothstep(0.85, 1.25, flowRms)' in v220_recon
-        and 'registrationNeighborhoodFlowAt(uv)' in v220_recon,
+domain_slice = hdr_shader[hdr_shader.index('float longLossRecoveryDomainAt(vec2 sampleUv)'):
+                          hdr_shader.index('vec3 broadRecoverySeedStatsAt(vec2 sampleUv)')]
+require('registrationNeighborhoodConfidenceAt' not in domain_slice
+        and 'stillRegistrationConfidence' not in domain_slice
+        and 'shortRecoveryDomainValidityAt(sampleUv)' in domain_slice,
+        "physical recovery domain must not be hole-punched by registration confidence")
+require('for (int oy = -2; oy <= 2; ++oy)' in hdr_shader[hdr_shader.index('float broadRecoveryDomainAt'):hdr_shader.index('// IRIS_V217_REVERSED_V215_LONG_TRUTH_END')]
+        and 'domainSum / 25.0' in hdr_shader,
+        "V2.21 recovery domain must cover each 16x16 atlas cell densely")
+require('float targetConfidence = stillLocalRegistrationConfidenceAt(uv);' in v221_recon
+        and 'float targetFlowError = length(targetFlowPixels - meanFlowPixels);' in v221_recon
+        and 'float geometryBarrier = mix(1.0, targetAgreement, targetMeasured);' in v221_recon,
+        "supported local-flow disagreement must remain the motion/disocclusion barrier")
+require('meanFlowPixels' in v221_recon
+        and 'flowRms' in v221_recon
+        and 'smoothstep(0.85, 1.25, flowRms)' in v221_recon
+        and 'registrationNeighborhoodFlowAt(uv)' in v221_recon,
         "wide clipped regions must inherit coherent residual geometry from proven seeds")
 
 # Saved mode 5 is reversed-V2.15 source truth: LONG by default, aligned SHORT as a
@@ -1060,7 +1116,7 @@ require('IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN' in hdr_shader
         and 'vec3 longRgb = stillLongRgbAt(uv);' in hdr_shader
         and 'vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;' in hdr_shader
         and 'vec3 longScene = srgbToLinear(longRgb);' in hdr_shader,
-        "V2.20 mode 5 must use propagated SHORT residual geometry and immutable LONG candidates")
+        "V2.21 mode 5 must use propagated SHORT residual geometry and immutable LONG candidates")
 v217_mode5 = hdr_shader[hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN'):
                          hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_END')]
 require('float shortOwns = step(0.50, support.r) * usableBracket;' in v217_mode5
@@ -1151,20 +1207,20 @@ require('return Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));' 
 require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kts').read_text().lower(),
         "OpenCV must remain simulation-only and absent from runtime")
 
-# V2.20 changes topology only. Successful V2.19 exposure/tone/capture owners and
-# JpegFusion registration/calibration utility remain exact.
-require(hashlib.sha256(camera.encode()).hexdigest() ==
-        '032b90942199b400d2ea8ac91de27e49af6d3e0eaa92560865ae0edc2803673c',
-        "successful V2.19 CameraController bytes changed")
+# V2.21 changes only topology-domain semantics + AUTO presentation. Successful
+# V2.20 alignment/lifecycle/capture/DNG/UI owners remain byte-exact.
+require(hashlib.sha256(gl.encode()).hexdigest() ==
+        '7eb802b71a529cb44144403ea0098726562adfe027154eeb112dace07954066d',
+        "successful V2.20 HdrGlView bytes changed")
 require(hashlib.sha256(fusion.encode()).hexdigest() ==
         '7aa3f4956f28a48b204375c0123195c020d57c8d8edd774946dccb39d42f7434',
-        "successful V2.19 JpegFusion bytes changed")
+        "successful V2.20 JpegFusion bytes changed")
 require(hashlib.sha256(saver.encode()).hexdigest() ==
         '60cfa6d09db46d2af8fc1917e5ebf1e3c580102e1b07fe6bfea8e683c8372248',
-        "successful V2.19 CaptureSetSaver bytes changed")
+        "successful V2.20 CaptureSetSaver bytes changed")
 require(hashlib.sha256(main.encode()).hexdigest() ==
         'b142084c33bb2482ad60113bb66653b9c3efeff55c9bdcdd84082d3345a4be3b',
-        "successful V2.19 MainActivity bytes changed")
+        "successful V2.20 MainActivity bytes changed")
 
 # V2.17 permanent visual/source regressions include the exact V2.16 device failure:
 # valid SHORT highlight pieces may not be dropped by a per-pixel re-proof inside one
@@ -1185,7 +1241,7 @@ require('(width + 15) / 16' in gl
         and 'while (propagationPasses < maxPropagationPasses)' in gl
         and 'counts[0] == previousOwned' in gl
         and 'readTopologyTexture = writeTopologyTexture;' in gl,
-        "V2.20 connected ownership topology/convergence loop disappeared")
+        "V2.21 must preserve V2.20 connected ownership topology/convergence loop")
 require('aligned auxiliary' in hdr_shader and 'immutable LONG body' in hdr_shader,
         "LONG-body / aligned-SHORT source contract markers disappeared")
 require('radianceFloorWeight' not in hdr_shader and 'radianceRaised' not in hdr_shader,
@@ -1252,9 +1308,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 37' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.20"' in Path('app/build.gradle.kts').read_text(),
-        "V2.20 version/build marker must be exact")
+require('versionCode = 38' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.21"' in Path('app/build.gradle.kts').read_text(),
+        "V2.21 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1302,7 +1358,7 @@ require('int[] shortPixels = new int[width * rowsPerStrip];' in fusion
         and 'supportEvidence' not in fusion,
         "byte-preserved CPU utility must use bounded strip buffers and no LONG support mask")
 
-# V2.20 exact wide-bracket topology regression. The supplied MANUAL failure used
+# V2.21 topology regression preserves V2.20 convergence and adds the exact 4x domain-hole failure. The supplied MANUAL failure used
 # SHORT 1/1000 ISO50 and LONG 1/100 ISO100 = 20x / 4.32 EV. At the production
 # 1/16 atlas, its large hard-loss components contain interior cells roughly 14 cells
 # from a valid boundary, far beyond the retired radius-2 one-pass closure.
@@ -1388,6 +1444,21 @@ owned20, _ = reconstruct_mask(seed20, domain20)
 require(owned20[center][center],
         "exact 20x wide-plateau center must inherit SHORT ownership after convergence")
 
+# Exact V2.20 4x failure class: propagation itself converged, but confidence-shaped
+# G contained internal false holes. Geometry confidence may be absent in an interior
+# cell without removing that cell from the physical LONG-loss domain.
+physical_domain_4x = [[True] * 9 for _ in range(9)]
+seed_4x = [[False] * 9 for _ in range(9)]
+seed_4x[0][4] = True
+registration_supported = [[True] * 9 for _ in range(9)]
+registration_supported[4][4] = False
+# V2.21 domain is physical, so the unsupported center remains eligible.
+require(physical_domain_4x[4][4] and not registration_supported[4][4],
+        "4x fixture must contain a registration-confidence hole inside physical loss")
+owned4, _ = reconstruct_mask(seed_4x, physical_domain_4x)
+require(owned4[4][4],
+        "V2.21 physical domain must carry SHORT ownership through the exact 4x confidence hole")
+
 # FIT math replay: producer axis swap can change geometry, display rotation cannot.
 def fit_scale(frame_w, frame_h, axis_swap, viewport_w, viewport_h):
     rotated_w = frame_h if axis_swap else frame_w
@@ -1448,4 +1519,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.20 REGRESSION PASS: exact successful V2.19 authority, V2.18/V2.19 capture+tone preserved, finite-radius closure replaced by convergent LONG-loss-constrained GPU reconstruction with coherent residual-flow inheritance and 4x/20x/64x topology invariance")
+print("V1.4.11 V2.21 REGRESSION PASS: exact successful V2.20 authority, V2.18 physical capture preserved, V2.20 convergence preserved, confidence-free physical recovery topology + measured-flow barriers, and four-anchor P10/P25/P50/P90 AUTO presentation with exact 4x haze/domain-hole plus 20x/64x invariance regressions")

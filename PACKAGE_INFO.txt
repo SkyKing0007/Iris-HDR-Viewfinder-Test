@@ -1,4 +1,4 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.20 RATIO-INVARIANT CONNECTED-REGION FUSION PACKAGE INFO
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.21 TOPOLOGY-COMPLETE RECOVERY + FULL-DISTRIBUTION AUTO TONE PACKAGE INFO
 
 STATUS
 PREPARED / UPLOAD-READY only after packaged proof completes; NOT BUILD-PROVEN until GitHub Actions succeeds.
@@ -7,66 +7,67 @@ No backup branch requested or created.
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 37
-Target versionName: 1.0-v1.4.11-v2.20
+Target versionCode: 38
+Target versionName: 1.0-v1.4.11-v2.21
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: 13393e945e7313d981b38ce5a44e31eceff7dc79
-Tree: 401b1c3b2fdf7ae979788d21bf963471debe874b
-GitHub Actions run: 33947113826 — SUCCESS
-Artifact ID: 9963691541
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.19
-Artifact ZIP digest: sha256:ecbe17d5988a059c49bbe863624aa6d55eccef4a5ed4e2c361459fb3a0344e54
-V2.19 APK SHA-256: 4539fa6ebf6cf1ebecf589936ada659e2a3be6a19ac51a8bb400bfc03b62fe6d
-V2.19 source-candidate TAR SHA-256: 67deec2a8e644b8e06f85b4ae1a9537c6725b16e3466f34fdbce8196044df91d
-V2.19 runtime manifest SHA-256: e9c9effd529ee23a44a207c59083f51b5d19483d880fc9231d1ceff1699a2dfa
-V2.19 repository manifest SHA-256: 5b3dedc8a61260d0adb99ea1ae6b1b9391d3aa2bf2ed30ca333f313ac1eeaecf
-V2.19 regressions SHA-256: 343be162660a589b5409afeb5c5e5c7b4ff3367b56b06b87ea1e49eac2a30c7d
+Commit: b0fb984d31ea8204f89160db2f3f7c1e885624a6
+Tree: 2f997efe5f6d69025d7fa008aefb96f1a58f3561
+GitHub Actions run: 33980347593 — SUCCESS
+Artifact ID: 9973585046
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.20
+Artifact ZIP digest: sha256:ef3932f6fab439d085888bc85145b933e5fb77c9e081ddf68b8a08655777eb04
+V2.20 APK SHA-256: 658a322a64882d20b9ab576eff4067ce699d40d37cd1e37c159a9fe5279b8460
+V2.20 source-candidate TAR SHA-256: 4b0788d771edb6997c7c3b167202ec7853c5f37b2eab331620f4d016f099b6a3
+V2.20 runtime manifest SHA-256: 72a29a8ed08c131cf8a79747d46003a12473223e24fd66decc6a9cab73d74209
+V2.20 repository manifest SHA-256: e1e5e51e092e0805da425a3655eea08fc54484cd00d32c0574cc3146532afbb0
+V2.20 regressions SHA-256: d6a5430dc56e84c0a39515d85d20c69d51e14f29f373144c616dada0047fcfc9
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.19/V2.18 procedure inherited unchanged. Step count/order, action versions, authority reconstruction, allowlist proof, deterministic full-index patch proof, pinned real glslang commands, real Java compiler, PRE-BUILD SAFETY proof, full :app:assembleDebug, post-build invariance, exactly-one-APK proof and artifact export remain unchanged.
+Exact successful V2.19 procedure as inherited unchanged by successful V2.20. Step count/order, action versions, authority reconstruction, strict changed-file allowlist, deterministic full-index patch proof, pinned real glslang commands, real project Java compiler, PRE-BUILD SAFETY proof, full :app:assembleDebug, post-build invariance, exactly-one-APK proof and artifact export remain unchanged.
 
-PRIMARY V2.20 DEVICE EVIDENCE
-The supplied MANUAL V2.19 failure is SHORT 1/1000 ISO50 and LONG 1/100 ISO100 = 20x / 4.32 EV. Global displacement was approximately 0.5 pixel with negligible scale/rotation error; physical exposure ratio and JPEG appearance gain were both ~20x. The failure was therefore isolated to ownership topology: a large LONG-clipped component exceeded the finite reach of the old one-pass 1/16 atlas closure, leaving internal LONG holes/white-cyan-orange fragments inside a valid SHORT recovery component.
+PRIMARY V2.21 DEVICE EVIDENCE
+1) Exact V2.20 AUTO 4x window failure: SHORT 1/167 ISO50 / LONG 1/167 ISO200. V2.20 convergence improved large-region recovery, but FUSED still showed flat gray islands absent from both source images. This proves the remaining defect is not finite propagation reach; the recovery-domain mask itself still contains confidence-shaped interior holes.
+2) Exact V2.20 tone failure: AUTO selected approximately -1.3 EV / Gamma 1.80. Supplied final linear-luma percentiles were approximately P10 0.050 / P25 0.080 / P50 0.098 / P90 0.379, while Photon reference was approximately P10 0.009 / P25 0.044 / P50 0.066 / P90 0.356. Upper-body/highlight brightness was already close; shadows/lower mids were over-lifted into haze.
 
-STRICT V2.20 FUSION CONTRACT
-- AUTO and MANUAL share one fusion engine; only exposure selection differs.
-- Fusion topology must remain correct across the supported 4x..64x / 2..6 EV range; exact regressions cover 4x, supplied 20x and 64x.
+STRICT V2.21 FUSION CONTRACT
+- Preserve successful V2.20 monotonic convergence reconstruction unchanged in mechanics.
+- AUTO and MANUAL continue through one shared fusion engine; exposure ratio changes the physical loss domain size, not topology mechanics.
 - LONG remains the primary clean saved body/default RGB/detail owner.
-- Existing V2.19 registration direction and capture/radiometric owners remain unchanged.
-- Mode 3 separates a strict locally registered SHORT-recovery seed from a broader LONG-loss + valid-SHORT recovery domain.
-- Domain membership alone never creates a seed.
-- Mode 4 performs monotonic geodesic reconstruction by dilation under the recovery mask; it ping-pongs at 1/16 atlas resolution until ownership occupancy stops growing.
-- The retired fixed 5x5/radius-2 ownership closure is forbidden.
-- Hard-clipped interiors are not required to produce their own LONG gradient; coherent residual SHORT geometry propagates inward from proven seeds.
-- Propagated residual-flow disagreement remains a hard barrier; disconnected/mismatched motion cannot be bridged merely by brightness.
+- Existing successful V2.20 global/local registration direction, exposure-ratio authority, appearance gain and source sampling remain unchanged.
+- Mode 3 retains a strict locally registered SHORT-recovery seed.
+- The broader recovery domain is now PHYSICAL LONG information loss + usable real SHORT signal/headroom; local registration confidence is forbidden from carving interior holes in that domain.
+- Hard-clipped/effectively-lost interiors may inherit the connected component's proven residual geometry; they are not required to independently provide texture/flow evidence destroyed by clipping.
+- A cell with its own trustworthy measured local residual remains a geometry authority: if its measured residual disagrees with the propagated component residual, Mode 4 treats that disagreement as a motion/disocclusion barrier.
+- Unsupported clipped interior cells inherit coherent component flow rather than becoming false barriers.
+- Mode 4 remains monotonic geodesic reconstruction to convergence under the physical recovery mask.
 - Mode 5 remains binary real-source ownership: immutable LONG by default, aligned SHORT only inside converged recovery ownership.
-- No fractional LONG/SHORT high-frequency RGB mix, synthetic radiance fill or third-source RGB.
-- Convergence readback inspects only the small ownership atlas; production source RGB remains GPU-owned.
+- No fractional LONG/SHORT high-frequency RGB mix, synthetic radiance fill, CPU source fusion or third-source RGB.
+- Permanent topology regressions retain 4x / exact 20x / 64x invariance and add the exact V2.20 4x confidence-hole failure class.
 
-CAPTURE / EXPOSURE / TONE CONTRACT — BYTE-PROTECTED FROM SUCCESSFUL V2.19
-- V2.18 AUTO physical bracket solver remains 4x..64x with full 6-EV capability when feasible.
-- SHORT and LONG remain independent captures; SHORT effective exposure never exceeds LONG.
-- MANUAL exposure selection and truthful flicker-safe actual reporting remain unchanged.
-- Physical 50/60-Hz anti-flicker solver remains unchanged.
-- Actual CaptureResult exposure ratio remains final radiometric authority.
-- V2.19 Photon-normalized post-fusion scene-key solver remains byte-exact.
-- AUTO mode-6 Dehaze/Micro neutralization and MANUAL presentation behavior remain unchanged.
-- DNG and JPEG ownership remain unchanged.
+STRICT V2.21 AUTO PRESENTATION CONTRACT
+- Physical AUTO exposure remains byte-preserved from successful V2.20/V2.18; this is not an exposure-capture change.
+- V2.19/V2.20 P50/P90-only AUTO scene-key fitting is insufficient because two bright/body anchors can be satisfied by excessive Gamma while the black/shadow floor is lifted.
+- AUTO now closes the loop jointly on robust P10/P25/P50/P90 predicted final output.
+- P10/P25 targets are derived from the fused scene's own low-end ratios, preserving real scene-native shadow ordering rather than imposing a fixed black value.
+- LONG highlight pressure determines how much upper-body contrast is retained; P90 remains near the already-correct Photon-like range instead of globally darkening the frame.
+- Exact V2.20 window regression must replace the -1.3EV/Gamma1.80 haze solution with a substantially lower-Gamma photographic solution while materially deepening P10/P25 and retaining P90.
+- Existing shelf/chandelier/ordinary-scene regressions remain required so the window fix cannot darken every scene globally.
+- AUTO mode-6 Dehaze/Micro remains neutral; MANUAL presentation behavior remains unchanged.
 
 INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 2
 - app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 
 PROTECTED RUNTIME — EXACTLY 10
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/fullscreen.vert
 - app/src/main/assets/shaders/oes_to_rgb.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
@@ -77,10 +78,10 @@ INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-YES, PAYLOAD/REGRESSION CONTRACT ONLY. Authority/version/hash/allowlist/artifact payloads advance to V2.20. Successful V2.19 compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, deterministic patch replay, freeze and one-APK proof remain unchanged.
+YES, PAYLOAD/REGRESSION CONTRACT ONLY. Authority/version/hash/allowlist/artifact payloads advance to V2.21. Successful V2.19/V2.20 compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, deterministic patch replay, freeze and one-APK proof remain unchanged.
 
-V2.20 RUNTIME DIGEST
-72a29a8ed08c131cf8a79747d46003a12473223e24fd66decc6a9cab73d74209
+V2.21 RUNTIME DIGEST
+6c2af087efaa324ca44751ea89e35e8b2596b6cd033dd00a79faf18e8f4c7987
 Runtime universe remains exactly 12 files.
 
 COMPILER STATUS BEFORE ACTIONS
@@ -89,4 +90,4 @@ REAL project Java compiler: NOT RUN locally.
 FULL :app:assembleDebug: NOT RUN locally.
 
 FINAL ACTIONS AUTHORITY
-Until V2.20 succeeds, final authority remains V2.19 commit 13393e945e7313d981b38ce5a44e31eceff7dc79 / run 33947113826 / artifact 9963691541.
+Until V2.21 succeeds, final authority remains V2.20 commit b0fb984d31ea8204f89160db2f3f7c1e885624a6 / run 33980347593 / artifact 9973585046.
