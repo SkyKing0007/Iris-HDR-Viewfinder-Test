@@ -1,24 +1,29 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.24
+# Iris HDR Viewfinder Test V1.4.11 V2.25
 
-V2.24 is based on exact successful V2.23 Actions authority (`e4b75493b0ddd1212a1c50e9ac4913902c164b33`, run `34014611207`, artifact `9983535386`).
+V2.25 is based on the exact successful V2.24 compiled candidate: commit `f5ed95f8da45adc806dd421bc8c805155a311ccf`, Actions run `34042332593`, artifact `9992085735`.
 
-## What changes
+## What V2.25 corrects
 
-V2.23 HDR capture, SHORT/LONG exposure policy, GPU fusion, highlight recovery, tone/brightness, DNG handling, shaders, `HdrGlView`, `JpegFusion`, and the exact NAFNet model weights remain protected. V2.24 changes only the post-fusion NAFNet application contract plus UI/focus/lifecycle ownership around the existing capture.
+The combined bathroom-window and bathroom-bulb audit found that AUTO still had stale cross-owner highlight vetoes. SHORT and LONG were therefore often both photon-starved even though the architecture already has separate highlight and body exposures. The same samples also exposed a flat upper-highlight tone plateau and a software AUTO-presentation oscillation.
 
-- The camera selector is compact (`ID0`, etc.); detailed capability text remains in runtime logging.
-- The adjacent button is labeled exactly `Denoise`; each press toggles NAFNet on/off, with the choice frozen at capture start. OFF writes the exact pre-NAFNet fused JPEG.
-- NAFNet ON no longer receives general image-reconstruction authority. Broad/DC neural residual is removed per RGB channel, and correction is admitted only inside positively proven locally smooth source interiors.
-- Coherent microstructure is source-authoritative everywhere, independent of semantics or neighboring background: hair, pine needles, fabric/denim weave, microfiber, fur, foliage, grass, stitching, mesh, text, thin branches and comparable dense detail fail closed to the original fused image.
-- Touch-to-focus is Camera2 AF-only; it never sets AE regions and does not alter V2.23 HDR SHORT/LONG exposure solving or fusion.
-- After GPU fusion bytes exist and both acquired RAW Images have been released, Iris shows `HDR Captured. You can now move the phone.` and starts a foreground `mediaProcessing` lifetime lease. From that proven boundary onward, ordinary Home/backgrounding no longer aborts optional NAFNet/final file writes. The service owns no image math and stops when the capture succeeds or fails.
+V2.25 implements the audit literally:
 
-## Protected V2.23 image owners
+- **SHORT_HEADROOM_TARGET** is solved from SHORT P99 headroom and may move SHORT brighter or darker. Highlight clipping pressure may only reduce SHORT.
+- **LONG_BODY_TARGET** is solved independently from robust LONG P50/P95 body statistics. SHORT P98, LONG P98 and global LONG near-clipping may no longer veto the body's exposure.
+- **BRACKET_RATIO** is derived after those two targets. The existing 4x..64x physical contract remains, but V2.25 does not hardcode a 3EV/4EV/5EV bracket.
+- Exposure convergence is bounded to 0.30EV normally and 1.0EV on a scene cut.
+- The recovered-highlight shoulder is now strictly monotonic toward white instead of collapsing different valid highlight values into a gray ceiling. The same equation is used by the GPU shader, AUTO presentation predictor and dormant CPU fail-closed path.
+- The CPU fallback precomputes the exponential shoulder into a LUT outside the full-resolution pixel loop, preserving the established no-expensive-per-pixel-operations regression.
+- AUTO presentation counts each distinct complete SHORT/LONG pair once, requires three persistent pairs, uses deadbands, and limits accepted motion to 0.08EV brightness / 0.025 gamma per update. This targets the observed 1.75↔1.80 same-exposure software pumping.
 
-`HdrGlView.java`, `JpegFusion.java`, all four GLSL shaders, the exact 62,454,048-byte NAFNet model and its license, `FrameMeta.java`, and `MediaStoreWriter.java` remain byte-identical to successful V2.23.
+## What stays protected
+
+V2.24 `HdrGlView` registration/recovery ownership is byte-identical. The NAFNet model and structure-safe denoise/toggle, AF-only touch focus, background-safe processing, DNG handling, media writing, capture ownership and the non-highlight shaders remain unchanged.
+
+The runtime change is exactly three files: `CameraController.java`, `JpegFusion.java`, and `hdr_display.frag`.
 
 ## Build proof
 
-The successful V2.22/V2.23 15-step GitHub Actions procedure is preserved in the same order. V2.24 updates only the new authority/version/hash/allowlist/regression payload needed for this candidate. Real project Java compilation and full `:app:assembleDebug` remain authoritative in GitHub Actions.
+The successful V2.24 GitHub Actions procedure is preserved without reordering or substitution. V2.25 updates only authority/version/hash/allowlist/regression payloads required by the new candidate. Changed GLSL must pass the same pinned real `glslangValidator`; changed Java must pass the real project `javac`; full `:app:assembleDebug` remains mandatory.
 
-V2.24 is **PREPARED / UPLOAD-READY only after clean-extract replay**. It is not build-proven until its GitHub Actions run succeeds.
+V2.25 is **PREPARED / UPLOAD-READY only after clean-extract replay**. It is not build-proven until its GitHub Actions run succeeds.

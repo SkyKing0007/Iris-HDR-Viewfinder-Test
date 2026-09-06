@@ -26,7 +26,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.24 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.25 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -56,7 +56,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.24 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.25 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -268,11 +268,17 @@ require('private static float mapLut(float value, float[] lut) {' in fusion,
         "mapLut helper required by saved Gamma must remain present")
 require('const float knee = 0.70;' in hdr_shader and 'HDR_KNEE = 0.70f' in fusion,
         "live/save HDR knee must remain 0.70")
-require('0.82 - 0.04 * (bracketStops - 1.0)' in hdr_shader
-        and '0.82f - 0.04f * (bracketStops - 1.0f)' in fusion,
-        "live/save white-anchor policy changed")
-require('whiteAnchor + 0.14' in hdr_shader and 'whiteAnchor + 0.14f' in fusion,
-        "live/save display-ceiling policy changed")
+require('0.45 + 0.06 * (bracketStops - 2.0)' in hdr_shader
+        and '0.45f + 0.06f * (bracketStops - 2.0f)' in fusion
+        and '0.45f + 0.06f * (bracketStops - 2.0f)' in camera,
+        "V2.25 live/save/predictor monotonic shoulder scale must stay synchronized")
+require('1.0 - exp(-distanceAboveKnee / shoulderScale)' in hdr_shader
+        and 'Math.exp(' in fusion
+        and 'Math.exp(-distanceAboveKnee / shoulderScale)' in camera,
+        "V2.25 monotonic shoulder equation missing from live/save/predictor owners")
+require('whiteAnchor' not in hdr_shader and 'displayCeiling' not in hdr_shader
+        and 'whiteAnchor' not in fusion and 'displayCeiling' not in fusion,
+        "retired bracket-dependent gray highlight ceiling returned")
 require('adaptiveAppearanceLift' not in hdr_shader and 'appearanceLiftScale' not in fusion,
         "retired global appearance lift must not return")
 require('65_536.0' in fusion and '65_536.0' in saver and '65_536.0' in gl and '65536.0' in hdr_shader,
@@ -357,9 +363,9 @@ require('STATS_WIDTH = 32' in gl and 'STATS_HEIGHT = 24' in gl
 require('AUTO_LIVE_HYSTERESIS_EV = 0.10' in camera
         and 'AUTO_LIVE_MAX_STEP_EV = 0.30' in camera
         and 'AUTO_LIVE_SCENE_CUT_EV = 0.70' in camera
-        and 'AUTO_LIVE_SCENE_CUT_MAX_STEP_EV = 6.0' in camera
+        and 'AUTO_LIVE_SCENE_CUT_MAX_STEP_EV = 1.0' in camera
         and 'AUTO_LIVE_UPDATE_MIN_NS = 80_000_000L' in camera,
-        "V2.3 fast scene-cut AUTO response bounds missing")
+        "V2.25 bounded scene-cut AUTO response contract missing")
 require('setSceneStatsListener(controller::onHdrSceneStats)' in main
         and 'processHdrSceneStatsLocked' in camera,
         "live scene-statistics route to CameraController missing")
@@ -575,54 +581,55 @@ require('60 FPS CROP ON: request fixed 60/60 preview' in main,
         "UI must state explicit force-60 semantics")
 
 
-# 036 / 043 / V2 - Exact V1.4.7 highlight mapping plus V1.4.11-V2 brightness/gamma math.
-def v147_policy(exposure_ratio):
+# 036 / 043 / V2.25 - Preserve V1.4.7 SHORT admission geometry while replacing
+# only the old gray-ceiling tone curve with the monotonic Photon-like shoulder.
+def v225_policy(exposure_ratio):
     ratio = max(1.0, min(65536.0, exposure_ratio))
     stops = max(1.0, min(6.0, math.log(max(ratio, 1.0001), 2.0)))
     clip_start = max(0.90, min(0.95, 0.90 + 0.01 * (stops - 1.0)))
-    white_anchor = max(0.68, min(0.82, 0.82 - 0.04 * (stops - 1.0)))
-    display_ceiling = max(0.84, min(0.96, white_anchor + 0.14))
-    return ratio, stops, clip_start, white_anchor, display_ceiling
+    shoulder_scale = max(0.42, min(0.72, 0.45 + 0.06 * (stops - 2.0)))
+    return ratio, stops, clip_start, shoulder_scale
 
 def smoothstep_math(edge0, edge1, value):
     t = max(0.0, min(1.0, (value - edge0) / (edge1 - edge0)))
     return t * t * (3.0 - 2.0 * t)
 
 def map_peak_math(scene_peak, exposure_ratio, brightness_ev=0.0):
-    ratio, stops, _, white_anchor, display_ceiling = v147_policy(exposure_ratio)
+    ratio, stops, _, shoulder_scale = v225_policy(exposure_ratio)
     boosted = scene_peak * (2.0 ** max(-16.0, min(1.0, brightness_ev)))
     knee = 0.70
     if boosted <= knee:
         return boosted
-    if boosted <= 1.0:
-        t = max(0.0, min(1.0, (boosted - knee) / (1.0 - knee)))
-        return knee + (white_anchor - knee) * t
-    t = max(0.0, min(1.0, math.log(boosted, 2.0) / max(math.log(max(ratio, 1.0001), 2.0), 0.0001)))
-    return white_anchor + (display_ceiling - white_anchor) * t
+    distance = max(boosted - knee, 0.0)
+    return max(knee, min(1.0,
+        knee + (1.0 - knee) * (1.0 - math.exp(-distance / shoulder_scale))))
 
-ratio8, stops8, clip8, anchor8, ceiling8 = v147_policy(8.0)
+ratio8, stops8, clip8, shoulder8 = v225_policy(8.0)
 require(math.isclose(stops8, 3.0, abs_tol=1e-6), "8x bracket must equal 3 EV")
 require(math.isclose(clip8, 0.92, abs_tol=1e-6), "8x SHORT admission must begin at 92% LONG code")
-require(math.isclose(anchor8, 0.74, abs_tol=1e-6) and math.isclose(ceiling8, 0.88, abs_tol=1e-6),
-        "V1.4.7 3-EV highlight anchors changed")
 require(smoothstep_math(clip8, 0.995, 0.50) == 0.0,
         "SHORT must contribute zero in healthy LONG shadows/midtones")
 require(map_peak_math(0.40, 8.0, 0.0) == 0.40,
-        "0.0 EV must be the exact no-brightness-change V1.4.7 baseline")
+        "0.0 EV must remain the exact no-brightness-change lower-body baseline")
 require(map_peak_math(0.40, 8.0, 0.5) > map_peak_math(0.40, 8.0, 0.0),
         "+0.5 EV must brighten a lower midtone")
-require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
-        "brightness gain must be highlight-fitted rather than post-SDR clipped")
-require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
-        "recovered highlight ordering must survive positive Brightness EV")
+for ratio in (4.0, 8.0, 16.0, 32.0, 64.0):
+    mapped = [map_peak_math(x, ratio, 0.0) for x in (0.70, 0.80, 1.0, 1.2, 1.5, 2.0, 4.0)]
+    require(all(b > a for a, b in zip(mapped, mapped[1:])),
+            f"V2.25 highlight shoulder must remain strictly monotonic at ratio {ratio}x: {mapped}")
+    require(mapped[-1] > 0.99,
+            f"V2.25 intense valid highlight energy must converge toward white at ratio {ratio}x")
+require(map_peak_math(1.0, 32.0, 0.0) < map_peak_math(1.5, 32.0, 0.0)
+        < map_peak_math(2.0, 32.0, 0.0),
+        "5-EV valid highlight separation must not flatten or reverse")
 
-# 038 / 042 / V2.24 - Exact successful V2.23 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.23' in workflow
-        and 'run-id: 34014611207' in workflow
-        and "authority='e4b75493b0ddd1212a1c50e9ac4913902c164b33'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.23 Actions authority")
-require("authority='8d47c8a37a5dfd1a6cabec6eb56a0616a83480e3'" not in workflow,
-        "V2.24 must not seed runtime from V2.22 after successful V2.23")
+# 038 / 042 / V2.25 - Exact successful V2.24 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.24' in workflow
+        and 'run-id: 34042332593' in workflow
+        and "authority='f5ed95f8da45adc806dd421bc8c805155a311ccf'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.24 Actions authority")
+require("authority='e4b75493b0ddd1212a1c50e9ac4913902c164b33'" not in workflow,
+        "V2.25 must not seed runtime from V2.23 after successful V2.24")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -659,16 +666,76 @@ require('DISPLAY_GAMMA_MIN = 0.50f' in main
         "Gamma slider must remain 0.50..2.00 in 0.05 increments")
 require('AUTO_BRACKET_MIN_RATIO = 4.0' in camera
         and 'AUTO_BRACKET_MAX_RATIO = 64.0' in camera
-        and 'AUTO_SHORT_P50_LONG_TARGET = 0.015' in camera
-        and 'AUTO_SHORT_P90_LONG_TARGET = 0.10' in camera
-        and 'AUTO_SHORT_P98_LONG_HEADROOM = 0.65' in camera
+        and 'AUTO_LONG_BODY_P50_TARGET = 0.015' in camera
+        and 'AUTO_LONG_BODY_P95_TARGET = 0.24' in camera
+        and 'AUTO_LONG_BODY_SCALE_MAX = 8.0' in camera
         and 'AUTO_SHORT_P99_HEADROOM_TARGET = 0.35' in camera
         and 'AUTO_SHORT_NEAR_CLIP_SOFT = 0.0015f' in camera
         and 'AUTO_SHORT_NEAR_CLIP_HARD = 0.0100f' in camera
-        and 'AUTO_LONG_P95_BODY_TARGET = 0.24' in camera
-        and 'AUTO_LONG_P98_BODY_TARGET = 0.42' in camera
-        and 'AUTO_LONG_MAX_NEAR_CLIP_FRACTION = 0.005' in camera,
-        "V2.22 independent SHORT-highlight / inherited LONG-body AUTO targets missing")
+        and 'AUTO_SHORT_SCALE_MAX = 4.0' in camera,
+        "V2.25 independent LONG-body / bidirectional SHORT-headroom targets missing")
+require('AUTO_SHORT_P50_LONG_TARGET' not in camera
+        and 'AUTO_SHORT_P90_LONG_TARGET' not in camera
+        and 'AUTO_SHORT_P98_LONG_HEADROOM' not in camera
+        and 'AUTO_LONG_P98_BODY_TARGET' not in camera
+        and 'AUTO_LONG_MAX_NEAR_CLIP_FRACTION' not in camera,
+        "stale cross-owner highlight veto returned to LONG-body AUTO")
+stats_solver = camera[camera.index('// IRIS_V225_INDEPENDENT_EXPOSURE_OWNERS_BEGIN'):
+                      camera.index('// IRIS_V225_INDEPENDENT_EXPOSURE_OWNERS_END')]
+require('stats.longP50Linear' in stats_solver and 'stats.longP95Linear' in stats_solver
+        and 'stats.shortP99Linear' in stats_solver
+        and 'stats.shortNearClipFraction' in stats_solver,
+        "V2.25 independent LONG_BODY/SHORT_HEADROOM producers missing")
+require('stats.longP98Linear' not in stats_solver
+        and 'stats.longNearClipFraction' not in stats_solver
+        and 'stats.shortP98Linear' not in stats_solver,
+        "V2.25 LONG body target must not be vetoed by retired highlight-tail statistics")
+require('AUTO_SHORT_SCALE_MAX' in stats_solver
+        and 'targetShortProduct = Math.max(' in stats_solver
+        and 'targetLongProduct = Math.max(' in stats_solver,
+        "V2.25 SHORT must be able to lengthen as well as shorten before bracket derivation")
+require('autoDesiredBracketRatio = Math.max(' in stats_solver
+        and 'autoLiveLongProduct / Math.max(1.0, autoLiveShortProduct)' in stats_solver,
+        "V2.25 bracket must be derived from converged independent exposure products")
+require('AUTO_LIVE_SCENE_CUT_MAX_STEP_EV = 1.0' in camera,
+        "V2.25 exposure convergence must not retain the prior 6-EV scene-cut jump")
+
+
+# V2.25 combined-device-photo regressions. These are saved-JPEG approximations of
+# the exact window/bulb captures that exposed the ownership failure; they assert
+# policy direction, not scene-specific capture constants. The window must widen
+# because LONG body is starved while SHORT already has headroom. The isolated bulb
+# scene must brighten both exposures without being forced into an unnecessary wide bracket.
+def v225_exposure_targets(long_p50, long_p95, short_p99, short_clip,
+                          current_ratio=4.0):
+    long_p50_scale = 0.015 / max(0.00025, long_p50)
+    long_p95_scale = 0.24 / max(0.010, long_p95)
+    long_body_scale = max(0.25, min(8.0,
+        math.sqrt(long_p50_scale * long_p95_scale)))
+    p99_scale = 0.35 / max(0.010, short_p99)
+    clip_t = smoothstep_math(0.0015, 0.0100, short_clip)
+    clip_scale = 1.0 - 0.50 * clip_t
+    short_scale = p99_scale if clip_t <= 0.0 else min(p99_scale, clip_scale)
+    short_scale = max(0.25, min(4.0, short_scale))
+    target_short = short_scale
+    target_long = current_ratio * long_body_scale
+    target_long = max(target_long, target_short * 4.0)
+    target_long = min(target_long, target_short * 64.0)
+    return long_body_scale, short_scale, target_long / target_short, target_long / current_ratio
+
+window_policy = v225_exposure_targets(
+    0.003591948, 0.09143406, 0.28203595, 0.0, 4.0)
+require(3.20 <= window_policy[0] <= 3.45
+        and 1.20 <= window_policy[1] <= 1.30
+        and 10.0 <= window_policy[2] <= 11.5,
+        f"V2.25 window regression must raise LONG materially and widen bracket from 2EV: {window_policy}")
+bulb_policy = v225_exposure_targets(
+    0.004984338, 0.081579626, 0.084685184, 0.0, 4.0)
+require(2.85 <= bulb_policy[0] <= 3.10
+        and math.isclose(bulb_policy[1], 4.0, abs_tol=1e-6)
+        and math.isclose(bulb_policy[2], 4.0, abs_tol=1e-6)
+        and math.isclose(bulb_policy[3], 4.0, abs_tol=1e-6),
+        f"V2.25 isolated-bulb regression must brighten both exposures without forced over-bracketing: {bulb_policy}")
 
 # 092 - Exact javac failure from failed V2.13 run 33900980849: CameraController
 # consumed stats.shortP90Linear while SceneStats did not publish that field. Preserve
@@ -688,12 +755,11 @@ require(not missing_scene_stats,
         f"CameraController SceneStats consumer fields missing from producer: {missing_scene_stats}")
 require('autoLiveTargetMedianLinear' not in camera,
         "AUTO must not restore HAL-median brightness ownership")
-require('Math.min(ratioBody, Math.min(ratioHeadroom, ratioLongBody))' in camera
+require('stats.longP50Linear' in camera
         and 'stats.longP95Linear' in camera
-        and 'stats.longP98Linear' in camera
-        and 'stats.longNearClipFraction' in camera
+        and 'stats.shortP99Linear' in camera
         and 'targetShortProduct * AUTO_BRACKET_MIN_RATIO' in camera,
-        "AUTO must use MANUAL-calibrated body/headroom plus closed-loop LONG-body protection")
+        "V2.25 AUTO must use independent LONG-body and SHORT-headroom closed-loop authorities")
 require('autoShortExposureNs = autoLongExposureNs;' not in camera[camera.index('private void deriveAutoPairFromAnchorLocked()'):camera.index('private void processHdrSceneStatsLocked')],
         "AUTO unknown/PWM flicker must never collapse SHORT exposure onto LONG")
 require('FLICKER UNSAFE' in camera and 'autoFlickerSafetySatisfied = false;' in camera,
@@ -730,34 +796,30 @@ require(camera.count('manualEffectiveShortExposureNs, manualEffectiveLongExposur
 require('Short ACTUAL ' in main and 'Long ACTUAL ' in main,
         "MANUAL UI must label effective shutter values as actual")
 
-# V2.22 changes only one explicitly bounded scene-stat policy region: absolute
-# SHORT highlight protection is separated from the inherited LONG-body target.
-# Everything before/after that marked region, plus the actual pair solver and clean-AE
-# anchor solver, must remain byte-exact to successful V2.21/V2.18 mechanics.
+# V2.25 intentionally replaces the V2.22/V2.24 scene-stat exposure-policy region
+# after the combined window/bulb audit. Preserve the proven pair realization and
+# clean-AE anchor solvers byte-exact; validate the new policy semantically rather
+# than allowing the retired V2.22 marker to stand in for V2.25 ownership.
 physical_stats_slice = camera[camera.index('    private void processHdrSceneStatsLocked('):
                               camera.index('    private void deriveAutoPairFromSceneTargetsLocked()')]
 physical_pair_slice = camera[camera.index('    private void deriveAutoPairFromSceneTargetsLocked()'):
                              camera.index('    private void updateAdaptivePresentationLocked(')]
 physical_anchor_slice = camera[camera.index('    private void deriveAutoPairFromAnchorLocked()'):
                                camera.index('    private void processHdrSceneStatsLocked(')]
-marker_begin = '        // IRIS_V222_INDEPENDENT_SHORT_HIGHLIGHT_BEGIN\n'
-marker_end = '        // IRIS_V222_INDEPENDENT_SHORT_HIGHLIGHT_END\n'
+marker_begin = '        // IRIS_V225_INDEPENDENT_EXPOSURE_OWNERS_BEGIN\n'
+marker_end = '        // IRIS_V225_INDEPENDENT_EXPOSURE_OWNERS_END\n'
 require(marker_begin in physical_stats_slice and marker_end in physical_stats_slice,
-        "V2.22 independent SHORT highlight ownership markers missing")
-physical_prefix = physical_stats_slice[:physical_stats_slice.index(marker_begin)]
-physical_suffix = physical_stats_slice[physical_stats_slice.index(marker_end) + len(marker_end):]
-require(hashlib.sha256(physical_prefix.encode()).hexdigest() ==
-        'f29b3104d02f7b6f200ad4ec6d540d2e8031c9506fcc4f338a947ccfaeb5bc97',
-        "V2.22 changed pre-policy V2.21 physical scene-stat mechanics")
-require(hashlib.sha256(physical_suffix.encode()).hexdigest() ==
-        '6d30a0ceab87ebc9525a217d2b18dc5c5b8204312be897ae740c8d01d29ea7bd',
-        "V2.22 changed post-policy V2.21 physical scene-stat mechanics")
+        "V2.25 independent exposure-ownership policy markers missing")
+require('updateAdaptivePresentationLocked(stats, autoHdrExposure, false);' in physical_stats_slice
+        and 'if (stats.longFrameNumber <= lastAutoLiveStatsFrame) return;' in physical_stats_slice
+        and 'staleLongEv > 0.30 || staleShortEv > 0.30' in physical_stats_slice,
+        "V2.25 changed the synchronized scene-stat freshness/presentation preconditions")
 require(hashlib.sha256(physical_pair_slice.encode()).hexdigest() ==
         '7794c401735797af9edd2edb2468d76b9bc4de0d86946d9c0c9a8d2e9d2b040b',
-        "successful V2.18/V2.21 scene-target pair solver changed")
+        "successful V2.24 scene-target pair realization solver changed")
 require(hashlib.sha256(physical_anchor_slice.encode()).hexdigest() ==
         '306add9a9eed6e80d14555c24c8a37f35b93a79f4af7cf6d7d0e939cec6e9e7d',
-        "successful V2.18/V2.21 clean-AE anchor solver changed")
+        "successful V2.24 clean-AE bootstrap solver changed")
 
 # V2.21 full-distribution presentation regression. V2.19 matched only P50/P90;
 # the real V2.20 4x window sample therefore solved to -1.3 EV / Gamma 1.80 and
@@ -940,10 +1002,12 @@ require(8.0 <= v222_target_ratio(4.0, auto_chandelier_short_scale) <= 8.8,
         "V2.22 must widen the bracket rather than dragging inherited LONG body down with SHORT")
 require(math.isclose(v222_target_ratio(64.0, 1.0), 64.0, abs_tol=1e-6),
         "V2.22 must preserve the 64x ceiling")
-require('double targetLongProduct = Math.max(1.0,\n                stats.shortExposureProduct * baselineRatio);' in camera
-        and 'double targetShortProduct = Math.max(1.0,\n                stats.shortExposureProduct * shortScale);' in camera
-        and 'targetLongProduct = Math.max(targetShortProduct * AUTO_BRACKET_MIN_RATIO,' in camera,
-        "V2.22 must solve SHORT highlight protection independently before applying only the 4x..64x contract")
+require('double targetLongProduct = Math.max(' in stats_solver
+        and 'stats.longExposureProduct * longBodyScale' in stats_solver
+        and 'double targetShortProduct = Math.max(' in stats_solver
+        and 'stats.shortExposureProduct * shortHeadroomScale' in stats_solver
+        and 'targetShortProduct * AUTO_BRACKET_MIN_RATIO' in stats_solver,
+        "V2.25 must solve independent LONG_BODY/SHORT_HEADROOM targets before applying only the 4x..64x contract")
 
 # Presentation remains adaptive, but a failed physical bracket is restrained rather
 # than disguised with strong brightness/gamma/dehaze/microcontrast.
@@ -1285,10 +1349,13 @@ require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kt
 # construction remain protected.
 require(hashlib.sha256(gl.encode()).hexdigest() ==
         '7eb802b71a529cb44144403ea0098726562adfe027154eeb112dace07954066d',
-        "successful V2.23 HdrGlView bytes changed")
-require(hashlib.sha256(fusion.encode()).hexdigest() ==
-        '7aa3f4956f28a48b204375c0123195c020d57c8d8edd774946dccb39d42f7434',
-        "successful V2.23 JpegFusion bytes changed")
+        "successful V2.24 HdrGlView bytes changed")
+fusion_provenance_prefix = fusion[
+        fusion.index('    static byte[] fuse('):
+        fusion.index('        float clampedBrightnessEv', fusion.index('    static byte[] fuse('))]
+require(hashlib.sha256(fusion_provenance_prefix.encode()).hexdigest() ==
+        '0b186fe57f767d97b1c928f227171206169492c2e5c89ec5f4defae59ce23e11',
+        "V2.25 CPU fallback registration/provenance changed outside intended tone correction")
 still_burst = camera[camera.index('    private void issueStillBurstLocked()'):
                      camera.index('    private final CameraCaptureSession.CaptureCallback stillCaptureCallback')]
 require(hashlib.sha256(still_burst.encode()).hexdigest() ==
@@ -1386,9 +1453,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 41' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.24"' in build_gradle,
-        "V2.24 version/build marker must be exact")
+require('versionCode = 42' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.25"' in build_gradle,
+        "V2.25 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1688,6 +1755,22 @@ require('LEFT PATH SET FAIL' in workflow and 'RIGHT PATH SET FAIL' in workflow,
         "V2.23 patch replay must prove exact path sets as well as byte equality")
 
 
+# V2.25 - complete-pair presentation persistence and deadband.
+require('lastAutoPresentationLongFrame' in camera
+        and 'stats.longFrameNumber <= lastAutoPresentationLongFrame' in camera
+        and 'AUTO_PRESENT_STABLE_PAIRS = 3' in camera
+        and 'AUTO_PRESENT_GAMMA_DEADBAND = 0.075f' in camera
+        and 'AUTO_PRESENT_BRIGHTNESS_DEADBAND_EV = 0.10f' in camera,
+        "V2.25 paired-presentation persistence/deadband contract missing")
+require('haveStagingShort && stagingShortMeta != null' in gl
+        and 'meta.frameNumber > stagingShortMeta.frameNumber' in gl
+        and 'lastShortMeta = stagingShortMeta;' in gl
+        and 'lastLongMeta = meta;' in gl,
+        "V2.25 presentation statistics must remain sourced from complete synchronized pairs")
+require('AUTO_PRESENT_BRIGHTNESS_STEP_EV = 0.08f' in camera
+        and 'AUTO_PRESENT_GAMMA_STEP = 0.025f' in camera,
+        "V2.25 presentation convergence must remain slower than the V2.24 0.18EV/0.05 pumping path")
+
 # V2.24 - post-fusion denoise ownership, AF-only touch focus and safe background lifetime.
 require('android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING' in manifest
         and 'android:foregroundServiceType="mediaProcessing"' in manifest
@@ -1756,13 +1839,12 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillJpegs(' not in service
         and 'fuseStillJpegs(' not in nafnet,
         "V2.24 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.23_to_V1.4.11-V2.24.forward.patch' in workflow
-        and 'V1.4.11-V2.24_to_V1.4.11-V2.23.rollback.patch' in workflow,
-        "V2.24 final artifact must export correctly named V2.23<->V2.24 patches")
-require("if len(tracked) != 28:" in workflow
-        and "V1.4.11 V2.23 AUTHORITY REPOSITORY COUNT FAIL" in workflow
-        and "if len(tracked) != 29:" in workflow
+require('V1.4.11-V2.24_to_V1.4.11-V2.25.forward.patch' in workflow
+        and 'V1.4.11-V2.25_to_V1.4.11-V2.24.rollback.patch' in workflow,
+        "V2.25 final artifact must export correctly named V2.24<->V2.25 patches")
+require("if len(tracked) != 29:" in workflow
+        and "V1.4.11 V2.24 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.24 must distinguish the 28-file V2.23 authority from the 29-file V2.24 candidate")
+        "V2.25 must preserve the 29-file V2.24 authority/candidate universe")
 
-print("V1.4.11 V2.24 REGRESSION PASS: successful V2.23 HDR fusion/shaders/model remain protected, Denoise OFF preserves the pre-NAFNet fused JPEG, NAFNet broad/DC relighting is suppressed and coherent microstructure fails closed to source, touch focus is AF-only, and background processing becomes preservable only after fused bytes exist and both RAW Images are released")
+print("V1.4.11 V2.25 REGRESSION PASS: successful V2.24 fusion geometry, NAFNet/touch-AF/background ownership remain protected; LONG body and SHORT highlight exposure authorities are independent, bracket is derived afterward, presentation requires persistent complete-pair evidence, and the live/save/predictor highlight shoulder is monotonic toward white without the retired gray plateau")

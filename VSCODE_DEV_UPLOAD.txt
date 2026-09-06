@@ -1,13 +1,15 @@
-V1.4.11 V2.24 — VSCODE.DEV UPLOAD
+V1.4.11 V2.25 — VSCODE.DEV UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: e4b75493b0ddd1212a1c50e9ac4913902c164b33 (successful V2.23)
-Remote backup branch creation from this environment was blocked with HTTP 403; do not create extra commits/branches as part of this upload unless you explicitly want to. Exact V2.23 commit/artifact + packaged rollback patch remain the rollback authority.
+Required direct parent / runtime authority: f5ed95f8da45adc806dd421bc8c805155a311ccf (successful V2.24)
+No backup requested or needed for this build.
 
-1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.23 parent before uploading.
-2. Upload/replace ALL files from this ZIP at repository root, preserving paths.
-3. Do not add extra files or folders and do not commit the ZIP itself.
-4. Source Control must show exactly 14 changed tracked paths relative to V2.23:
+This upload ZIP contains ONLY the files that are intended to change, to avoid marking protected V2.24 files modified/deleted in vscode.dev.
+
+1. Open vscode.dev on the branch above and verify it is still at the required V2.24 parent.
+2. Upload/replace all extracted files at repository root, preserving their included paths.
+3. Do not commit the ZIP itself and do not add extra files.
+4. Source Control must show exactly 11 changed tracked paths relative to V2.24:
    .github/workflows/build.yml [M]
    BUILD_WORKFLOW_COPY.yml [M]
    PACKAGE_INFO.txt [M]
@@ -15,18 +17,15 @@ Remote backup branch creation from this environment was blocked with HTTP 403; d
    README.md [M]
    VSCODE_DEV_UPLOAD.txt [M]
    app/build.gradle.kts [M]
-   app/src/main/AndroidManifest.xml [M]
+   app/src/main/assets/shaders/hdr_display.frag [M]
    app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java [M]
-   app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java [M]
-   app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java [A]
-   app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java [M]
-   app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java [M]
+   app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java [M]
    scripts/verify_orientation.py [M]
 5. Commit once and push once.
 
 Suggested commit message:
-V1.4.11 V2.24 constrain NAFNet and add touch AF background-safe processing
+V1.4.11 V2.25 fix independent AUTO exposures and preserve highlight tone
 
 Do not alter dev/main.
 Do not push an APK.
-GitHub Actions is the authoritative real Java / pinned GLSL / full Android build proof.
+GitHub Actions is the authoritative pinned GLSL / real Java / full Android build proof.

@@ -79,24 +79,20 @@ float max3(vec3 value) {
 }
 
 vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
-    // V2.15 preserves SHORT spatial/chromatic truth. Scene values above the
-    // display range are compressed pointwise while preserving SHORT RGB ratios.
+    // V2.25 monotonic highlight shoulder. Valid SHORT-derived highlight separation
+    // keeps a positive tonal slope all the way toward white; there is no artificial
+    // bracket-dependent gray ceiling/plateau. Only increasingly intense scene energy
+    // asymptotically converges to display white. Whole-RGB scaling preserves hue.
     const float knee = 0.70;
     float scenePeak = max3(sceneLinear);
     if (scenePeak <= knee || scenePeak <= 0.000001) return sceneLinear;
 
-    float whiteAnchor = clamp(0.82 - 0.04 * (bracketStops - 1.0), 0.68, 0.82);
-    float displayCeiling = clamp(whiteAnchor + 0.14, 0.84, 0.96);
-    float mappedPeak;
-
-    if (scenePeak <= 1.0) {
-        float t = clamp((scenePeak - knee) / (1.0 - knee), 0.0, 1.0);
-        mappedPeak = mix(knee, whiteAnchor, t);
-    } else {
-        float headroomLog2 = max(log2(max(ratio, 1.0001)), 0.0001);
-        float t = clamp(log2(scenePeak) / headroomLog2, 0.0, 1.0);
-        mappedPeak = mix(whiteAnchor, displayCeiling, t);
-    }
+    float shoulderScale = clamp(
+        0.45 + 0.06 * (bracketStops - 2.0), 0.42, 0.72);
+    float distanceAboveKnee = max(scenePeak - knee, 0.0);
+    float mappedPeak = knee + (1.0 - knee)
+        * (1.0 - exp(-distanceAboveKnee / shoulderScale));
+    mappedPeak = clamp(mappedPeak, knee, 1.0);
 
     return sceneLinear * (mappedPeak / scenePeak);
 }
