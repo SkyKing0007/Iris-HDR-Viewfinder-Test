@@ -24,6 +24,7 @@ final class CaptureSetSaver {
 
     interface Listener {
         void onInputsAcquired(String captureId);
+        void onBackgroundSafe(String captureId);
         void onFinished(String captureId, boolean success, String message);
     }
 
@@ -33,6 +34,7 @@ final class CaptureSetSaver {
         boolean rawSubmitted;
         boolean jpegSubmitted;
         boolean rawSaved;
+        boolean rawReleased;
         boolean jpegSaved;
     }
 
@@ -45,6 +47,7 @@ final class CaptureSetSaver {
     private final float displayGamma;
     private final float displayDehaze;
     private final float displayMicroContrast;
+    private final boolean denoiseEnabled;
     private final HdrGlView stillFusionView;
     private final Listener listener;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -59,6 +62,9 @@ final class CaptureSetSaver {
     private boolean metadataSubmitted;
     private boolean metadataSaved;
     private boolean inputsAcquiredNotified;
+    private boolean fusionBytesReady;
+    private boolean backgroundSafe;
+    private boolean backgroundServiceStarted;
     private boolean terminal;
 
     CaptureSetSaver(
@@ -71,6 +77,7 @@ final class CaptureSetSaver {
             float displayGamma,
             float displayDehaze,
             float displayMicroContrast,
+            boolean denoiseEnabled,
             HdrGlView stillFusionView,
             Listener listener) {
         this.context = context.getApplicationContext();
@@ -82,6 +89,7 @@ final class CaptureSetSaver {
         this.displayGamma = Math.max(0.50f, Math.min(2.00f, displayGamma));
         this.displayDehaze = Math.max(0.0f, Math.min(1.0f, displayDehaze));
         this.displayMicroContrast = Math.max(0.0f, Math.min(1.0f, displayMicroContrast));
+        this.denoiseEnabled = denoiseEnabled;
         this.stillFusionView = stillFusionView;
         this.listener = listener;
     }
@@ -108,6 +116,10 @@ final class CaptureSetSaver {
 
     synchronized void abort(String reason) {
         failLocked(new IllegalStateException(reason));
+    }
+
+    synchronized boolean isBackgroundSafe() {
+        return backgroundSafe && !terminal;
     }
 
     synchronized void onRawImage(Image image) {
@@ -173,12 +185,15 @@ final class CaptureSetSaver {
         if (acquired) {
             inputsAcquiredNotified = true;
             listener.onInputsAcquired(captureId);
+            maybeNotifyBackgroundSafeLocked();
         }
     }
 
     private void submitRaw(String label, CaptureData data, Image raw) {
         TotalCaptureResult result = data.result;
         io.execute(() -> {
+            boolean saved = false;
+            Throwable failure = null;
             try (DngCreator creator = new DngCreator(characteristics, result)) {
                 creator.setOrientation(dngOrientation);
                 String name = captureId + "_" + label + ".dng";
@@ -187,16 +202,21 @@ final class CaptureSetSaver {
                         name,
                         "image/x-adobe-dng",
                         output -> creator.writeImage(output, raw));
-                synchronized (CaptureSetSaver.this) {
-                    data.rawSaved = true;
-                    checkCompleteLocked();
-                }
+                saved = true;
             } catch (Throwable t) {
-                synchronized (CaptureSetSaver.this) {
-                    failLocked(t);
-                }
+                failure = t;
             } finally {
                 raw.close();
+                synchronized (CaptureSetSaver.this) {
+                    data.rawReleased = true;
+                    if (failure != null) {
+                        failLocked(failure);
+                    } else if (!terminal && saved) {
+                        data.rawSaved = true;
+                        maybeNotifyBackgroundSafeLocked();
+                        checkCompleteLocked();
+                    }
+                }
             }
         });
     }
@@ -258,6 +278,10 @@ final class CaptureSetSaver {
                         }
                         return;
                     }
+                    synchronized (CaptureSetSaver.this) {
+                        fusionBytesReady = true;
+                        maybeNotifyBackgroundSafeLocked();
+                    }
                     submitFusedBytes(fused);
                 });
     }
@@ -268,10 +292,14 @@ final class CaptureSetSaver {
             // already complete in `fused`. A denoiser failure must fall back to those
             // exact V2.22 bytes rather than turn an optional cleanup into capture loss.
             byte[] finalFused = fused;
-            try {
-                finalFused = NafNetDenoiser.denoiseFusedJpeg(context, fused);
-            } catch (Throwable denoiseFailure) {
-                RuntimeLogger.error("NAFNET_DENOISE_FALLBACK", denoiseFailure);
+            if (denoiseEnabled) {
+                try {
+                    finalFused = NafNetDenoiser.denoiseFusedJpeg(context, fused);
+                } catch (Throwable denoiseFailure) {
+                    RuntimeLogger.error("NAFNET_DENOISE_FALLBACK", denoiseFailure);
+                }
+            } else {
+                RuntimeLogger.event("NAFNET_DENOISE", "bypassed; exact pre-denoise fused JPEG preserved");
             }
             try {
                 MediaStoreWriter.writeBytes(
@@ -286,6 +314,26 @@ final class CaptureSetSaver {
                 }
             }
         });
+    }
+
+    private void maybeNotifyBackgroundSafeLocked() {
+        if (terminal || backgroundSafe) return;
+        if (!inputsAcquiredNotified || !fusionBytesReady
+                || !shortData.rawReleased || !longData.rawReleased) {
+            return;
+        }
+        try {
+            HdrProcessingService.start(context, captureId);
+            backgroundServiceStarted = true;
+            backgroundSafe = true;
+            RuntimeLogger.event(
+                    "CAPTURE_BACKGROUND_SAFE",
+                    captureId + " fusionBytesReady=true rawReleased=true denoise=" + denoiseEnabled);
+            listener.onBackgroundSafe(captureId);
+        } catch (Throwable t) {
+            RuntimeLogger.error("HDR_PROCESSING_SERVICE_START_FAIL", t);
+            // Fail closed: no safe toast and camera-close still aborts this capture.
+        }
     }
 
     private void maybeSubmitMetadataLocked() {
@@ -390,6 +438,7 @@ final class CaptureSetSaver {
         if (done) {
             terminal = true;
             io.shutdown();
+            if (backgroundServiceStarted) HdrProcessingService.stop(context);
             listener.onFinished(
                     captureId,
                     true,
@@ -404,6 +453,7 @@ final class CaptureSetSaver {
         pendingRaw.clear();
         pendingJpeg.clear();
         io.shutdown();
+        if (backgroundServiceStarted) HdrProcessingService.stop(context);
         listener.onFinished(captureId, false, t.getClass().getSimpleName() + ": " + t.getMessage());
     }
 }

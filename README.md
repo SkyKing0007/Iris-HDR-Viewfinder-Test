@@ -1,29 +1,24 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.23
+# Iris HDR Viewfinder Test V1.4.11 V2.24
 
-V2.23 is the **pretrained NAFNet-SIDD width32 post-fusion denoise integration** based on exact successful V2.22 Actions authority (`8d47c8a37a5dfd1a6cabec6eb56a0616a83480e3`, run `34009186958`, artifact `9981936667`).
+V2.24 is based on exact successful V2.23 Actions authority (`e4b75493b0ddd1212a1c50e9ac4913902c164b33`, run `34014611207`, artifact `9983535386`).
 
 ## What changes
 
-V2.22 capture, AUTO exposure, LONG-primary saved fusion, SHORT connected highlight recovery, alignment, tone/brightness, DNG handling and shader behavior are frozen. After V2.22 has produced its completed fused/tone-rendered JPEG bytes, `CaptureSetSaver` gives those bytes to a new `NafNetDenoiser`; only the denoised result is written as `_FUSED_HDR.jpg`.
+V2.23 HDR capture, SHORT/LONG exposure policy, GPU fusion, highlight recovery, tone/brightness, DNG handling, shaders, `HdrGlView`, `JpegFusion`, and the exact NAFNet model weights remain protected. V2.24 changes only the post-fusion NAFNet application contract plus UI/focus/lifecycle ownership around the existing capture.
 
-The exact vendored model is `nafnet_sidd_width32_fp16.tflite`, 62,454,048 bytes, SHA-256 `f8fbaa422411683c53e802cf7cc7cf9be0a0de00886ad4af057232e26b172a0c`. It uses LiteRT 2.1.5 `CompiledModel` with GPU-only acceleration and the published NCHW RGB `[1,3,256,256]`, `[0,1]` input/output contract.
+- The camera selector is compact (`ID0`, etc.); detailed capability text remains in runtime logging.
+- The adjacent button is labeled exactly `Denoise`; each press toggles NAFNet on/off, with the choice frozen at capture start. OFF writes the exact pre-NAFNet fused JPEG.
+- NAFNet ON no longer receives general image-reconstruction authority. Broad/DC neural residual is removed per RGB channel, and correction is admitted only inside positively proven locally smooth source interiors.
+- Coherent microstructure is source-authoritative everywhere, independent of semantics or neighboring background: hair, pine needles, fabric/denim weave, microfiber, fur, foliage, grass, stitching, mesh, text, thin branches and comparable dense detail fail closed to the original fused image.
+- Touch-to-focus is Camera2 AF-only; it never sets AE regions and does not alter V2.23 HDR SHORT/LONG exposure solving or fusion.
+- After GPU fusion bytes exist and both acquired RAW Images have been released, Iris shows `HDR Captured. You can now move the phone.` and starts a foreground `mediaProcessing` lifetime lease. From that proven boundary onward, ordinary Home/backgrounding no longer aborts optional NAFNet/final file writes. The service owns no image math and stops when the capture succeeds or fails.
 
-## Full-resolution / safety contract
+## Protected V2.23 image owners
 
-- No whole-image downscale: the original fused dimensions are preserved.
-- 256x256 inference tiles use a 32px reflected halo and retain only the 192x192 center core.
-- NAFNet is a cleanup stage, not a new image owner: the predicted correction is bounded to +/-0.12 normalized RGB per channel.
-- Bright/recovered highlights receive progressively less ML correction; max-channel >=0.985 is limited to <=0.10 denoise strength.
-- GPU work is serialized and LiteRT buffers/model close after every fused capture.
-- Any ML failure falls back to the exact original V2.22 fused JPEG bytes.
-- SHORT/LONG JPEGs and DNGs never enter the NAFNet save path.
-
-## V2.22 bytes intentionally protected
-
-`hdr_display.frag`, `CameraController.java`, `HdrGlView.java`, `JpegFusion.java`, `FrameMeta.java`, `MainActivity.java`, `MediaStoreWriter.java`, all non-HDR shaders and `AndroidManifest.xml` remain byte-identical to successful V2.22. `CaptureSetSaver.java` changes only at the final fused-byte save hook.
+`HdrGlView.java`, `JpegFusion.java`, all four GLSL shaders, the exact 62,454,048-byte NAFNet model and its license, `FrameMeta.java`, and `MediaStoreWriter.java` remain byte-identical to successful V2.23.
 
 ## Build proof
 
-The successful V2.22 15-step GitHub Actions procedure is preserved in the same order. V2.23 updates only authority/version/hash/allowlist payload, adds the pinned LiteRT dependency and model-specific regressions, and proves after assemble that the APK contains the exact `.tflite` hash uncompressed. Real project Java compilation and full `:app:assembleDebug` remain authoritative in GitHub Actions.
+The successful V2.22/V2.23 15-step GitHub Actions procedure is preserved in the same order. V2.24 updates only the new authority/version/hash/allowlist/regression payload needed for this candidate. Real project Java compilation and full `:app:assembleDebug` remain authoritative in GitHub Actions.
 
-V2.23 is **PREPARED / UPLOAD-READY only after clean-extract replay**. It is not build-proven until its GitHub Actions run succeeds.
+V2.24 is **PREPARED / UPLOAD-READY only after clean-extract replay**. It is not build-proven until its GitHub Actions run succeeds.

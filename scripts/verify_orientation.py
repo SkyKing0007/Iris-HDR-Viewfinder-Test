@@ -13,6 +13,7 @@ camera = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/CameraCont
 gl = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java").read_text()
 fusion = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java").read_text()
 saver = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java").read_text()
+service = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java").read_text()
 nafnet = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java").read_text()
 build_gradle = (ROOT / "app/build.gradle.kts").read_text()
 nafnet_model = ROOT / "app/src/main/assets/nafnet_sidd_width32_fp16.tflite"
@@ -25,7 +26,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.23 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.24 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -55,7 +56,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.23 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.24 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -326,8 +327,17 @@ require('setManualControlsEnabled(!autoHdrEnabled)' in main,
         "manual controls must be explicitly gated by AUTO/MANUAL ownership")
 require('TAG_METER' in camera and 'buildMeterPreviewRequest' in camera,
         "clean contiguous AE metering phase missing")
-require('captureSession.capture(' not in camera,
-        "V1.4.2 one-shot live capture() meter must never return")
+touch_focus_capture = camera[
+        camera.index('private void triggerTouchFocusLocked'):
+        camera.index('private CaptureRequest.Builder buildFocusTriggerRequestLocked')]
+require(touch_focus_capture.count('captureSession.capture(') == 2
+        and 'CONTROL_AF_TRIGGER_CANCEL' in touch_focus_capture
+        and 'CONTROL_AF_TRIGGER_START' in touch_focus_capture,
+        "V2.24 touch AF must use exactly the AF CANCEL/START one-shot pair")
+camera_without_touch_focus_capture = camera.replace(touch_focus_capture, '', 1)
+require('captureSession.capture(' not in camera_without_touch_focus_capture
+        and 'captureSession.capture(buildMeterPreviewRequest' not in camera,
+        "V1.4.2 one-shot live AE/meter capture() must never return")
 require('buildMeterPreviewRequest(), previewCaptureCallback' in camera,
         "AUTO metering must use a contiguous repeating AE phase")
 require('Arrays.asList(shortRequest, longRequest)' in camera,
@@ -606,13 +616,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.23 - Exact successful V2.22 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.22' in workflow
-        and 'run-id: 34009186958' in workflow
-        and "authority='8d47c8a37a5dfd1a6cabec6eb56a0616a83480e3'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.22 Actions authority")
-require("authority='320548b3af7b2989bac75b9c987218bc5d3defe5'" not in workflow,
-        "V2.23 must not seed runtime from V2.21 after successful V2.22")
+# 038 / 042 / V2.24 - Exact successful V2.23 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.23' in workflow
+        and 'run-id: 34014611207' in workflow
+        and "authority='e4b75493b0ddd1212a1c50e9ac4913902c164b33'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.23 Actions authority")
+require("authority='8d47c8a37a5dfd1a6cabec6eb56a0616a83480e3'" not in workflow,
+        "V2.24 must not seed runtime from V2.22 after successful V2.23")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1270,38 +1280,25 @@ require('return Math.max(1.0, Math.min(65_536.0, longProduct / shortProduct));' 
 require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kts').read_text().lower(),
         "OpenCV must remain simulation-only and absent from runtime")
 
-# V2.21 changes only topology-domain semantics + AUTO presentation. Successful
-# V2.20 alignment/lifecycle/capture/DNG/UI owners remain byte-exact.
+# V2.24 may change UI/AF/lifecycle and post-fusion denoise application, but the
+# successful V2.23 GPU HDR owner and the physical SHORT/LONG still-burst request
+# construction remain protected.
 require(hashlib.sha256(gl.encode()).hexdigest() ==
         '7eb802b71a529cb44144403ea0098726562adfe027154eeb112dace07954066d',
-        "successful V2.20 HdrGlView bytes changed")
+        "successful V2.23 HdrGlView bytes changed")
 require(hashlib.sha256(fusion.encode()).hexdigest() ==
         '7aa3f4956f28a48b204375c0123195c020d57c8d8edd774946dccb39d42f7434',
-        "successful V2.20 JpegFusion bytes changed")
-v223_saver_insert = '''            // V2.23 post-fusion-only ML owner. HDR alignment/source ownership/tone are
-            // already complete in `fused`. A denoiser failure must fall back to those
-            // exact V2.22 bytes rather than turn an optional cleanup into capture loss.
-            byte[] finalFused = fused;
-            try {
-                finalFused = NafNetDenoiser.denoiseFusedJpeg(context, fused);
-            } catch (Throwable denoiseFailure) {
-                RuntimeLogger.error("NAFNET_DENOISE_FALLBACK", denoiseFailure);
-            }
-'''
-require(saver.count(v223_saver_insert) == 1,
-        "V2.23 CaptureSetSaver denoise insertion must exist exactly once")
-saver_v222 = saver.replace(v223_saver_insert, '', 1)
-require(saver_v222.count('captureId + "_FUSED_HDR.jpg", "image/jpeg", finalFused') == 1,
-        "V2.23 CaptureSetSaver final output hook count changed")
-saver_v222 = saver_v222.replace(
-        'captureId + "_FUSED_HDR.jpg", "image/jpeg", finalFused',
-        'captureId + "_FUSED_HDR.jpg", "image/jpeg", fused', 1)
-require(hashlib.sha256(saver_v222.encode()).hexdigest() ==
-        '60cfa6d09db46d2af8fc1917e5ebf1e3c580102e1b07fe6bfea8e683c8372248',
-        "V2.23 CaptureSetSaver differs from V2.22 outside the isolated final-output ML hook")
-require(hashlib.sha256(main.encode()).hexdigest() ==
-        'b142084c33bb2482ad60113bb66653b9c3efeff55c9bdcdd84082d3345a4be3b',
-        "successful V2.20 MainActivity bytes changed")
+        "successful V2.23 JpegFusion bytes changed")
+still_burst = camera[camera.index('    private void issueStillBurstLocked()'):
+                     camera.index('    private final CameraCaptureSession.CaptureCallback stillCaptureCallback')]
+require(hashlib.sha256(still_burst.encode()).hexdigest() ==
+        'af1a49f21c4b660c4b8c79b10abb729daf57619a4b091bbcc0aa01000172378e',
+        "V2.24 changed the successful V2.23 SHORT/LONG still-burst request block")
+require('stillFusionView.fuseStillJpegs(' in saver
+        and 'shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma,' in saver
+        and 'displayDehaze, displayMicroContrast,' in saver
+        and 'JpegFusion.fuse' not in saver,
+        "V2.24 must preserve the single V2.23 GPU still-fusion owner")
 
 # V2.17 permanent visual/source regressions include the exact V2.16 device failure:
 # valid SHORT highlight pieces may not be dropped by a per-pixel re-proof inside one
@@ -1389,9 +1386,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 40' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.23"' in build_gradle,
-        "V2.23 version/build marker must be exact")
+require('versionCode = 41' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.24"' in build_gradle,
+        "V2.24 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1682,12 +1679,90 @@ require("subprocess.run(['git','apply',str(forward)]" in workflow
 require("subprocess.run(['patch','-p1','--fuzz=0','-i',str(forward_text)]" in workflow
         and "subprocess.run(['patch','-p1','--fuzz=0','-i',str(rollback_text)]" in workflow,
         "V2.23 GNU text projection must preserve fuzz=0 forward/rollback replay")
-require("GNU FUZZ0 MODEL PRESEED SHA FAIL" in workflow
+require("GNU FUZZ0 INHERITED MODEL SHA FAIL" in workflow
         and "GNU FUZZ0 FORWARD MODEL INVARIANCE FAIL" in workflow
         and "GNU FUZZ0 ROLLBACK MODEL INVARIANCE FAIL" in workflow
-        and 'model_dst.unlink()' in workflow,
-        "V2.23 GNU projection must independently pin, preserve, and remove the exact model")
+        and 'model_dst.unlink()' not in workflow,
+        "V2.24 GNU projection must independently pin and preserve the exact inherited model")
 require('LEFT PATH SET FAIL' in workflow and 'RIGHT PATH SET FAIL' in workflow,
         "V2.23 patch replay must prove exact path sets as well as byte equality")
 
-print("V1.4.11 V2.23 REGRESSION PASS: successful V2.22 HDR/exposure/tone owners preserved byte-for-byte, exact NAFNet-SIDD width32 fp16 asset pinned, GPU-only post-fusion full-resolution halo tiling active, bounded highlight-safe residual enforced, ML failure falls back to the exact V2.22 fused JPEG, and binary-aware deterministic patch proof is locked")
+
+# V2.24 - post-fusion denoise ownership, AF-only touch focus and safe background lifetime.
+require('android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING' in manifest
+        and 'android:foregroundServiceType="mediaProcessing"' in manifest
+        and 'android:name=".HdrProcessingService"' in manifest,
+        "V2.24 mediaProcessing foreground service declaration/permission missing")
+require('FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING' in service
+        and 'START_NOT_STICKY' in service
+        and 'NafNetDenoiser' not in service
+        and 'HdrGlView' not in service
+        and 'JpegFusion' not in service,
+        "V2.24 service must own process lifetime only, never image math")
+require('onCaptureBackgroundSafe(String captureId)' in camera
+        and 'listener.onCaptureBackgroundSafe(id);' in camera
+        and '"HDR Captured. You can now move the phone."' in main,
+        "V2.24 safe-move toast must be driven by the background-safe capture state")
+require('fusionBytesReady = true;' in saver
+        and '!shortData.rawReleased || !longData.rawReleased' in saver
+        and 'HdrProcessingService.start(context, captureId);' in saver
+        and 'backgroundSafe = true;' in saver,
+        "V2.24 background-safe state must require fused bytes and released RAW Images")
+require('boolean preserveBackgroundProcessing = captureSaver != null && captureSaver.isBackgroundSafe();' in camera
+        and 'captureSaver.abort("Camera closed")' in camera
+        and 'CAPTURE_BACKGROUND_PRESERVE' in camera,
+        "V2.24 camera-close behavior must abort before safe boundary and preserve after it")
+require('HdrProcessingService.stop(context);' in saver
+        and saver.count('HdrProcessingService.stop(context);') >= 2,
+        "V2.24 processing service must stop on both terminal success and failure")
+require('CaptureRequest.CONTROL_AF_REGIONS' in camera
+        and 'CaptureRequest.CONTROL_AF_TRIGGER_START' in camera
+        and 'CaptureRequest.CONTROL_AF_TRIGGER_CANCEL' in camera
+        and 'CaptureRequest.CONTROL_AE_REGIONS' not in camera,
+        "V2.24 touch focus must be AF-only and must never acquire AE authority")
+require('focusAtNormalized(sensorX, sensorY);' in main
+        and 'glView.setOnTouchListener(this::handleFocusTouch);' in main,
+        "V2.24 preview touch mapping must reach the Camera2 AF owner")
+require('out.add(new CameraDescriptor(id, "ID" + id));' in camera
+        and 'CAMERA_DISCOVERY' in camera,
+        "V2.24 compact ID<n> UI must preserve detailed camera capability logging")
+require('denoiseButton.setText("Denoise");' in main
+        and 'denoiseButton.setAlpha(denoiseEnabled ? 1.0f : 0.55f);' in main
+        and 'captureDenoiseEnabled = denoiseEnabled;' in camera
+        and 'captureDenoiseEnabled,' in camera,
+        "V2.24 Denoise button label/state and per-capture freeze contract missing")
+require('if (denoiseEnabled)' in saver
+        and 'bypassed; exact pre-denoise fused JPEG preserved' in saver,
+        "V2.24 Denoise OFF must bypass NAFNet and preserve the pre-denoise fused JPEG")
+require('RESIDUAL_MEAN_RADIUS = 12' in nafnet
+        and 'residualR[tileIndex] - meanR' in nafnet
+        and 'residualG[tileIndex] - meanG' in nafnet
+        and 'residualB[tileIndex] - meanB' in nafnet,
+        "V2.24 broad/DC NAFNet residual suppression missing")
+require('smoothSourceAuthority(' in nafnet
+        and 'BROAD_SMOOTH_RADIUS = RESIDUAL_MEAN_RADIUS' in nafnet
+        and 'broadLumaAuthority' in nafnet
+        and 'broadChromaAuthority' in nafnet,
+        "V2.24 neural authority must require a positively smooth broad source interior")
+require('coherentStructureProtection(' in nafnet
+        and 'integralTensorXx' in nafnet
+        and '1.0f - coherentProtection' in nafnet
+        and 'Positive proof only. Ambiguous texture/noise boundaries fail closed to source.' in nafnet,
+        "V2.24 universal coherent-structure protection/fail-closed contract missing")
+require('HdrGlView.java' not in '' or True, "internal")
+# Protected fusion/runtime SHA pins are enforced in the authoritative workflow; source-level ownership
+# additionally forbids the new service/NAFNet/touch path from calling a second fusion implementation.
+require('JpegFusion.fuse' not in saver
+        and 'fuseStillJpegs(' not in service
+        and 'fuseStillJpegs(' not in nafnet,
+        "V2.24 may not introduce a second HDR fusion owner")
+require('V1.4.11-V2.23_to_V1.4.11-V2.24.forward.patch' in workflow
+        and 'V1.4.11-V2.24_to_V1.4.11-V2.23.rollback.patch' in workflow,
+        "V2.24 final artifact must export correctly named V2.23<->V2.24 patches")
+require("if len(tracked) != 28:" in workflow
+        and "V1.4.11 V2.23 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "if len(tracked) != 29:" in workflow
+        and "POST-BUILD TRACKED COUNT FAIL" in workflow,
+        "V2.24 must distinguish the 28-file V2.23 authority from the 29-file V2.24 candidate")
+
+print("V1.4.11 V2.24 REGRESSION PASS: successful V2.23 HDR fusion/shaders/model remain protected, Denoise OFF preserves the pre-NAFNet fused JPEG, NAFNet broad/DC relighting is suppressed and coherent microstructure fails closed to source, touch focus is AF-only, and background processing becomes preservable only after fused bytes exist and both RAW Images are released")

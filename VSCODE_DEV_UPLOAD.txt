@@ -1,13 +1,13 @@
-V1.4.11 V2.23 — VSCODE.DEV UPLOAD
+V1.4.11 V2.24 — VSCODE.DEV UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: 8d47c8a37a5dfd1a6cabec6eb56a0616a83480e3 (successful V2.22)
-Backup already created by user: backup-v2.22-pre-nafnet-denoise
+Required direct parent / runtime authority: e4b75493b0ddd1212a1c50e9ac4913902c164b33 (successful V2.23)
+Remote backup branch creation from this environment was blocked with HTTP 403; do not create extra commits/branches as part of this upload unless you explicitly want to. Exact V2.23 commit/artifact + packaged rollback patch remain the rollback authority.
 
-1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.22 parent before uploading.
-2. Upload/replace ALL files from this ZIP at repository root, preserving paths. The 62,454,048-byte NAFNet .tflite must remain at app/src/main/assets/nafnet_sidd_width32_fp16.tflite.
+1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.23 parent before uploading.
+2. Upload/replace ALL files from this ZIP at repository root, preserving paths.
 3. Do not add extra files or folders and do not commit the ZIP itself.
-4. Source Control must show exactly 12 changed tracked paths relative to V2.22:
+4. Source Control must show exactly 14 changed tracked paths relative to V2.23:
    .github/workflows/build.yml [M]
    BUILD_WORKFLOW_COPY.yml [M]
    PACKAGE_INFO.txt [M]
@@ -15,15 +15,17 @@ Backup already created by user: backup-v2.22-pre-nafnet-denoise
    README.md [M]
    VSCODE_DEV_UPLOAD.txt [M]
    app/build.gradle.kts [M]
-   app/src/main/assets/licenses/NAFNet_LICENSE.txt [A]
-   app/src/main/assets/nafnet_sidd_width32_fp16.tflite [A]
+   app/src/main/AndroidManifest.xml [M]
+   app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java [M]
    app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java [M]
-   app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java [A]
+   app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java [A]
+   app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java [M]
+   app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java [M]
    scripts/verify_orientation.py [M]
 5. Commit once and push once.
 
 Suggested commit message:
-V1.4.11 V2.23 add NAFNet-SIDD width32 post-fusion denoise
+V1.4.11 V2.24 constrain NAFNet and add touch AF background-safe processing
 
 Do not alter dev/main.
 Do not push an APK.

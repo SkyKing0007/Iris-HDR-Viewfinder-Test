@@ -21,6 +21,7 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.Size;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
@@ -60,6 +61,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private static final String STATE_FLICKER_MODE = "flickerMode";
     private static final String STATE_DISPLAY_BRIGHTNESS_EV = "displayBrightnessEv";
     private static final String STATE_DISPLAY_GAMMA = "displayGamma";
+    private static final String STATE_DENOISE_ENABLED = "denoiseEnabled";
     private static final float DISPLAY_BRIGHTNESS_MIN_EV = -16.0f;
     private static final float DISPLAY_BRIGHTNESS_MAX_EV = 1.0f;
     private static final int DISPLAY_BRIGHTNESS_STEPS_PER_EV = 10;
@@ -106,6 +108,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private Button autoButton;
     private Button fpsButton;
     private Button flickerButton;
+    private Button denoiseButton;
     private final List<CameraController.CameraDescriptor> cameras = new ArrayList<>();
     private boolean updatingControls;
     private String selectedCameraId;
@@ -118,6 +121,9 @@ public final class MainActivity extends Activity implements CameraController.Lis
     private volatile boolean allowCropped60Fps;
     private volatile float displayBrightnessEv;
     private volatile float displayGamma = 1.0f;
+    private volatile boolean denoiseEnabled = true;
+    private Size configuredPreviewSize;
+    private int previewRelationDegrees;
     private final Handler heartbeatHandler = new Handler(Looper.getMainLooper());
     private boolean heartbeatScheduled;
     private final Runnable heartbeatRunnable = new Runnable() {
@@ -153,6 +159,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         glView.setInputSurfaceListener(controller::setPreviewSurface);
         glView.setSceneStatsListener(controller::onHdrSceneStats);
         controller.setStillFusionView(glView);
+        controller.setDenoiseEnabled(denoiseEnabled);
         glView.setDisplayBrightnessEv(displayBrightnessEv);
         glView.setDisplayGamma(displayGamma);
         glView.setDisplayEnhancement(0.28f, 0.20f);
@@ -183,6 +190,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
                 Math.min(DISPLAY_BRIGHTNESS_MAX_EV, state.getFloat(STATE_DISPLAY_BRIGHTNESS_EV, displayBrightnessEv)));
         displayGamma = Math.max(DISPLAY_GAMMA_MIN,
                 Math.min(DISPLAY_GAMMA_MAX, state.getFloat(STATE_DISPLAY_GAMMA, displayGamma)));
+        denoiseEnabled = state.getBoolean(STATE_DENOISE_ENABLED, denoiseEnabled);
     }
 
     @Override
@@ -198,6 +206,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         outState.putBoolean(STATE_ALLOW_CROPPED_60, allowCropped60Fps);
         outState.putFloat(STATE_DISPLAY_BRIGHTNESS_EV, displayBrightnessEv);
         outState.putFloat(STATE_DISPLAY_GAMMA, displayGamma);
+        outState.putBoolean(STATE_DENOISE_ENABLED, denoiseEnabled);
     }
 
     private void buildUi() {
@@ -250,6 +259,9 @@ public final class MainActivity extends Activity implements CameraController.Lis
         flickerButton = new Button(this);
         refreshFlickerButton();
 
+        denoiseButton = new Button(this);
+        refreshDenoiseButton();
+
         captureButton = new Button(this);
         captureButton.setText("CAPTURE HDR SET");
 
@@ -285,6 +297,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         compactControl(autoButton);
         compactControl(fpsButton);
         compactControl(flickerButton);
+        compactControl(denoiseButton);
         compactControl(captureButton);
         compactControl(shortBar);
         compactControl(longBar);
@@ -302,6 +315,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(root);
+        glView.setOnTouchListener(this::handleFocusTouch);
         applySafeSystemBarInsets(root, panel);
         setManualControlsEnabled(!autoHdrEnabled);
 
@@ -416,6 +430,16 @@ public final class MainActivity extends Activity implements CameraController.Lis
                     Toast.LENGTH_LONG).show();
         });
 
+        denoiseButton.setOnClickListener(v -> {
+            denoiseEnabled = !denoiseEnabled;
+            refreshDenoiseButton();
+            if (controller != null) controller.setDenoiseEnabled(denoiseEnabled);
+            Toast.makeText(
+                    this,
+                    denoiseEnabled ? "Denoise ON" : "Denoise OFF",
+                    Toast.LENGTH_SHORT).show();
+        });
+
         fpsButton.setOnClickListener(v -> {
             allowCropped60Fps = !allowCropped60Fps;
             refreshFpsButton();
@@ -436,7 +460,10 @@ public final class MainActivity extends Activity implements CameraController.Lis
     }
 
     private void buildPortraitControls(LinearLayout panel, Button autoButton, Button fpsButton) {
-        panel.addView(cameraSpinner, matchWrap());
+        LinearLayout cameraRow = makeHorizontalRow();
+        cameraRow.addView(cameraSpinner, weighted(1f));
+        cameraRow.addView(denoiseButton, weighted(1f));
+        panel.addView(cameraRow, matchWrap());
 
         LinearLayout modeRow = makeHorizontalRow();
         modeRow.addView(modeSpinner, weighted(1f));
@@ -457,7 +484,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
 
     private void buildLandscapeControls(LinearLayout panel, Button autoButton, Button fpsButton) {
         LinearLayout row1 = makeHorizontalRow();
-        row1.addView(cameraSpinner, weighted(2f));
+        row1.addView(cameraSpinner, weighted(0.8f));
+        row1.addView(denoiseButton, weighted(0.9f));
         row1.addView(modeSpinner, weighted(1f));
         row1.addView(autoButton, weighted(1f));
         row1.addView(flickerButton, weighted(1.15f));
@@ -605,6 +633,8 @@ public final class MainActivity extends Activity implements CameraController.Lis
             boolean srgbTonemap) {
         int displayDegrees = rotationToDegrees(getWindowManager().getDefaultDisplay().getRotation());
         int previewRelation = (sensorOrientation - displayDegrees + 360) % 360;
+        configuredPreviewSize = previewSize;
+        previewRelationDegrees = previewRelation;
         int jpegOrientation = (sensorOrientation - displayDegrees + 360) % 360;
         glView.setProducerOwnedOrientationDegrees(previewRelation);
         glView.setDisplayBrightnessEv(displayBrightnessEv);
@@ -616,6 +646,7 @@ public final class MainActivity extends Activity implements CameraController.Lis
         controller.setPreviewMode(previewModeForIndex(modeIndex));
         controller.setFlickerMode(flickerMode);
         controller.setAutoHdrExposure(autoHdrEnabled);
+        controller.setDenoiseEnabled(denoiseEnabled);
         controller.setManualSettings(
                 EXPOSURES_NS[shortIndex],
                 EXPOSURES_NS[longIndex],
@@ -717,6 +748,18 @@ public final class MainActivity extends Activity implements CameraController.Lis
     }
 
     @Override
+    public void onCaptureBackgroundSafe(String captureId) {
+        RuntimeLogger.event("CAPTURE_UI_BACKGROUND_SAFE", captureId);
+        runOnUiThread(() -> {
+            Toast.makeText(
+                    this,
+                    "HDR Captured. You can now move the phone.",
+                    Toast.LENGTH_LONG).show();
+            statusText.setText("HDR captured; background processing is now safe: " + captureId);
+        });
+    }
+
+    @Override
     public void onCaptureFinished(String captureId, boolean success, String message) {
         RuntimeLogger.event(success ? "CAPTURE_UI_DONE" : "CAPTURE_UI_FAIL", captureId + " " + message);
         runOnUiThread(() -> {
@@ -727,6 +770,54 @@ public final class MainActivity extends Activity implements CameraController.Lis
                     Toast.LENGTH_LONG).show();
             statusText.setText(message);
         });
+    }
+
+    private boolean handleFocusTouch(View view, MotionEvent event) {
+        if (event.getActionMasked() != MotionEvent.ACTION_UP) return true;
+        if (controller == null || configuredPreviewSize == null) return true;
+        float viewWidth = glView.getWidth();
+        float viewHeight = glView.getHeight();
+        if (viewWidth <= 1.0f || viewHeight <= 1.0f) return true;
+
+        boolean axisSwap = ((previewRelationDegrees / 90) & 1) != 0;
+        float imageWidth = axisSwap ? configuredPreviewSize.getHeight() : configuredPreviewSize.getWidth();
+        float imageHeight = axisSwap ? configuredPreviewSize.getWidth() : configuredPreviewSize.getHeight();
+        float imageAspect = imageWidth / Math.max(imageHeight, 1.0f);
+        float viewportAspect = viewWidth / viewHeight;
+        float scaleX = 1.0f;
+        float scaleY = 1.0f;
+        if (viewportAspect > imageAspect) {
+            scaleX = viewportAspect / imageAspect;
+        } else if (viewportAspect < imageAspect) {
+            scaleY = imageAspect / viewportAspect;
+        }
+
+        float displayX = event.getX() / viewWidth;
+        float displayY = event.getY() / viewHeight;
+        float orientedX = 0.5f + (displayX - 0.5f) * scaleX;
+        float orientedY = 0.5f + (displayY - 0.5f) * scaleY;
+        if (orientedX < 0.0f || orientedX > 1.0f || orientedY < 0.0f || orientedY > 1.0f) {
+            return true;
+        }
+
+        float sensorX;
+        float sensorY;
+        int rotation = ((previewRelationDegrees % 360) + 360) % 360;
+        if (rotation == 90) {
+            sensorX = orientedY;
+            sensorY = 1.0f - orientedX;
+        } else if (rotation == 180) {
+            sensorX = 1.0f - orientedX;
+            sensorY = 1.0f - orientedY;
+        } else if (rotation == 270) {
+            sensorX = 1.0f - orientedY;
+            sensorY = orientedX;
+        } else {
+            sensorX = orientedX;
+            sensorY = orientedY;
+        }
+        controller.focusAtNormalized(sensorX, sensorY);
+        return true;
     }
 
     private static int brightnessProgressForEv(float ev) {
@@ -778,6 +869,14 @@ public final class MainActivity extends Activity implements CameraController.Lis
         if (flickerMode == CameraController.FLICKER_MODE_60HZ) return "60Hz";
         if (flickerMode == CameraController.FLICKER_MODE_OFF) return "OFF";
         return "AUTO";
+    }
+
+    private void refreshDenoiseButton() {
+        if (denoiseButton == null) return;
+        denoiseButton.setText("Denoise");
+        denoiseButton.setAlpha(denoiseEnabled ? 1.0f : 0.55f);
+        denoiseButton.setActivated(denoiseEnabled);
+        denoiseButton.setContentDescription(denoiseEnabled ? "Denoise on" : "Denoise off");
     }
 
     private void refreshFpsButton() {

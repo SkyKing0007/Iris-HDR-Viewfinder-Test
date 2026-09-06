@@ -15,6 +15,7 @@ import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.CaptureResult;
 import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.hardware.camera2.params.MeteringRectangle;
 import android.hardware.camera2.params.TonemapCurve;
 import android.media.Image;
 import android.media.ImageReader;
@@ -80,6 +81,7 @@ final class CameraController {
                 float dehaze,
                 float microContrast,
                 boolean automatic);
+        void onCaptureBackgroundSafe(String captureId);
         void onCaptureFinished(String captureId, boolean success, String message);
     }
 
@@ -242,6 +244,11 @@ final class CameraController {
     private String lastPhysicalActiveArrayId;
     private Float lastReportedZoomRatio;
     private String lastActivePhysicalId;
+    private int maxAfRegions;
+    private MeteringRectangle touchFocusRegion;
+    private boolean touchFocusActive;
+    private boolean denoiseEnabled = true;
+    private boolean captureDenoiseEnabled = true;
 
     CameraController(Context context, Listener listener) {
         this.context = context.getApplicationContext();
@@ -269,21 +276,35 @@ final class CameraController {
             Integer level = c.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
             Integer sync = c.get(CameraCharacteristics.SYNC_MAX_LATENCY);
             Set<String> physical = c.getPhysicalCameraIds();
-            String label = String.format(
+            String details = String.format(
                     Locale.US,
-                    "ID %s  %.1fmm  RAW+Manual  level=%s  sync=%s%s",
+                    "ID %s %.1fmm RAW+Manual level=%s sync=%s%s",
                     id,
                     focal,
                     hardwareLevelName(level),
                     sync == null ? "?" : sync.toString(),
-                    physical.isEmpty() ? "" : "  physical=" + physical);
-            out.add(new CameraDescriptor(id, label));
+                    physical.isEmpty() ? "" : " physical=" + physical);
+            RuntimeLogger.event("CAMERA_DISCOVERY", details);
+            out.add(new CameraDescriptor(id, "ID" + id));
         }
         return out;
     }
 
     void setStillFusionView(HdrGlView view) {
         stillFusionView = view;
+    }
+
+    void setDenoiseEnabled(boolean enabled) {
+        cameraHandler.post(() -> {
+            denoiseEnabled = enabled;
+            RuntimeLogger.event("DENOISE_TOGGLE", enabled ? "ON" : "OFF");
+        });
+    }
+
+    void focusAtNormalized(float sensorX, float sensorY) {
+        final float x = Math.max(0.0f, Math.min(1.0f, sensorX));
+        final float y = Math.max(0.0f, Math.min(1.0f, sensorY));
+        cameraHandler.post(() -> triggerTouchFocusLocked(x, y));
     }
 
     void setPreviewSurface(Surface surface) {
@@ -468,6 +489,10 @@ final class CameraController {
         try {
             characteristics = cameraManager.getCameraCharacteristics(cameraId);
             activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE);
+            Integer afRegions = characteristics.get(CameraCharacteristics.CONTROL_MAX_REGIONS_AF);
+            maxAfRegions = afRegions == null ? 0 : afRegions;
+            touchFocusRegion = null;
+            touchFocusActive = false;
             Range<Long> expRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
             Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
             if (expRange == null || isoRange == null) {
@@ -779,7 +804,7 @@ final class CameraController {
     private void configureAutoExposureRequest(CaptureRequest.Builder builder) {
         builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
         builder.set(CaptureRequest.CONTROL_AE_ANTIBANDING_MODE, aeAntibandingModeLocked());
-        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+        configureAutofocusRequest(builder);
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
         builder.set(
                 CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
@@ -801,7 +826,7 @@ final class CameraController {
         long exposure = clampExposure(exposureNs);
         int sensitivity = clampIso(iso);
         builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
-        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+        configureAutofocusRequest(builder);
         builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
         builder.set(
                 CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
@@ -835,6 +860,100 @@ final class CameraController {
         configureProcessingControls(builder);
         configureSrgbTonemap(builder);
     }
+
+    private void configureAutofocusRequest(CaptureRequest.Builder builder) {
+        if (touchFocusActive && touchFocusRegion != null && maxAfRegions > 0) {
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO);
+            builder.set(CaptureRequest.CONTROL_AF_REGIONS, new MeteringRectangle[]{touchFocusRegion});
+        } else {
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE);
+        }
+        builder.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE);
+    }
+
+    private void triggerTouchFocusLocked(float normalizedX, float normalizedY) {
+        if (cameraDevice == null || captureSession == null || previewSurface == null || !previewSurface.isValid()) {
+            listener.onStatus("Touch focus unavailable until preview is active");
+            return;
+        }
+        if (capturing || stillSessionActive) {
+            listener.onStatus("Touch focus unavailable while HDR capture is processing");
+            return;
+        }
+        if (activeArray == null || maxAfRegions <= 0) {
+            listener.onStatus("This camera does not expose touch AF regions");
+            return;
+        }
+
+        int regionWidth = Math.max(48, activeArray.width() / 10);
+        int regionHeight = Math.max(48, activeArray.height() / 10);
+        int centerX = activeArray.left + Math.round(normalizedX * activeArray.width());
+        int centerY = activeArray.top + Math.round(normalizedY * activeArray.height());
+        int left = Math.max(activeArray.left, Math.min(activeArray.right - regionWidth, centerX - regionWidth / 2));
+        int top = Math.max(activeArray.top, Math.min(activeArray.bottom - regionHeight, centerY - regionHeight / 2));
+        touchFocusRegion = new MeteringRectangle(
+                new Rect(left, top, left + regionWidth, top + regionHeight),
+                MeteringRectangle.METERING_WEIGHT_MAX);
+        touchFocusActive = true;
+
+        try {
+            CaptureRequest.Builder cancel = buildFocusTriggerRequestLocked();
+            cancel.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL);
+            captureSession.capture(cancel.build(), null, cameraHandler);
+
+            CaptureRequest.Builder start = buildFocusTriggerRequestLocked();
+            start.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START);
+            captureSession.capture(start.build(), touchFocusCallback, cameraHandler);
+            RuntimeLogger.event(
+                    "TOUCH_FOCUS",
+                    String.format(Locale.US, "sensor=(%.4f,%.4f) region=%s", normalizedX, normalizedY, touchFocusRegion));
+        } catch (Throwable t) {
+            RuntimeLogger.error("TOUCH_FOCUS_FAIL", t);
+            listener.onStatus("Touch focus failed: " + t.getMessage());
+        }
+    }
+
+    private CaptureRequest.Builder buildFocusTriggerRequestLocked() throws CameraAccessException {
+        CaptureRequest.Builder builder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+        builder.addTarget(previewSurface);
+        if (previewMode == PreviewMode.NORMAL) {
+            configureAutoExposureRequest(builder);
+        } else {
+            int postRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;
+            configureManualRequest(builder, activeLongExposureNs(), activeLongIso(), postRawBoost, true);
+            if (aeFpsRange != null) {
+                builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, aeFpsRange);
+            }
+            configurePreviewRotateAndCrop(builder);
+        }
+        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO);
+        builder.set(CaptureRequest.CONTROL_AF_REGIONS, new MeteringRectangle[]{touchFocusRegion});
+        return builder;
+    }
+
+    private final CameraCaptureSession.CaptureCallback touchFocusCallback =
+            new CameraCaptureSession.CaptureCallback() {
+                @Override
+                public void onCaptureCompleted(
+                        CameraCaptureSession session,
+                        CaptureRequest request,
+                        TotalCaptureResult result) {
+                    Integer afState = result.get(CaptureResult.CONTROL_AF_STATE);
+                    RuntimeLogger.event("TOUCH_FOCUS_RESULT", "afState=" + afState + " region=" + touchFocusRegion);
+                    listener.onStatus("Touch focus applied");
+                    applyPreviewRepeatingLocked();
+                }
+
+                @Override
+                public void onCaptureFailed(
+                        CameraCaptureSession session,
+                        CaptureRequest request,
+                        CaptureFailure failure) {
+                    RuntimeLogger.event("TOUCH_FOCUS_FAIL", "reason=" + failure.getReason());
+                    listener.onStatus("Touch focus request failed");
+                    applyPreviewRepeatingLocked();
+                }
+            };
 
     private void configurePreviewRotateAndCrop(CaptureRequest.Builder builder) {
         if (Build.VERSION.SDK_INT < 31 || characteristics == null) return;
@@ -974,6 +1093,7 @@ final class CameraController {
         captureDisplayGamma = displayGamma;
         captureDisplayDehaze = displayDehaze;
         captureDisplayMicroContrast = displayMicroContrast;
+        captureDenoiseEnabled = denoiseEnabled;
         captureBeginRealtimeNs = System.nanoTime();
         String captureId = "IrisHDR_" + new SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(new Date());
         RuntimeLogger.event(
@@ -985,6 +1105,7 @@ final class CameraController {
                         + String.format(Locale.US, " brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
                                 captureDisplayBrightnessEv, captureDisplayGamma,
                                 captureDisplayDehaze, captureDisplayMicroContrast)
+                        + " denoise=" + (captureDenoiseEnabled ? "ON" : "OFF")
                         + " mode=" + (autoHdrExposure ? "AUTO " + flickerStatusLocked() : manualSafetySummaryLocked()));
         listener.onStatus("Capturing matched SHORT/LONG RAW + JPEG set…");
         captureSaver = new CaptureSetSaver(
@@ -997,11 +1118,20 @@ final class CameraController {
                 captureDisplayGamma,
                 captureDisplayDehaze,
                 captureDisplayMicroContrast,
+                captureDenoiseEnabled,
                 stillFusionView,
                 new CaptureSetSaver.Listener() {
                     @Override
                     public void onInputsAcquired(String id) {
                         cameraHandler.post(() -> resumePreviewAfterStillInputsLocked(id));
+                    }
+
+                    @Override
+                    public void onBackgroundSafe(String id) {
+                        cameraHandler.post(() -> {
+                            RuntimeLogger.event("CAPTURE_BACKGROUND_SAFE", id);
+                            listener.onCaptureBackgroundSafe(id);
+                        });
                     }
 
                     @Override
@@ -1108,10 +1238,16 @@ final class CameraController {
 
     private void closeDeviceLocked() {
         autoMetering = false;
-        capturing = false;
         stillSessionActive = false;
-        if (captureSaver != null) captureSaver.abort("Camera closed");
-        captureSaver = null;
+        boolean preserveBackgroundProcessing = captureSaver != null && captureSaver.isBackgroundSafe();
+        if (captureSaver != null && !preserveBackgroundProcessing) {
+            captureSaver.abort("Camera closed");
+            captureSaver = null;
+        }
+        capturing = preserveBackgroundProcessing;
+        if (preserveBackgroundProcessing) {
+            RuntimeLogger.event("CAPTURE_BACKGROUND_PRESERVE", "camera closed after safe processing boundary");
+        }
         closeSessionLocked();
         closeReader(rawReader);
         closeReader(jpegReader);
