@@ -167,24 +167,52 @@ float longLinearLumaAt(vec2 sampleUv) {
     return linearLuma(srgbToLinear(stillLongRgbAt(sampleUv)));
 }
 
-float shortRecoveryValidityAt(vec2 sampleUv) {
-    // Strict seed validity: a seed must have comfortable signal and highlight
-    // headroom of its own before it is allowed to start SHORT ownership.
+vec2 localLinearRangeAtRadius(vec2 sampleUv, float radiusPixels);
+
+float channelClipDamage(vec3 rgb) {
+    // A single near-clipped channel is not equivalent to losing the whole RGB
+    // sample. Average channel damage preserves useful filament/color structure in
+    // the remaining channels instead of rejecting the pixel via max(R,G,B).
+    float rDamage = smoothstep(0.985, 0.9995, rgb.r);
+    float gDamage = smoothstep(0.985, 0.9995, rgb.g);
+    float bDamage = smoothstep(0.985, 0.9995, rgb.b);
+    return (rDamage + gDamage + bDamage) / 3.0;
+}
+
+float shortInformationAdvantageAt(vec2 sampleUv) {
     vec3 shortRgb = stillShortRgbAt(sampleUv);
-    float signal = smoothstep(0.015, 0.055, encodedLuma(shortRgb));
-    float headroom = 1.0 - smoothstep(0.955, 0.992, max3(shortRgb));
-    return signal * headroom;
+    vec3 longRgb = stillLongRgbAt(sampleUv);
+    float clipAdvantage = smoothstep(
+        0.03, 0.45, channelClipDamage(longRgb) - channelClipDamage(shortRgb));
+    vec2 localRanges = localLinearRangeAtRadius(sampleUv, 4.0);
+    float shortStructure = smoothstep(0.003, 0.022, localRanges.x);
+    float structureAdvantage = smoothstep(
+        0.0015, 0.018, localRanges.x - 1.03 * localRanges.y);
+    return max(clipAdvantage, shortStructure * structureAdvantage);
+}
+
+float shortRecoveryValidityAt(vec2 sampleUv) {
+    // V2.22 strict seed validity is INFORMATION-relative, not max-channel-headroom
+    // based. A filament may have one clipped channel yet still contain coherent
+    // shape/color/gradient information that is clearly superior to clipped LONG.
+    vec3 shortRgb = stillShortRgbAt(sampleUv);
+    float signal = smoothstep(0.012, 0.050, encodedLuma(shortRgb));
+    vec2 localRanges = localLinearRangeAtRadius(sampleUv, 4.0);
+    float retainedStructure = smoothstep(0.003, 0.020, localRanges.x);
+    float channelRetention = 1.0 - smoothstep(
+        0.72, 0.995, channelClipDamage(shortRgb));
+    float relativeAdvantage = shortInformationAdvantageAt(sampleUv);
+    return signal * max(relativeAdvantage, max(retainedStructure, channelRetention * 0.55));
 }
 
 float shortRecoveryDomainValidityAt(vec2 sampleUv) {
-    // V2.21 domain validity is deliberately broader than seed validity. Once a
-    // connected LONG-loss component has a strict seed, a low-texture interior only
-    // needs usable real SHORT signal; it must not punch a LONG hole merely because
-    // it does not satisfy the stricter seed thresholds at every atlas cell.
+    // Once a connected LONG-loss component has a valid seed, every real SHORT
+    // sample with usable signal remains eligible for ownership propagation. Near
+    // clipping is deliberately NOT a domain hole: if SHORT is the less-damaged
+    // exposure it remains the correct recovery source, and a fully clipped core
+    // stays connected to its informative SHORT boundary instead of falling to LONG.
     vec3 shortRgb = stillShortRgbAt(sampleUv);
-    float signal = smoothstep(0.006, 0.025, encodedLuma(shortRgb));
-    float headroom = 1.0 - smoothstep(0.985, 0.999, max3(shortRgb));
-    return signal * headroom;
+    return smoothstep(0.004, 0.020, encodedLuma(shortRgb));
 }
 
 float registrationNeighborhoodConfidenceAt(vec2 sampleUv) {
@@ -539,7 +567,7 @@ void main() {
         return;
     }
 
-    // IRIS_V221_TOPOLOGY_COMPLETE_REGION_RECONSTRUCTION_BEGIN
+    // IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_BEGIN
     // Mode 3 creates two distinct masks: R is a strict, locally registered seed;
     // G is a topology-complete PHYSICAL LONG-loss + usable-SHORT domain. BA carry
     // residual SHORT flow owned by the seed. Mode 4 reconstructs to convergence;
@@ -643,7 +671,7 @@ void main() {
         outColor = vec4(propagate, recoveryDomain, mix(centerState.ba, encodedFlow, propagate));
         return;
     }
-    // IRIS_V221_TOPOLOGY_COMPLETE_REGION_RECONSTRUCTION_END
+    // IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_END
 
     if (mode == 5) {
         // IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN

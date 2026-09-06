@@ -21,7 +21,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.21 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.22 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -51,7 +51,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.21 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.22 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -602,13 +602,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.21 - Exact successful V2.20 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.20' in workflow
-        and 'run-id: 33980347593' in workflow
-        and "authority='b0fb984d31ea8204f89160db2f3f7c1e885624a6'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.20 Actions authority")
-require("authority='13393e945e7313d981b38ce5a44e31eceff7dc79'" not in workflow,
-        "V2.21 must not seed runtime from V2.19 after successful V2.20")
+# 038 / 042 / V2.22 - Exact successful V2.21 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.21' in workflow
+        and 'run-id: 34000719226' in workflow
+        and "authority='320548b3af7b2989bac75b9c987218bc5d3defe5'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.21 Actions authority")
+require("authority='b0fb984d31ea8204f89160db2f3f7c1e885624a6'" not in workflow,
+        "V2.22 must not seed runtime from V2.20 after successful V2.21")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -648,10 +648,13 @@ require('AUTO_BRACKET_MIN_RATIO = 4.0' in camera
         and 'AUTO_SHORT_P50_LONG_TARGET = 0.015' in camera
         and 'AUTO_SHORT_P90_LONG_TARGET = 0.10' in camera
         and 'AUTO_SHORT_P98_LONG_HEADROOM = 0.65' in camera
+        and 'AUTO_SHORT_P99_HEADROOM_TARGET = 0.35' in camera
+        and 'AUTO_SHORT_NEAR_CLIP_SOFT = 0.0015f' in camera
+        and 'AUTO_SHORT_NEAR_CLIP_HARD = 0.0100f' in camera
         and 'AUTO_LONG_P95_BODY_TARGET = 0.24' in camera
         and 'AUTO_LONG_P98_BODY_TARGET = 0.42' in camera
         and 'AUTO_LONG_MAX_NEAR_CLIP_FRACTION = 0.005' in camera,
-        "V2.18 MANUAL-calibrated AUTO bracket/body targets missing")
+        "V2.22 independent SHORT-highlight / inherited LONG-body AUTO targets missing")
 
 # 092 - Exact javac failure from failed V2.13 run 33900980849: CameraController
 # consumed stats.shortP90Linear while SceneStats did not publish that field. Preserve
@@ -713,23 +716,34 @@ require(camera.count('manualEffectiveShortExposureNs, manualEffectiveLongExposur
 require('Short ACTUAL ' in main and 'Long ACTUAL ' in main,
         "MANUAL UI must label effective shutter values as actual")
 
-# V2.19 is post-fusion presentation-only inside CameraController. The successful
-# V2.18 physical AUTO exposure controller must remain byte-exact.
+# V2.22 changes only one explicitly bounded scene-stat policy region: absolute
+# SHORT highlight protection is separated from the inherited LONG-body target.
+# Everything before/after that marked region, plus the actual pair solver and clean-AE
+# anchor solver, must remain byte-exact to successful V2.21/V2.18 mechanics.
 physical_stats_slice = camera[camera.index('    private void processHdrSceneStatsLocked('):
                               camera.index('    private void deriveAutoPairFromSceneTargetsLocked()')]
 physical_pair_slice = camera[camera.index('    private void deriveAutoPairFromSceneTargetsLocked()'):
                              camera.index('    private void updateAdaptivePresentationLocked(')]
 physical_anchor_slice = camera[camera.index('    private void deriveAutoPairFromAnchorLocked()'):
                                camera.index('    private void processHdrSceneStatsLocked(')]
-require(hashlib.sha256(physical_stats_slice.encode()).hexdigest() ==
-        'aefcfea728217485c9d39764aba520dc3b3b29f8460c4beb6060927c05845d0c',
-        "successful V2.18 scene-stat physical exposure controller changed")
+marker_begin = '        // IRIS_V222_INDEPENDENT_SHORT_HIGHLIGHT_BEGIN\n'
+marker_end = '        // IRIS_V222_INDEPENDENT_SHORT_HIGHLIGHT_END\n'
+require(marker_begin in physical_stats_slice and marker_end in physical_stats_slice,
+        "V2.22 independent SHORT highlight ownership markers missing")
+physical_prefix = physical_stats_slice[:physical_stats_slice.index(marker_begin)]
+physical_suffix = physical_stats_slice[physical_stats_slice.index(marker_end) + len(marker_end):]
+require(hashlib.sha256(physical_prefix.encode()).hexdigest() ==
+        'f29b3104d02f7b6f200ad4ec6d540d2e8031c9506fcc4f338a947ccfaeb5bc97',
+        "V2.22 changed pre-policy V2.21 physical scene-stat mechanics")
+require(hashlib.sha256(physical_suffix.encode()).hexdigest() ==
+        '6d30a0ceab87ebc9525a217d2b18dc5c5b8204312be897ae740c8d01d29ea7bd',
+        "V2.22 changed post-policy V2.21 physical scene-stat mechanics")
 require(hashlib.sha256(physical_pair_slice.encode()).hexdigest() ==
         '7794c401735797af9edd2edb2468d76b9bc4de0d86946d9c0c9a8d2e9d2b040b',
-        "successful V2.18 scene-target pair solver changed")
+        "successful V2.18/V2.21 scene-target pair solver changed")
 require(hashlib.sha256(physical_anchor_slice.encode()).hexdigest() ==
         '306add9a9eed6e80d14555c24c8a37f35b93a79f4af7cf6d7d0e939cec6e9e7d',
-        "successful V2.18 clean-AE anchor solver changed")
+        "successful V2.18/V2.21 clean-AE anchor solver changed")
 
 # V2.21 full-distribution presentation regression. V2.19 matched only P50/P90;
 # the real V2.20 4x window sample therefore solved to -1.3 EV / Gamma 1.80 and
@@ -885,6 +899,37 @@ require(math.isclose(bad_auto_ratio, 4.0, abs_tol=0.01),
         "V2.18 bad 20.6x AUTO physical regression must remain fixed")
 require(desired_ratio_v218(0.00025, 0.00025, 0.003, 0.010, 0.010, 0.0, 4.0) >= 64.0,
         "genuinely dark feasible scenes must retain the 64x / 6EV AUTO ceiling")
+
+# V2.22 separates absolute SHORT highlight protection from the inherited LONG-body
+# target. Real AUTO chandelier: SHORT P99~0.732 / near-clip~0.83% at 1/50 ISO50;
+# MANUAL 1/120 ISO50 retained materially more filament detail.
+def v222_short_scale(p99, near_clip):
+    p99_scale = 0.35 / max(0.010, p99)
+    t = max(0.0, min(1.0, (near_clip - 0.0015) / (0.0100 - 0.0015)))
+    t = t * t * (3.0 - 2.0 * t)
+    clip_scale = 1.0 - 0.50 * t
+    return max(0.25, min(1.0, p99_scale, clip_scale))
+
+def v222_target_ratio(baseline_ratio, short_scale):
+    target_short = max(1e-9, short_scale)
+    target_long = baseline_ratio
+    target_long = max(target_short * 4.0, min(target_long, target_short * 64.0))
+    return target_long / target_short
+
+auto_chandelier_short_scale = v222_short_scale(0.7318, 0.00832)
+manual_chandelier_short_scale = v222_short_scale(0.2598, 0.00434)
+require(0.45 <= auto_chandelier_short_scale <= 0.52,
+        "V2.22 must materially shorten the exact AUTO filament SHORT exposure")
+require(manual_chandelier_short_scale >= 0.84,
+        "V2.22 must not overreact to the already-protected MANUAL-like SHORT tail")
+require(8.0 <= v222_target_ratio(4.0, auto_chandelier_short_scale) <= 8.8,
+        "V2.22 must widen the bracket rather than dragging inherited LONG body down with SHORT")
+require(math.isclose(v222_target_ratio(64.0, 1.0), 64.0, abs_tol=1e-6),
+        "V2.22 must preserve the 64x ceiling")
+require('double targetLongProduct = Math.max(1.0,\n                stats.shortExposureProduct * baselineRatio);' in camera
+        and 'double targetShortProduct = Math.max(1.0,\n                stats.shortExposureProduct * shortScale);' in camera
+        and 'targetLongProduct = Math.max(targetShortProduct * AUTO_BRACKET_MIN_RATIO,' in camera,
+        "V2.22 must solve SHORT highlight protection independently before applying only the 4x..64x contract")
 
 # Presentation remains adaptive, but a failed physical bracket is restrained rather
 # than disguised with strong brightness/gamma/dehaze/microcontrast.
@@ -1048,6 +1093,8 @@ require('presentationTexture);\n                GLES30.glTexParameteri(GLES30.GL
 # V2.21 source-loss atlas separates strict seeds from the topology-complete physical
 # propagation domain. The atlas still never carries source RGB.
 require('IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN' in hdr_shader
+        and 'float channelClipDamage(vec3 rgb)' in hdr_shader
+        and 'float shortInformationAdvantageAt(vec2 sampleUv)' in hdr_shader
         and 'float shortRecoveryValidityAt(vec2 sampleUv)' in hdr_shader
         and 'float registrationNeighborhoodConfidenceAt(vec2 sampleUv)' in hdr_shader
         and 'vec2 registrationNeighborhoodFlowAt(vec2 sampleUv)' in hdr_shader
@@ -1075,18 +1122,18 @@ require('int analysisWidth = Math.max(1, (width + 15) / 16);' in gl
         "V2.17 ownership atlas must preserve the proven 1/16 allocation")
 require(math.ceil(4096 / 16) == 256 and math.ceil(3072 / 16) == 192,
         "3072x4096 device captures must map to a 192x256 ownership atlas")
-v221_recon = hdr_shader[hdr_shader.index('// IRIS_V221_TOPOLOGY_COMPLETE_REGION_RECONSTRUCTION_BEGIN'):
-                         hdr_shader.index('// IRIS_V221_TOPOLOGY_COMPLETE_REGION_RECONSTRUCTION_END')]
-require('float seed = step(0.30, seedStrength);' in v221_recon
-        and 'float recoveryDomain = step(0.30, broadRecoveryDomainAt(uv));' in v221_recon
-        and 'float currentOwned = step(0.5, centerState.r);' in v221_recon
-        and 'if (currentOwned > 0.5 || recoveryDomain < 0.5)' in v221_recon
-        and 'float propagate = step(0.35, coherentFlow * geometryBarrier) * recoveryDomain;' in v221_recon,
+v222_recon = hdr_shader[hdr_shader.index('// IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_BEGIN'):
+                         hdr_shader.index('// IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_END')]
+require('float seed = step(0.30, seedStrength);' in v222_recon
+        and 'float recoveryDomain = step(0.30, broadRecoveryDomainAt(uv));' in v222_recon
+        and 'float currentOwned = step(0.5, centerState.r);' in v222_recon
+        and 'if (currentOwned > 0.5 || recoveryDomain < 0.5)' in v222_recon
+        and 'float propagate = step(0.35, coherentFlow * geometryBarrier) * recoveryDomain;' in v222_recon,
         "V2.21 mode 3/4 must implement strict-seed, mask-constrained monotonic reconstruction")
-require('for (int oy = -2; oy <= 2; ++oy)' not in v221_recon
-        and 'float coherentSupport = seededRegion' not in v221_recon,
+require('for (int oy = -2; oy <= 2; ++oy)' not in v222_recon
+        and 'float coherentSupport = seededRegion' not in v222_recon,
         "retired finite-radius one-pass V2.19 closure returned")
-require('exposureRatio' not in v221_recon,
+require('exposureRatio' not in v222_recon,
         "ownership reconstruction topology must be exposure-ratio invariant")
 domain_slice = hdr_shader[hdr_shader.index('float longLossRecoveryDomainAt(vec2 sampleUv)'):
                           hdr_shader.index('vec3 broadRecoverySeedStatsAt(vec2 sampleUv)')]
@@ -1094,17 +1141,29 @@ require('registrationNeighborhoodConfidenceAt' not in domain_slice
         and 'stillRegistrationConfidence' not in domain_slice
         and 'shortRecoveryDomainValidityAt(sampleUv)' in domain_slice,
         "physical recovery domain must not be hole-punched by registration confidence")
+short_validity_slice = hdr_shader[hdr_shader.index('float shortRecoveryValidityAt(vec2 sampleUv)'):
+                                  hdr_shader.index('float shortRecoveryDomainValidityAt(vec2 sampleUv)')]
+short_domain_validity_slice = hdr_shader[hdr_shader.index('float shortRecoveryDomainValidityAt(vec2 sampleUv)'):
+                                         hdr_shader.index('float registrationNeighborhoodConfidenceAt(vec2 sampleUv)')]
+require('max3(shortRgb)' not in short_validity_slice
+        and 'max3(shortRgb)' not in short_domain_validity_slice
+        and 'shortInformationAdvantageAt(sampleUv)' in short_validity_slice
+        and 'localLinearRangeAtRadius(sampleUv, 4.0)' in short_validity_slice,
+        "V2.22 must not reject useful SHORT merely because one channel approaches clipping")
+require('headroom' not in short_domain_validity_slice
+        and 'return smoothstep(0.004, 0.020, encodedLuma(shortRgb));' in short_domain_validity_slice,
+        "V2.22 connected recovery domain must keep real SHORT signal eligible through near-clipped interiors")
 require('for (int oy = -2; oy <= 2; ++oy)' in hdr_shader[hdr_shader.index('float broadRecoveryDomainAt'):hdr_shader.index('// IRIS_V217_REVERSED_V215_LONG_TRUTH_END')]
         and 'domainSum / 25.0' in hdr_shader,
         "V2.21 recovery domain must cover each 16x16 atlas cell densely")
-require('float targetConfidence = stillLocalRegistrationConfidenceAt(uv);' in v221_recon
-        and 'float targetFlowError = length(targetFlowPixels - meanFlowPixels);' in v221_recon
-        and 'float geometryBarrier = mix(1.0, targetAgreement, targetMeasured);' in v221_recon,
+require('float targetConfidence = stillLocalRegistrationConfidenceAt(uv);' in v222_recon
+        and 'float targetFlowError = length(targetFlowPixels - meanFlowPixels);' in v222_recon
+        and 'float geometryBarrier = mix(1.0, targetAgreement, targetMeasured);' in v222_recon,
         "supported local-flow disagreement must remain the motion/disocclusion barrier")
-require('meanFlowPixels' in v221_recon
-        and 'flowRms' in v221_recon
-        and 'smoothstep(0.85, 1.25, flowRms)' in v221_recon
-        and 'registrationNeighborhoodFlowAt(uv)' in v221_recon,
+require('meanFlowPixels' in v222_recon
+        and 'flowRms' in v222_recon
+        and 'smoothstep(0.85, 1.25, flowRms)' in v222_recon
+        and 'registrationNeighborhoodFlowAt(uv)' in v222_recon,
         "wide clipped regions must inherit coherent residual geometry from proven seeds")
 
 # Saved mode 5 is reversed-V2.15 source truth: LONG by default, aligned SHORT as a
@@ -1308,9 +1367,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 38' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.21"' in Path('app/build.gradle.kts').read_text(),
-        "V2.21 version/build marker must be exact")
+require('versionCode = 39' in Path('app/build.gradle.kts').read_text()
+        and 'versionName = "1.0-v1.4.11-v2.22"' in Path('app/build.gradle.kts').read_text(),
+        "V2.22 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1358,7 +1417,26 @@ require('int[] shortPixels = new int[width * rowsPerStrip];' in fusion
         and 'supportEvidence' not in fusion,
         "byte-preserved CPU utility must use bounded strip buffers and no LONG support mask")
 
-# V2.21 topology regression preserves V2.20 convergence and adds the exact 4x domain-hole failure. The supplied MANUAL failure used
+# V2.22 exact filament/gray-block regression: one-channel saturation is not whole-pixel
+# information loss. SHORT stays recovery-authoritative when it retains more channel
+# information or local structure than LONG. Near-clipped interiors stay connected.
+def clip_damage(rgb):
+    def ss(x):
+        t = max(0.0, min(1.0, (x - 0.985) / (0.9995 - 0.985)))
+        return t * t * (3.0 - 2.0 * t)
+    return sum(ss(v) for v in rgb) / 3.0
+
+short_filament = (1.0, 0.91, 0.74)
+long_filament = (1.0, 1.0, 1.0)
+require(clip_damage(short_filament) < clip_damage(long_filament),
+        "filament fixture must retain more SHORT channel information than LONG")
+require(clip_damage((1.0, 0.70, 0.55)) < 0.50,
+        "one clipped SHORT channel must not classify the whole RGB sample as lost")
+require('float headroom = 1.0 - smoothstep(0.955, 0.992, max3(shortRgb));' not in hdr_shader
+        and 'float headroom = 1.0 - smoothstep(0.985, 0.999, max3(shortRgb));' not in hdr_shader,
+        "retired max-channel SHORT veto returned")
+
+# V2.22 topology regression preserves V2.20/V2.21 convergence and adds the exact 4x domain-hole failure. The supplied MANUAL failure used
 # SHORT 1/1000 ISO50 and LONG 1/100 ISO100 = 20x / 4.32 EV. At the production
 # 1/16 atlas, its large hard-loss components contain interior cells roughly 14 cells
 # from a valid boundary, far beyond the retired radius-2 one-pass closure.
@@ -1519,4 +1597,4 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.21 REGRESSION PASS: exact successful V2.20 authority, V2.18 physical capture preserved, V2.20 convergence preserved, confidence-free physical recovery topology + measured-flow barriers, and four-anchor P10/P25/P50/P90 AUTO presentation with exact 4x haze/domain-hole plus 20x/64x invariance regressions")
+print("V1.4.11 V2.22 REGRESSION PASS: exact successful V2.21 authority, V2.20/V2.21 convergence and four-anchor tone preserved, max-channel SHORT veto removed in favor of channel/structure-relative information validity, connected near-clipped SHORT remains eligible, and AUTO protects the absolute SHORT high tail independently while retaining the inherited LONG-body target within 4x..64x")

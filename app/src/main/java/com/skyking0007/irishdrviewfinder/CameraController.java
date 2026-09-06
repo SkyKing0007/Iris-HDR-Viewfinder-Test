@@ -113,6 +113,12 @@ final class CameraController {
     private static final double AUTO_SHORT_P50_LONG_TARGET = 0.015;
     private static final double AUTO_SHORT_P90_LONG_TARGET = 0.10;
     private static final double AUTO_SHORT_P98_LONG_HEADROOM = 0.65;
+    // V2.22 SHORT is a dedicated highlight-recovery exposure. The prior P99=0.78 /
+    // 1%-near-clip policy let small filament/specular detail saturate while still
+    // reporting a nominal 4x bracket. Protect the high tail independently of LONG.
+    private static final double AUTO_SHORT_P99_HEADROOM_TARGET = 0.35;
+    private static final float AUTO_SHORT_NEAR_CLIP_SOFT = 0.0015f;
+    private static final float AUTO_SHORT_NEAR_CLIP_HARD = 0.0100f;
     private static final double AUTO_LONG_P95_BODY_TARGET = 0.24;
     private static final double AUTO_LONG_P98_BODY_TARGET = 0.42;
     private static final double AUTO_LONG_MAX_NEAR_CLIP_FRACTION = 0.005;
@@ -1631,18 +1637,34 @@ final class CameraController {
                     ratioLongBody,
                     currentRatio * Math.max(0.25, Math.min(1.0, clipScale)));
         }
-        double desiredRatio = Math.max(AUTO_BRACKET_MIN_RATIO,
+        // IRIS_V222_INDEPENDENT_SHORT_HIGHLIGHT_BEGIN
+        // Preserve the successful V2.18/V2.21 LONG-body target first. SHORT is then
+        // solved independently for highlight information. If SHORT needs less exposure,
+        // the bracket widens instead of dragging the clean LONG body darker. Only the
+        // hard 4x..64x contract may bound either side afterward.
+        double baselineRatio = Math.max(AUTO_BRACKET_MIN_RATIO,
                 Math.min(AUTO_BRACKET_MAX_RATIO,
                         Math.min(ratioBody, Math.min(ratioHeadroom, ratioLongBody))));
+        double targetLongProduct = Math.max(1.0,
+                stats.shortExposureProduct * baselineRatio);
 
-        // P99/clip pressure changes SHORT itself, never collapses LONG onto SHORT.
-        double shortScale = Math.min(1.0,
-                0.78 / Math.max(0.010, stats.shortP99Linear));
-        if (stats.shortNearClipFraction > 0.010f) shortScale = Math.min(shortScale, 0.80);
-        shortScale = Math.max(0.25, shortScale);
-        double targetShortProduct = Math.max(1.0, stats.shortExposureProduct * shortScale);
-        double targetLongProduct = Math.max(targetShortProduct * AUTO_BRACKET_MIN_RATIO,
-                targetShortProduct * desiredRatio);
+        double p99Scale = AUTO_SHORT_P99_HEADROOM_TARGET
+                / Math.max(0.010, stats.shortP99Linear);
+        float clipPressure = smoothstepFloat(
+                AUTO_SHORT_NEAR_CLIP_SOFT,
+                AUTO_SHORT_NEAR_CLIP_HARD,
+                stats.shortNearClipFraction);
+        double clipScale = 1.0 - 0.50 * clipPressure;
+        double shortScale = Math.max(0.25,
+                Math.min(1.0, Math.min(p99Scale, clipScale)));
+        double targetShortProduct = Math.max(1.0,
+                stats.shortExposureProduct * shortScale);
+
+        targetLongProduct = Math.max(targetShortProduct * AUTO_BRACKET_MIN_RATIO,
+                Math.min(targetLongProduct, targetShortProduct * AUTO_BRACKET_MAX_RATIO));
+        double desiredRatio = Math.max(AUTO_BRACKET_MIN_RATIO,
+                Math.min(AUTO_BRACKET_MAX_RATIO,
+                        targetLongProduct / Math.max(1.0, targetShortProduct)));
 
         double errorEv = Math.log(targetLongProduct / expectedLongProduct) / Math.log(2.0);
         double ratioErrorEv = Math.log(desiredRatio / Math.max(1.0, autoDesiredBracketRatio)) / Math.log(2.0);
@@ -1679,17 +1701,19 @@ final class CameraController {
         RuntimeLogger.event(
                 "AUTO_SCENE_ADAPT",
                 String.format(Locale.US,
-                        "shortP50=%.4f shortP90=%.4f shortP98=%.4f shortP99=%.4f shortClip=%.3f longP95=%.4f longP98=%.4f longClip=%.3f bodyRatio=%.2fx longBodyCap=%.2fx targetRatio=%.2fx err=%+.2fEV step=%+.2fEV short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
+                        "shortP50=%.4f shortP90=%.4f shortP98=%.4f shortP99=%.4f shortClip=%.3f longP95=%.4f longP98=%.4f longClip=%.3f bodyRatio=%.2fx longBodyCap=%.2fx baseline=%.2fx shortScale=%.3f targetRatio=%.2fx err=%+.2fEV step=%+.2fEV short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
                         stats.shortP50Linear, stats.shortP90Linear, stats.shortP98Linear,
                         stats.shortP99Linear, stats.shortNearClipFraction,
                         stats.longP95Linear, stats.longP98Linear, stats.longNearClipFraction,
-                        ratioBody, ratioLongBody, desiredRatio, errorEv, stepEv,
+                        ratioBody, ratioLongBody, baselineRatio, shortScale,
+                        desiredRatio, errorEv, stepEv,
                         exposureText(autoShortExposureNs), autoShortIso,
                         exposureText(autoLongExposureNs), autoLongIso, bracketEv, flickerStatusLocked()));
         listener.onAutoHdrSettings(
                 autoShortExposureNs, autoShortIso, autoLongExposureNs, autoLongIso,
                 flickerStatusLocked(), bracketEv);
         applyPreviewRepeatingLocked();
+        // IRIS_V222_INDEPENDENT_SHORT_HIGHLIGHT_END
         // IRIS_V218_MANUAL_CALIBRATED_AUTO_END
     }
 

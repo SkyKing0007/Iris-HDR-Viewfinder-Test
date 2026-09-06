@@ -1,12 +1,12 @@
-V1.4.11 V2.21 — VSCODE.DEV UPLOAD
+V1.4.11 V2.22 — VSCODE.DEV UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: b0fb984d31ea8204f89160db2f3f7c1e885624a6 (successful V2.20)
+Required direct parent / runtime authority: 320548b3af7b2989bac75b9c987218bc5d3defe5 (successful V2.21)
 
-1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.20 parent before uploading.
+1. Open a fresh vscode.dev session on the branch above and verify it is still at the required V2.21 parent before uploading.
 2. Upload/replace ALL files from this ZIP at repository root, preserving paths.
 3. Do not add extra files or folders.
-4. Source Control must show exactly 10 changed tracked files relative to V2.20:
+4. Source Control must show exactly 10 changed tracked files relative to V2.21:
    .github/workflows/build.yml
    BUILD_WORKFLOW_COPY.yml
    PACKAGE_INFO.txt
@@ -20,7 +20,7 @@ Required direct parent / runtime authority: b0fb984d31ea8204f89160db2f3f7c1e8856
 5. Commit once and push once.
 
 Suggested commit message:
-V1.4.11 V2.21 topology-complete recovery and full-distribution AUTO tone
+V1.4.11 V2.22 information-relative SHORT recovery and independent highlight protection
 
 Do not commit the ZIP itself.
 Do not alter dev/main.
