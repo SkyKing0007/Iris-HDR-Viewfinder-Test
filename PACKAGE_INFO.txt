@@ -1,88 +1,106 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.22 INFORMATION-RELATIVE SHORT RECOVERY + INDEPENDENT AUTO HIGHLIGHT PROTECTION PACKAGE INFO
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.23 NAFNET-SIDD WIDTH32 POST-FUSION DENOISE PACKAGE INFO
 
 STATUS
 PREPARED / UPLOAD-READY only after packaged proof completes; NOT BUILD-PROVEN until GitHub Actions succeeds.
-No backup branch requested or created.
+Backup created by user before this architectural ML integration: backup-v2.22-pre-nafnet-denoise.
 
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 39
-Target versionName: 1.0-v1.4.11-v2.22
+Target versionCode: 40
+Target versionName: 1.0-v1.4.11-v2.23
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: 320548b3af7b2989bac75b9c987218bc5d3defe5
-Tree: 352a2bd3ba42b7ce9248282627457f5ee2bd33af
-GitHub Actions run: 34000719226 — SUCCESS
-Artifact ID: 9979410043
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.21
-Artifact ZIP digest: sha256:86a8e4ebcc8b6f7b29d15533a303375d75631f2812ac94347407607e66a69fdb
-V2.21 APK SHA-256: b5b65c9b6ee1b1959a6e80354aa18eaac7f1d2e7f2a482579b7381eeed68f2a9
-V2.21 source-candidate TAR SHA-256: 88879e4404f7704eae7f18a77bdfe23f5c6548b8ca4ec299f817af9030d0b578
-V2.21 runtime manifest SHA-256: 6c2af087efaa324ca44751ea89e35e8b2596b6cd033dd00a79faf18e8f4c7987
-V2.21 repository manifest SHA-256: b4f76c029e68d9c27b31691d1a3b8b05098715fcd29497e228b535b4bcd44779
-V2.21 regressions SHA-256: ebe24d722ca782177a484e6ab809120b5e55a1dcd09a3f8688de4af02c6300a9
+Commit: 8d47c8a37a5dfd1a6cabec6eb56a0616a83480e3
+Tree: 83eb81bdd4e47f12907dfcaf7db45848d28aa694
+GitHub Actions run: 34009186958 — SUCCESS
+Artifact ID: 9981936667
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.22
+Artifact ZIP digest: sha256:34d4c2fd82a5eb3bc49d8dbedbcb8c844e5482a2e78286a28fc149ec7ca5081f
+V2.22 APK SHA-256: 0c38d795e5f14253eb5bfce4a08f89723ced805bc00adfee96af949159b4d8f7
+V2.22 source-candidate TAR SHA-256: 53bf2357316c991cf1e2619bb5070835508d41dcb5a2c2c0ac20e672e409a7e9
+V2.22 runtime manifest SHA-256: a51e20a71544ff6fb7726ca76785891e3b7ccd56e0e805836ad352ae212141c0
+V2.22 repository manifest SHA-256: ecf4d6291ed21c716c092789e6dd7d8a748513ca61a53332ed4564d1bf074c5d
+V2.22 regressions SHA-256: 59d62869aa5a0a585910921052d71a019fd0d33acc37c386ffd130d6bae2dc34
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.21 procedure, itself inherited unchanged from successful V2.19/V2.20. Step count/order, action versions, authority reconstruction, strict changed-file allowlist, deterministic full-index patch proof, pinned real glslang commands, real project Java compiler, PRE-BUILD SAFETY proof, full :app:assembleDebug, post-build invariance, exactly-one-APK proof and artifact export remain unchanged.
+Exact successful V2.22 procedure, itself inherited from successful V2.21/V2.20/V2.19 and golden 26567 V1.4 mechanics. Workflow remains exactly 15 ordered steps. Action versions, authority-first reconstruction, strict changed-file allowlist, deterministic full-index patch proof at core.abbrev 7/12/40, pinned real glslang commands, real project Java compiler, PRE-BUILD SAFETY proof, full :app:assembleDebug, post-build invariance, exactly-one-APK proof and deterministic artifact export remain in the successful order. V2.23 adds payload-specific NAFNet source/model/package assertions plus one necessary binary-aware patch replay accommodation: canonical forward/rollback remain full-index binary Git patches and are replayed in full by git apply; GNU patch --fuzz=0 replays an auxiliary text projection excluding only the exact SHA-pinned model binary, which is preseeded and independently hash/invariance checked. This accommodation was replayed against the real successful V2.22 Actions source-candidate universe.
 
-PRIMARY V2.22 DEVICE EVIDENCE
-1) Exact V2.21 AUTO chandelier: SHORT ~1/50 ISO50 / LONG ~1/50 ISO197, ~4x/2EV. SHORT JPEG visibly retains filament structure, but V2.21 max-channel headroom gates reject portions of that useful SHORT highlight and allow clipped LONG fallback, creating flat gray blocks.
-2) Exact V2.21 MANUAL chandelier: SHORT 1/120 ISO50 / LONG 1/120 ISO200, 4x/2EV. Filament preservation is materially better, proving AUTO must protect the absolute SHORT high tail rather than treating bracket ratio alone as sufficient.
-3) Measured uploaded JPEG statistics: AUTO SHORT P99 ~0.732 linear with near-clip ~0.83%; MANUAL SHORT P99 ~0.260 with near-clip ~0.43%. The previous P99~0.78 / >1% trigger is too permissive for small bright structures.
+V2.23 RUNTIME PURPOSE
+V2.22 HDR behavior is frozen. V2.23 adds one post-fusion machine-learning denoise stage using the exact pretrained NAFNet-SIDD width32 FP16 LiteRT model. The model consumes only the completed V2.22 fused/tone-rendered RGB JPEG and cannot participate in SHORT/LONG alignment, recovery ownership, exposure control, tone solving or DNG capture.
 
-STRICT V2.22 FUSION CONTRACT
-- LONG remains the primary clean saved body/default RGB/detail owner.
-- Preserve V2.20/V2.21 monotonic geodesic connected-region reconstruction and measured-flow barriers unchanged in mechanics.
-- Remove absolute max-channel SHORT headroom as a whole-pixel validity veto.
-- Strict seed validity must be channel-aware and information-relative: SHORT remains valid when it retains more channel information or coherent local structure than clipped LONG.
-- The connected propagation domain requires real SHORT signal but no max-channel headroom veto, so near-clipped SHORT interiors cannot become gray LONG holes.
-- Mode 5 remains binary real-source ownership; no fractional RGB mix, synthetic radiance, CPU fusion or third source.
-- Permanent 4x / 20x / 64x topology invariance remains required.
+EXACT MODEL AUTHORITY
+Asset: app/src/main/assets/nafnet_sidd_width32_fp16.tflite
+Size: 62,454,048 bytes
+SHA-256: f8fbaa422411683c53e802cf7cc7cf9be0a0de00886ad4af057232e26b172a0c
+Model contract: RGB [0,1], NCHW [1,3,256,256] -> denoised RGB [0,1], NCHW [1,3,256,256].
+Runtime: com.google.ai.edge.litert:litert:2.1.5, CompiledModel, Accelerator.GPU only.
+The model is vendored in the candidate; Actions does not download or substitute model weights.
 
-STRICT V2.22 AUTO CONTRACT
-- Preserve the inherited successful LONG-body target first.
-- Solve absolute SHORT highlight protection independently from P99 and near-clip pressure.
-- AUTO SHORT uses minimum ISO and may shorten to the shortest appropriate flicker-safe integration when highlight information demands it.
-- Shortening SHORT widens the bracket naturally instead of automatically dragging LONG body exposure down.
-- Only 4x..64x may couple the two independent targets.
-- Exact AUTO chandelier regression must materially shorten the old P99~0.732 / near-clip~0.83% SHORT state.
-- MANUAL-like already-protected SHORT tail must not be overreacted to.
-- V2.21 full-distribution AUTO tone remains unchanged.
+STRICT V2.23 DENOISE CONTRACT
+- CaptureSetSaver receives the already-completed V2.22 fused JPEG and calls NafNetDenoiser only immediately before the final _FUSED_HDR.jpg write.
+- Successful V2.22 hdr_display.frag, CameraController.java, HdrGlView.java and JpegFusion.java remain byte-identical.
+- SHORT JPEG, LONG JPEG, SHORT DNG and LONG DNG saves remain outside the ML path.
+- Full-resolution processing only; no whole-image resize/downscale.
+- Fixed 256x256 inference tile, 32px reflected context halo, 192x192 retained center core.
+- Network output is treated as a bounded correction to the exact V2.22 RGB source; each channel correction is capped to +/-0.12 normalized RGB.
+- Highlight protection tapers denoise above display luma 0.70; max-channel >=0.985 is limited to <=0.10 strength so recovered filament/highlight structure does not receive unrestricted ML ownership.
+- GPU inference is globally serialized across captures and model/tensor resources close deterministically after every fused job.
+- Any model/runtime/GPU/decode/encode failure falls back to the exact original V2.22 fused JPEG bytes rather than losing the capture.
+- The final APK must contain the exact model hash and store the .tflite uncompressed.
 
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 2
-- app/src/main/assets/shaders/hdr_display.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 4
+- app/src/main/assets/licenses/NAFNet_LICENSE.txt [ADD]
+- app/src/main/assets/nafnet_sidd_width32_fp16.tflite [ADD]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java [MODIFY]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java [ADD]
 
-PROTECTED RUNTIME — EXACTLY 10
+PROTECTED PRE-EXISTING RUNTIME — EXACTLY 11
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/fullscreen.vert
+- app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/assets/shaders/oes_to_rgb.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
 
-INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 3
+BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - .github/workflows/build.yml
 - BUILD_WORKFLOW_COPY.yml
+- app/build.gradle.kts
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-YES, PAYLOAD/REGRESSION CONTRACT ONLY. Successful V2.21 compiler/build mechanics, action versions, command order, pinned glslang, javac, assembleDebug, deterministic patch replay, freeze and one-APK proof remain unchanged.
+YES, REQUIRED V2.23 PAYLOAD + BINARY PATCH ACCOMMODATION: version marker, LiteRT 2.1.5 dependency/noCompress model packaging, V2.22 authority hashes, expanded 28-file/15-runtime strict universe, NAFNet regressions and exact APK-model hash/storage proof. Because the new 62,454,048-byte .tflite produces a Git binary patch that GNU patch cannot consume, the existing patch stage now keeps the canonical full binary/full-index forward and rollback patches unchanged for complete git-apply proof and adds deterministic full-index text projections solely for GNU --fuzz=0 replay, with only the exact model path excluded and separately SHA-pinned/preseeded/removed. Real V2.22 artifact replay passed. Workflow remains 15 steps; successful V2.22 action versions, GLSL commands, Java compiler command, assembleDebug command, PRE-BUILD/freeze/export ordering are unchanged.
 
-V2.22 RUNTIME DIGEST
-a51e20a71544ff6fb7726ca76785891e3b7ccd56e0e805836ad352ae212141c0
-Runtime universe remains exactly 12 files.
+DELIVERY DOCUMENT CHANGES
+- PACKAGE_INFO.txt
+- PACKAGE_MANIFEST_SHA256.txt
+- README.md
+- VSCODE_DEV_UPLOAD.txt
 
-COMPILER STATUS BEFORE ACTIONS
-REAL pinned GLSL compiler: NOT RUN locally.
-REAL project Java compiler: NOT RUN locally.
-FULL :app:assembleDebug: NOT RUN locally.
+V2.23 RUNTIME DIGEST
+90911e9d1149ad50b96670109ff474b501535455bfbb48bcadc8df7927dd1df2
+Runtime universe expands from successful V2.22's 12 files to exactly 15 because the NAFNet model, license and Java owner are new.
+
+LOCAL / PACKAGE GATE STATUS
+Exact V2.22 Actions artifact downloaded and SHA/manifests/source candidate verified.
+V2.22 branch HEAD/tree verified unchanged before packaging.
+Exact NAFNet model size/SHA verified.
+Authority-seeded V2.23 candidate reconstructed.
+V2.23 semantic/ownership/model regression verifier: PASS.
+Complete GLSL reserved-identifier scan on unchanged runtime shaders: PASS.
+Workflow embedded Python syntax: PASS.
+Binary-aware deterministic full-index forward/rollback proof at core.abbrev 7/12/40 against the real V2.22 artifact source universe: PASS.
+GNU patch --fuzz=0 auxiliary text projection replay with exact model SHA preseed/invariance/removal: PASS.
+Real pinned glslang compiler: NOT RUN locally because shader bytes are unchanged; Actions still runs the inherited pinned compiler on all runtime shader assets.
+Real project Java compiler: NOT RUN locally; Actions must prove :app:compileDebugJavaWithJavac.
+Full :app:assembleDebug: NOT RUN locally; Actions remains authoritative.
 
 FINAL ACTIONS AUTHORITY
-Until V2.22 succeeds, final authority remains V2.21 commit 320548b3af7b2989bac75b9c987218bc5d3defe5 / run 34000719226 / artifact 9979410043.
+Until V2.23 succeeds, final authority remains V2.22 commit 8d47c8a37a5dfd1a6cabec6eb56a0616a83480e3 / run 34009186958 / artifact 9981936667 / artifact digest sha256:34d4c2fd82a5eb3bc49d8dbedbcb8c844e5482a2e78286a28fc149ec7ca5081f.

@@ -13,6 +13,10 @@ camera = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/CameraCont
 gl = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java").read_text()
 fusion = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java").read_text()
 saver = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java").read_text()
+nafnet = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java").read_text()
+build_gradle = (ROOT / "app/build.gradle.kts").read_text()
+nafnet_model = ROOT / "app/src/main/assets/nafnet_sidd_width32_fp16.tflite"
+nafnet_license = ROOT / "app/src/main/assets/licenses/NAFNet_LICENSE.txt"
 frame_meta = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java").read_text()
 hdr_shader = (ROOT / "app/src/main/assets/shaders/hdr_display.frag").read_text()
 oes_shader = (ROOT / "app/src/main/assets/shaders/oes_to_rgb.frag").read_text()
@@ -21,7 +25,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.22 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.23 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -51,7 +55,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.22 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.23 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -602,13 +606,13 @@ require(map_peak_math(1.0, 8.0, 0.5) < 0.90,
 require(map_peak_math(1.0, 8.0, 0.5) < map_peak_math(2.0, 8.0, 0.5) <= ceiling8,
         "recovered highlight ordering must survive positive Brightness EV")
 
-# 038 / 042 / V2.22 - Exact successful V2.21 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.21' in workflow
-        and 'run-id: 34000719226' in workflow
-        and "authority='320548b3af7b2989bac75b9c987218bc5d3defe5'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.21 Actions authority")
-require("authority='b0fb984d31ea8204f89160db2f3f7c1e885624a6'" not in workflow,
-        "V2.22 must not seed runtime from V2.20 after successful V2.21")
+# 038 / 042 / V2.23 - Exact successful V2.22 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.22' in workflow
+        and 'run-id: 34009186958' in workflow
+        and "authority='8d47c8a37a5dfd1a6cabec6eb56a0616a83480e3'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.22 Actions authority")
+require("authority='320548b3af7b2989bac75b9c987218bc5d3defe5'" not in workflow,
+        "V2.23 must not seed runtime from V2.21 after successful V2.22")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1274,9 +1278,27 @@ require(hashlib.sha256(gl.encode()).hexdigest() ==
 require(hashlib.sha256(fusion.encode()).hexdigest() ==
         '7aa3f4956f28a48b204375c0123195c020d57c8d8edd774946dccb39d42f7434',
         "successful V2.20 JpegFusion bytes changed")
-require(hashlib.sha256(saver.encode()).hexdigest() ==
+v223_saver_insert = '''            // V2.23 post-fusion-only ML owner. HDR alignment/source ownership/tone are
+            // already complete in `fused`. A denoiser failure must fall back to those
+            // exact V2.22 bytes rather than turn an optional cleanup into capture loss.
+            byte[] finalFused = fused;
+            try {
+                finalFused = NafNetDenoiser.denoiseFusedJpeg(context, fused);
+            } catch (Throwable denoiseFailure) {
+                RuntimeLogger.error("NAFNET_DENOISE_FALLBACK", denoiseFailure);
+            }
+'''
+require(saver.count(v223_saver_insert) == 1,
+        "V2.23 CaptureSetSaver denoise insertion must exist exactly once")
+saver_v222 = saver.replace(v223_saver_insert, '', 1)
+require(saver_v222.count('captureId + "_FUSED_HDR.jpg", "image/jpeg", finalFused') == 1,
+        "V2.23 CaptureSetSaver final output hook count changed")
+saver_v222 = saver_v222.replace(
+        'captureId + "_FUSED_HDR.jpg", "image/jpeg", finalFused',
+        'captureId + "_FUSED_HDR.jpg", "image/jpeg", fused', 1)
+require(hashlib.sha256(saver_v222.encode()).hexdigest() ==
         '60cfa6d09db46d2af8fc1917e5ebf1e3c580102e1b07fe6bfea8e683c8372248',
-        "successful V2.20 CaptureSetSaver bytes changed")
+        "V2.23 CaptureSetSaver differs from V2.22 outside the isolated final-output ML hook")
 require(hashlib.sha256(main.encode()).hexdigest() ==
         'b142084c33bb2482ad60113bb66653b9c3efeff55c9bdcdd84082d3345a4be3b',
         "successful V2.20 MainActivity bytes changed")
@@ -1367,9 +1389,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 39' in Path('app/build.gradle.kts').read_text()
-        and 'versionName = "1.0-v1.4.11-v2.22"' in Path('app/build.gradle.kts').read_text(),
-        "V2.22 version/build marker must be exact")
+require('versionCode = 40' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.23"' in build_gradle,
+        "V2.23 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1597,4 +1619,75 @@ require(math.isclose(30.0 / 2.0, 15.0),
 require(math.isclose(math.log2(8.0), 3.0),
         "8x bracket must equal 3 EV")
 
-print("V1.4.11 V2.22 REGRESSION PASS: exact successful V2.21 authority, V2.20/V2.21 convergence and four-anchor tone preserved, max-channel SHORT veto removed in favor of channel/structure-relative information validity, connected near-clipped SHORT remains eligible, and AUTO protects the absolute SHORT high tail independently while retaining the inherited LONG-body target within 4x..64x")
+# V2.23 - NAFNet-SIDD width32 is a strictly post-fusion denoise owner.
+require(nafnet_model.is_file(),
+        "NAFNet-SIDD width32 model asset missing")
+require(hashlib.sha256(nafnet_model.read_bytes()).hexdigest()
+        == "f8fbaa422411683c53e802cf7cc7cf9be0a0de00886ad4af057232e26b172a0c",
+        "NAFNet-SIDD width32 model SHA-256 mismatch")
+require(nafnet_license.is_file() and "MIT License" in nafnet_license.read_text()
+        and "Copyright (c) 2022 megvii-model" in nafnet_license.read_text()
+        and "BasicSR" in nafnet_license.read_text() and "Apache License" in nafnet_license.read_text(),
+        "NAFNet/BasicSR license notice missing")
+require('implementation("com.google.ai.edge.litert:litert:2.1.5")' in build_gradle,
+        "V2.23 must pin LiteRT 2.1.5")
+require('noCompress += listOf("tflite")' in build_gradle,
+        "V2.23 model asset must remain uncompressed for LiteRT asset loading")
+require('NafNetDenoiser.denoiseFusedJpeg(context, fused)' in saver
+        and 'byte[] finalFused = fused;' in saver
+        and 'NAFNET_DENOISE_FALLBACK' in saver
+        and 'captureId + "_FUSED_HDR.jpg", "image/jpeg", finalFused' in saver,
+        "V2.23 final fused save must attempt NAFNet and fail closed to exact V2.22 bytes")
+require('NafNetDenoiser' not in gl and 'NafNetDenoiser' not in fusion and 'NafNetDenoiser' not in camera,
+        "NAFNet must not enter HDR alignment, source ownership, shader fusion, or exposure control")
+require('MODEL_ASSET = "nafnet_sidd_width32_fp16.tflite"' in nafnet
+        and 'EXPECTED_MODEL_SHA256' in nafnet
+        and 'TILE = 256' in nafnet and 'HALO = 32' in nafnet
+        and 'CORE = TILE - 2 * HALO' in nafnet,
+        "V2.23 fixed full-resolution halo tiling contract missing")
+require('new CompiledModel.Options(Accelerator.GPU)' in nafnet
+        and 'model.createInputBuffers()' in nafnet
+        and 'model.createOutputBuffers()' in nafnet
+        and 'inputBuffer.writeFloat(input);' in nafnet
+        and 'model.run(inputBuffers, outputBuffers);' in nafnet
+        and 'outputBuffer.readFloat()' in nafnet,
+        "V2.23 GPU-only LiteRT CompiledModel inference contract missing")
+require('Bitmap.createScaledBitmap' not in nafnet and '.resize(' not in nafnet,
+        "V2.23 must not downscale the fused output for ML inference")
+require('MAX_RESIDUAL = 0.12f' in nafnet
+        and 'highlightSafeStrength' in nafnet
+        and 'if (maxChannel >= 0.985f)' in nafnet,
+        "V2.23 bounded-residual/highlight-protection contract missing")
+require('synchronized (GPU_LOCK)' in nafnet
+        and 'buffer.close()' in nafnet and 'model.close()' in nafnet,
+        "V2.23 GPU inference must serialize and close model/buffers deterministically")
+require('JpegFusion.encodeJpeg(output)' in nafnet,
+        "V2.23 must preserve the existing quality-100 fused JPEG encoder")
+
+# V2.23 permanent packaging regression: the 62 MB model makes the canonical Git
+# patch binary. Keep the exact successful full-index binary proof for git apply,
+# while GNU patch fuzz=0 replays the text projection with the exact model preseeded
+# and hash-pinned. GNU patch must never be asked to consume the Git binary hunk.
+require('diff --binary --full-index "$authority" HEAD' in workflow
+        and 'diff --binary --full-index HEAD "$authority"' in workflow,
+        "V2.23 canonical forward/rollback patches must remain full-index binary Git patches")
+require('model_rel=\'app/src/main/assets/nafnet_sidd_width32_fp16.tflite\'' in workflow
+        and '":(exclude)$model_rel"' in workflow
+        and 'forward-text-$abbrev.patch' in workflow
+        and 'rollback-text-$abbrev.patch' in workflow,
+        "V2.23 GNU fuzz=0 projection must exclude only the exact pinned binary model")
+require("subprocess.run(['git','apply',str(forward)]" in workflow
+        and "subprocess.run(['git','apply',str(rollback)]" in workflow,
+        "V2.23 full binary forward/rollback must be replayed by git apply")
+require("subprocess.run(['patch','-p1','--fuzz=0','-i',str(forward_text)]" in workflow
+        and "subprocess.run(['patch','-p1','--fuzz=0','-i',str(rollback_text)]" in workflow,
+        "V2.23 GNU text projection must preserve fuzz=0 forward/rollback replay")
+require("GNU FUZZ0 MODEL PRESEED SHA FAIL" in workflow
+        and "GNU FUZZ0 FORWARD MODEL INVARIANCE FAIL" in workflow
+        and "GNU FUZZ0 ROLLBACK MODEL INVARIANCE FAIL" in workflow
+        and 'model_dst.unlink()' in workflow,
+        "V2.23 GNU projection must independently pin, preserve, and remove the exact model")
+require('LEFT PATH SET FAIL' in workflow and 'RIGHT PATH SET FAIL' in workflow,
+        "V2.23 patch replay must prove exact path sets as well as byte equality")
+
+print("V1.4.11 V2.23 REGRESSION PASS: successful V2.22 HDR/exposure/tone owners preserved byte-for-byte, exact NAFNet-SIDD width32 fp16 asset pinned, GPU-only post-fusion full-resolution halo tiling active, bounded highlight-safe residual enforced, ML failure falls back to the exact V2.22 fused JPEG, and binary-aware deterministic patch proof is locked")

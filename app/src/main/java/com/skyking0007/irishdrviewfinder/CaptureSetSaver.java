@@ -264,9 +264,18 @@ final class CaptureSetSaver {
 
     private void submitFusedBytes(byte[] fused) {
         io.execute(() -> {
+            // V2.23 post-fusion-only ML owner. HDR alignment/source ownership/tone are
+            // already complete in `fused`. A denoiser failure must fall back to those
+            // exact V2.22 bytes rather than turn an optional cleanup into capture loss.
+            byte[] finalFused = fused;
+            try {
+                finalFused = NafNetDenoiser.denoiseFusedJpeg(context, fused);
+            } catch (Throwable denoiseFailure) {
+                RuntimeLogger.error("NAFNET_DENOISE_FALLBACK", denoiseFailure);
+            }
             try {
                 MediaStoreWriter.writeBytes(
-                        context, captureId + "_FUSED_HDR.jpg", "image/jpeg", fused);
+                        context, captureId + "_FUSED_HDR.jpg", "image/jpeg", finalFused);
                 synchronized (CaptureSetSaver.this) {
                     fusionSaved = true;
                     checkCompleteLocked();

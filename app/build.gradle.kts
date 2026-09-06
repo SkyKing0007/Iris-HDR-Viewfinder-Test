@@ -10,8 +10,8 @@ android {
         applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"
         minSdk = 29
         targetSdk = 37
-        versionCode = 39
-        versionName = "1.0-v1.4.11-v2.22"
+        versionCode = 40
+        versionName = "1.0-v1.4.11-v2.23"
     }
 
     compileOptions {
@@ -24,4 +24,12 @@ android {
             isMinifyEnabled = false
         }
     }
+
+    androidResources {
+        noCompress += listOf("tflite")
+    }
+}
+
+dependencies {
+    implementation("com.google.ai.edge.litert:litert:2.1.5")
 }
