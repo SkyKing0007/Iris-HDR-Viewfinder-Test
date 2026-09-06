@@ -1,0 +1,169 @@
+name: One-time V2.25 protected-file repair
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  REPAIR_BRANCH: experiment-v1.4.11-v2-brightness-4ev
+  V224_AUTHORITY: f5ed95f8da45adc806dd421bc8c805155a311ccf
+  FAILED_V225: 67cb12227934ce7a69b12d45689bb524c5f8ab6f
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact repair history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore protected V2.24 files and fast-forward repair commit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test "$GITHUB_REF_NAME" = "$REPAIR_BRANCH"
+          test "$(git rev-parse HEAD^)" = "$FAILED_V225"
+          test "$(git rev-parse "$FAILED_V225^")" = "$V224_AUTHORITY"
+          test "$(git ls-remote origin "refs/heads/$REPAIR_BRANCH" | awk '{print $1}')" = "$GITHUB_SHA"
+
+          # The failed V2.25 upload must have exactly the known 25-path diff:
+          # 11 intended V2.25 changes + 14 accidental protected-file deletions.
+          python3 - <<'PY'
+          import subprocess
+
+          authority = 'f5ed95f8da45adc806dd421bc8c805155a311ccf'
+          failed = '67cb12227934ce7a69b12d45689bb524c5f8ab6f'
+          intended = {
+              '.github/workflows/build.yml': 'M',
+              'BUILD_WORKFLOW_COPY.yml': 'M',
+              'PACKAGE_INFO.txt': 'M',
+              'PACKAGE_MANIFEST_SHA256.txt': 'M',
+              'README.md': 'M',
+              'VSCODE_DEV_UPLOAD.txt': 'M',
+              'app/build.gradle.kts': 'M',
+              'app/src/main/assets/shaders/hdr_display.frag': 'M',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'M',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': 'M',
+              'scripts/verify_orientation.py': 'M',
+          }
+          deleted = {
+              'app/src/main/AndroidManifest.xml': 'D',
+              'app/src/main/assets/licenses/NAFNet_LICENSE.txt': 'D',
+              'app/src/main/assets/nafnet_sidd_width32_fp16.tflite': 'D',
+              'app/src/main/assets/shaders/copy_2d.frag': 'D',
+              'app/src/main/assets/shaders/fullscreen.vert': 'D',
+              'app/src/main/assets/shaders/oes_to_rgb.frag': 'D',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': 'D',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': 'D',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': 'D',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java': 'D',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java': 'D',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java': 'D',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java': 'D',
+              'scripts/verify_shaders.py': 'D',
+          }
+          expected = intended | deleted
+          raw = subprocess.check_output(['git', 'diff', '--name-status', authority, failed], text=True).splitlines()
+          actual = {}
+          for line in raw:
+              parts = line.split('\t')
+              actual[parts[-1]] = parts[0][0]
+          if actual != expected:
+              raise SystemExit(f'FAILED V2.25 TREE DOES NOT MATCH KNOWN REPAIR INPUT: actual={actual} expected={expected}')
+          print('FAILED V2.25 EXACT 25-PATH REPAIR INPUT: PASS')
+          PY
+
+          restore=(
+            app/src/main/AndroidManifest.xml
+            app/src/main/assets/licenses/NAFNet_LICENSE.txt
+            app/src/main/assets/nafnet_sidd_width32_fp16.tflite
+            app/src/main/assets/shaders/copy_2d.frag
+            app/src/main/assets/shaders/fullscreen.vert
+            app/src/main/assets/shaders/oes_to_rgb.frag
+            app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
+            app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
+            app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+            app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java
+            app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+            app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
+            app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java
+            scripts/verify_shaders.py
+          )
+
+          git checkout "$V224_AUTHORITY" -- "${restore[@]}"
+
+          # The temporary repair workflow must not survive in the final candidate.
+          git rm -- .github/workflows/repair-v225.yml
+
+          # Prove every restored protected file is the exact V2.24 Git blob.
+          for p in "${restore[@]}"; do
+            test "$(git rev-parse ":$p")" = "$(git rev-parse "$V224_AUTHORITY:$p")"
+          done
+          echo 'EXACT V2.24 PROTECTED BLOB RESTORE: PASS'
+
+          cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
+          sha256sum -c PACKAGE_MANIFEST_SHA256.txt
+          IRIS_WORKFLOW_SYNTAX_ONLY=1 python3 scripts/verify_orientation.py
+          python3 scripts/verify_orientation.py
+          python3 scripts/verify_shaders.py
+
+          final_tree="$(git write-tree)"
+
+          python3 - "$final_tree" <<'PY'
+          import subprocess, sys
+
+          tree = sys.argv[1]
+          authority = 'f5ed95f8da45adc806dd421bc8c805155a311ccf'
+          expected = {
+              '.github/workflows/build.yml': 'M',
+              'BUILD_WORKFLOW_COPY.yml': 'M',
+              'PACKAGE_INFO.txt': 'M',
+              'PACKAGE_MANIFEST_SHA256.txt': 'M',
+              'README.md': 'M',
+              'VSCODE_DEV_UPLOAD.txt': 'M',
+              'app/build.gradle.kts': 'M',
+              'app/src/main/assets/shaders/hdr_display.frag': 'M',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'M',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': 'M',
+              'scripts/verify_orientation.py': 'M',
+          }
+          raw = subprocess.check_output(['git', 'diff', '--name-status', authority, tree], text=True).splitlines()
+          actual = {}
+          for line in raw:
+              parts = line.split('\t')
+              actual[parts[-1]] = parts[0][0]
+          if actual != expected:
+              raise SystemExit(f'FINAL V2.25 EXACT 11-PATH ALLOWLIST FAIL: actual={actual} expected={expected}')
+          tracked = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', tree], text=True).splitlines()
+          if len(tracked) != 29:
+              raise SystemExit(f'FINAL V2.25 TRACKED COUNT FAIL: {len(tracked)} != 29')
+          if '.github/workflows/repair-v225.yml' in tracked:
+              raise SystemExit('TEMPORARY REPAIR WORKFLOW SURVIVED FINAL TREE')
+          print('FINAL V2.25 EXACT 11-PATH ALLOWLIST: PASS')
+          print('FINAL V2.25 TRACKED FILE COUNT 29: PASS')
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          repair_sha="$(printf '%s\n\n%s\n' \
+            'V1.4.11 V2.25 V1.1 restore protected V2.24 files' \
+            'Restore the 14 accidentally deleted V2.24 protected files without changing intended V2.25 runtime bytes.' \
+            | git commit-tree "$final_tree" -p "$V224_AUTHORITY" -p "$GITHUB_SHA")"
+
+          test "$(git rev-parse "$repair_sha^")" = "$V224_AUTHORITY"
+          test "$(git rev-parse "$repair_sha^2")" = "$GITHUB_SHA"
+          test "$(git rev-parse "$GITHUB_SHA^")" = "$FAILED_V225"
+
+          # Current branch tip is the second parent, so this remains a fast-forward update.
+          git merge-base --is-ancestor "$GITHUB_SHA" "$repair_sha"
+          test "$(git ls-remote origin "refs/heads/$REPAIR_BRANCH" | awk '{print $1}')" = "$GITHUB_SHA"
+          git push origin "$repair_sha:refs/heads/$REPAIR_BRANCH"
+
+          echo "V2.25 V1.1 REPAIR COMMIT: $repair_sha"
+          echo 'V2.25 V1.1 FAST-FORWARD PROTECTED-FILE REPAIR: PASS'
