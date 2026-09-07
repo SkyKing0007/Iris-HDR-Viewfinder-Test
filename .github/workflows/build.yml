@@ -1,4 +1,4 @@
-name: Build Iris HDR Viewfinder Test V1.4.11 V2.26
+name: Build Iris HDR Viewfinder Test V1.4.11 V2.27
 
 on:
   workflow_dispatch:
@@ -28,47 +28,47 @@ jobs:
         with:
           fetch-depth: 3
 
-      - name: Download exact successful V1.4.11 V2.25 Actions authority artifact
+      - name: Download exact successful V1.4.11 V2.26 Actions authority artifact
         uses: actions/download-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.25
-          path: ${{ runner.temp }}/v1411v225-authority-artifact
+          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.26
+          path: ${{ runner.temp }}/v1411v226-authority-artifact
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 34057462644
+          run-id: 34082370328
 
-      - name: Reconstruct exact V1.4.11 V2.25 authority and prove V1.4.11 V2.26 candidate before compilers
+      - name: Reconstruct exact V1.4.11 V2.26 authority and prove V1.4.11 V2.27 candidate before compilers
         shell: bash
         run: |
           set -euo pipefail
           IRIS_WORKFLOW_SYNTAX_ONLY=1 python3 scripts/verify_orientation.py
-          authority='66b689922267396afa8b8cedf1ca848d1eabffcb'
-          authority_tree='9253b753c8a808177e2cf166d30a52b109713318'
-          authority_dir="$RUNNER_TEMP/v1411v225-authority-artifact"
-          authority_src="$RUNNER_TEMP/v1411v225-authority-source"
+          authority='555f06179f078f2a08453abbd032c67845b6e293'
+          authority_tree='963625eeb789e0ecc675f0c217706e0e4de090a6'
+          authority_dir="$RUNNER_TEMP/v1411v226-authority-artifact"
+          authority_src="$RUNNER_TEMP/v1411v226-authority-source"
 
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'experiment-v1.4.11-v2-brightness-4ev'
           test "$(git rev-parse HEAD^)" = "$authority"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
-          grep -Fq 'versionCode = 43' app/build.gradle.kts
-          grep -Fq 'versionName = "1.0-v1.4.11-v2.26"' app/build.gradle.kts
+          grep -Fq 'versionCode = 44' app/build.gradle.kts
+          grep -Fq 'versionName = "1.0-v1.4.11-v2.27"' app/build.gradle.kts
           grep -Fq 'compileSdk = 37' app/build.gradle.kts
           grep -Fq 'minSdk = 29' app/build.gradle.kts
           grep -Fq 'targetSdk = 37' app/build.gradle.kts
           grep -Fq 'version "9.2.1"' build.gradle.kts
           sha256sum -c PACKAGE_MANIFEST_SHA256.txt
 
-          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.25-debug.apk" | awk '{print $1}')" = 'e240609a070fac9f0d8a480bff7065cb335f48155f905f6580d0d1cf5702b107'
-          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.25-source-candidate.tar" | awk '{print $1}')" = '305c5cd315b91cdd1986f9e9e01eb19fa192139f36a188f3cd797dd55ac993db'
-          test "$(sha256sum "$authority_dir/RUNTIME_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = '043b3e83585cae9a902e2267c2e246cdaebbb33682501ff5aa8f5548c2ebfe58'
-          test "$(sha256sum "$authority_dir/REPOSITORY_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = 'f82c0c1b516f6f188b73b68400dd587af661f4d3c67a3265f7b9ee4891d7037d'
-          test "$(sha256sum "$authority_dir/REGRESSIONS.txt" | awk '{print $1}')" = '31adaadb04b36e7c8b8dc5307cce1dc95a18a89d9fd2fdbe4626dfe14cf28dd1'
+          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.26-debug.apk" | awk '{print $1}')" = '535af930f0210a29270c87dc6bdd6ba8505871315a6b323c9107f9294084dcbf'
+          test "$(sha256sum "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.26-source-candidate.tar" | awk '{print $1}')" = 'dc093c98c31d9f65aed6b0131bd36d109ed03574e33b20caf5135225a93e5a01'
+          test "$(sha256sum "$authority_dir/RUNTIME_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = '36276eee01bcb15d98ecc8c51abf8b89442578f7c3bc1b6b7066fa78aeef7c9a'
+          test "$(sha256sum "$authority_dir/REPOSITORY_SOURCE_MANIFEST.tsv" | awk '{print $1}')" = 'ee791d4af5755f6792fc1ed84696c76dedcd2b3e1174e687ec168418e426abd0'
+          test "$(sha256sum "$authority_dir/REGRESSIONS.txt" | awk '{print $1}')" = '00bb786363be64ce15b12b8c427df4e6a4f5d203d2497a90740993793fb0c6ce'
           test "$(cat "$authority_dir/SOURCE_COMMIT.txt")" = "$authority"
 
           rm -rf "$authority_src"
           mkdir -p "$authority_src"
-          tar -xf "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.25-source-candidate.tar" -C "$authority_src"
+          tar -xf "$authority_dir/Iris-HDR-Viewfinder-Test-V1.4.11-V2.26-source-candidate.tar" -C "$authority_src"
 
           python3 - "$authority_src" "$authority_dir" <<'PY'
           from pathlib import Path
@@ -76,8 +76,8 @@ jobs:
 
           src = Path(sys.argv[1])
           artifact = Path(sys.argv[2])
-          expected_runtime_sha = '043b3e83585cae9a902e2267c2e246cdaebbb33682501ff5aa8f5548c2ebfe58'
-          expected_repo_sha = 'f82c0c1b516f6f188b73b68400dd587af661f4d3c67a3265f7b9ee4891d7037d'
+          expected_runtime_sha = '36276eee01bcb15d98ecc8c51abf8b89442578f7c3bc1b6b7066fa78aeef7c9a'
+          expected_repo_sha = 'ee791d4af5755f6792fc1ed84696c76dedcd2b3e1174e687ec168418e426abd0'
 
           def row(p, rel):
               b = p.read_bytes()
@@ -86,35 +86,35 @@ jobs:
 
           runtime_files = sorted(p for p in (src / 'app/src').rglob('*') if p.is_file())
           if len(runtime_files) != 16:
-              raise SystemExit(f'V1.4.11 V2.25 AUTHORITY RUNTIME COUNT FAIL: {len(runtime_files)}')
+              raise SystemExit(f'V1.4.11 V2.26 AUTHORITY RUNTIME COUNT FAIL: {len(runtime_files)}')
           runtime = ''.join(row(p, p.relative_to(src).as_posix()) for p in runtime_files).encode()
           if hashlib.sha256(runtime).hexdigest() != expected_runtime_sha:
-              raise SystemExit('V1.4.11 V2.25 AUTHORITY RUNTIME MANIFEST SHA FAIL')
+              raise SystemExit('V1.4.11 V2.26 AUTHORITY RUNTIME MANIFEST SHA FAIL')
           if runtime != (artifact / 'RUNTIME_SOURCE_MANIFEST.tsv').read_bytes():
-              raise SystemExit('V1.4.11 V2.25 AUTHORITY RUNTIME MANIFEST BYTE-EQUALITY FAIL')
+              raise SystemExit('V1.4.11 V2.26 AUTHORITY RUNTIME MANIFEST BYTE-EQUALITY FAIL')
 
           tracked = sorted(p for p in src.rglob('*') if p.is_file())
           if len(tracked) != 29:
-              raise SystemExit(f'V1.4.11 V2.25 AUTHORITY REPOSITORY COUNT FAIL: {len(tracked)}')
+              raise SystemExit(f'V1.4.11 V2.26 AUTHORITY REPOSITORY COUNT FAIL: {len(tracked)}')
           repo = ''.join(row(p, p.relative_to(src).as_posix()) for p in tracked).encode()
           if hashlib.sha256(repo).hexdigest() != expected_repo_sha:
-              raise SystemExit('V1.4.11 V2.25 AUTHORITY REPOSITORY MANIFEST SHA FAIL')
+              raise SystemExit('V1.4.11 V2.26 AUTHORITY REPOSITORY MANIFEST SHA FAIL')
           if repo != (artifact / 'REPOSITORY_SOURCE_MANIFEST.tsv').read_bytes():
-              raise SystemExit('V1.4.11 V2.25 AUTHORITY REPOSITORY MANIFEST BYTE-EQUALITY FAIL')
+              raise SystemExit('V1.4.11 V2.26 AUTHORITY REPOSITORY MANIFEST BYTE-EQUALITY FAIL')
 
           with tempfile.TemporaryDirectory() as td:
               tar_path = Path(td) / 'authority.tar'
-              subprocess.run(['git', 'archive', '--format=tar', f'--output={tar_path}', '66b689922267396afa8b8cedf1ca848d1eabffcb'], check=True)
+              subprocess.run(['git', 'archive', '--format=tar', f'--output={tar_path}', '555f06179f078f2a08453abbd032c67845b6e293'], check=True)
               checkout = Path(td) / 'git-archive'
               checkout.mkdir()
               subprocess.run(['tar', '-xf', str(tar_path), '-C', str(checkout)], check=True)
               git_files = sorted(p for p in checkout.rglob('*') if p.is_file())
               if [p.relative_to(checkout).as_posix() for p in git_files] != [p.relative_to(src).as_posix() for p in tracked]:
-                  raise SystemExit('V1.4.11 V2.25 AUTHORITY ARTIFACT/GIT PATH SET FAIL')
+                  raise SystemExit('V1.4.11 V2.26 AUTHORITY ARTIFACT/GIT PATH SET FAIL')
               for gp, ap in zip(git_files, tracked):
                   if gp.read_bytes() != ap.read_bytes():
-                      raise SystemExit(f'V1.4.11 V2.25 AUTHORITY ARTIFACT/GIT BYTE FAIL: {gp.relative_to(checkout)}')
-          print('EXACT V1.4.11 V2.25 ACTIONS ARTIFACT AUTHORITY: PASS')
+                      raise SystemExit(f'V1.4.11 V2.26 AUTHORITY ARTIFACT/GIT BYTE FAIL: {gp.relative_to(checkout)}')
+          print('EXACT V1.4.11 V2.26 ACTIONS ARTIFACT AUTHORITY: PASS')
           PY
 
           bad_platform='platforms;android-37'
@@ -135,7 +135,7 @@ jobs:
           from pathlib import Path
           import hashlib, subprocess
 
-          authority = '66b689922267396afa8b8cedf1ca848d1eabffcb'
+          authority = '555f06179f078f2a08453abbd032c67845b6e293'
           expected_changes = {
               '.github/workflows/build.yml': 'M',
               'BUILD_WORKFLOW_COPY.yml': 'M',
@@ -156,7 +156,7 @@ jobs:
               parts = line.split('\t')
               actual[parts[-1]] = parts[0][0]
           if actual != expected_changes:
-              raise SystemExit(f'V1.4.11 V2.26 ALLOWLIST FAIL: actual={actual} expected={expected_changes}')
+              raise SystemExit(f'V1.4.11 V2.27 ALLOWLIST FAIL: actual={actual} expected={expected_changes}')
 
           expected_tracked = [
               '.github/workflows/build.yml', '.gitignore', 'BUILD_WORKFLOW_COPY.yml',
@@ -186,16 +186,16 @@ jobs:
 
           files = sorted(p for p in Path('app/src').rglob('*') if p.is_file())
           if len(files) != 16:
-              raise SystemExit(f'V1.4.11 V2.26 RUNTIME FILE COUNT FAIL: {len(files)}')
+              raise SystemExit(f'V1.4.11 V2.27 RUNTIME FILE COUNT FAIL: {len(files)}')
           rows=[]
           for p in files:
               b=p.read_bytes(); lines=b.count(b'\n') + (1 if b and not b.endswith(b'\n') else 0)
               rows.append(f"{hashlib.sha256(b).hexdigest()}\t{len(b)}\t{lines}\t{p.as_posix()}\n")
           manifest=''.join(rows).encode()
           digest=hashlib.sha256(manifest).hexdigest()
-          expected='36276eee01bcb15d98ecc8c51abf8b89442578f7c3bc1b6b7066fa78aeef7c9a'
+          expected='1bf0edbf2ba4dcb870361c06ca716d7349e940f172fc1c65595ea2cb292e473a'
           if digest != expected:
-              raise SystemExit(f'V1.4.11 V2.26 RUNTIME MANIFEST FAIL: {digest} != {expected}')
+              raise SystemExit(f'V1.4.11 V2.27 RUNTIME MANIFEST FAIL: {digest} != {expected}')
           Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
 
           protected = {
@@ -215,7 +215,7 @@ jobs:
           for rel, sha in protected.items():
               got=hashlib.sha256(Path(rel).read_bytes()).hexdigest()
               if got != sha:
-                  raise SystemExit(f'V1.4.11 V2.26 PROTECTED RUNTIME FAIL: {rel} {got} != {sha}')
+                  raise SystemExit(f'V1.4.11 V2.27 PROTECTED RUNTIME FAIL: {rel} {got} != {sha}')
 
           # Permanent exact regression from failed V2.13 run 33900980849.
           camera_text = Path('app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java').read_text()
@@ -225,7 +225,7 @@ jobs:
                   and 'this.shortP90Linear = shortP90Linear;' in gl_text
                   and 'percentileSorted(shortSorted, 0.90f),' in gl_text):
               raise SystemExit('REGRESSION FAIL 092: CameraController shortP90Linear consumer has no SceneStats P90 producer')
-          print(f'V1.4.11 V2.26 MINIMUM CANDIDATE PASS: changed={len(actual)} runtime=16 digest={digest} protected={len(protected)}/{len(protected)}')
+          print(f'V1.4.11 V2.27 MINIMUM CANDIDATE PASS: changed={len(actual)} runtime=16 digest={digest} protected={len(protected)}/{len(protected)}')
           PY
 
           # Canonical forward/rollback patches remain full-index binary Git patches.
@@ -262,10 +262,10 @@ jobs:
           cmp -s "$RUNNER_TEMP/forward-text-7.patch" "$RUNNER_TEMP/forward-text-40.patch"
           cmp -s "$RUNNER_TEMP/rollback-text-7.patch" "$RUNNER_TEMP/rollback-text-12.patch"
           cmp -s "$RUNNER_TEMP/rollback-text-7.patch" "$RUNNER_TEMP/rollback-text-40.patch"
-          cp "$RUNNER_TEMP/forward-7.patch" "$RUNNER_TEMP/V1.4.11-V2.25_to_V1.4.11-V2.26.forward.patch"
-          cp "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/V1.4.11-V2.26_to_V1.4.11-V2.25.rollback.patch"
+          cp "$RUNNER_TEMP/forward-7.patch" "$RUNNER_TEMP/V1.4.11-V2.26_to_V1.4.11-V2.27.forward.patch"
+          cp "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/V1.4.11-V2.27_to_V1.4.11-V2.26.rollback.patch"
 
-          python3 - "$authority_src" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/V1.4.11-V2.25_to_V1.4.11-V2.26.forward.patch" "$RUNNER_TEMP/V1.4.11-V2.26_to_V1.4.11-V2.25.rollback.patch" "$RUNNER_TEMP/forward-text-7.patch" "$RUNNER_TEMP/rollback-text-7.patch" "$model_rel" <<'PY'
+          python3 - "$authority_src" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/V1.4.11-V2.26_to_V1.4.11-V2.27.forward.patch" "$RUNNER_TEMP/V1.4.11-V2.27_to_V1.4.11-V2.26.rollback.patch" "$RUNNER_TEMP/forward-text-7.patch" "$RUNNER_TEMP/rollback-text-7.patch" "$model_rel" <<'PY'
           from pathlib import Path
           import hashlib, shutil, subprocess, sys, tempfile
           authority, candidate, forward, rollback, forward_text, rollback_text = map(Path, sys.argv[1:7])
@@ -362,7 +362,7 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:compileDebugJavaWithJavac
 
-      - name: Replay V1.4.11 V2.26 runtime regressions on compiler-tested candidate
+      - name: Replay V1.4.11 V2.27 runtime regressions on compiler-tested candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -373,7 +373,7 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Post-build invariance and freeze compiled V1.4.11 V2.26 candidate
+      - name: Post-build invariance and freeze compiled V1.4.11 V2.27 candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -386,10 +386,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, subprocess
-          expected_runtime='36276eee01bcb15d98ecc8c51abf8b89442578f7c3bc1b6b7066fa78aeef7c9a'
+          expected_runtime='1bf0edbf2ba4dcb870361c06ca716d7349e940f172fc1c65595ea2cb292e473a'
           # Permanent exact regression from failed V2.13 V1.1 run 33903152566:
           # post-build runtime expectation must equal the compiler-tested bootstrap digest.
-          if expected_runtime != '36276eee01bcb15d98ecc8c51abf8b89442578f7c3bc1b6b7066fa78aeef7c9a':
+          if expected_runtime != '1bf0edbf2ba4dcb870361c06ca716d7349e940f172fc1c65595ea2cb292e473a':
               raise SystemExit('REGRESSION FAIL 093: stale post-build runtime digest returned')
           files=sorted(p for p in Path('app/src').rglob('*') if p.is_file())
           rows=[]
@@ -432,15 +432,15 @@ jobs:
           test ${#apks[@]} -eq 1
           test "$(unzip -p "${apks[0]}" assets/nafnet_sidd_width32_fp16.tflite | sha256sum | awk '{print $1}')" = 'f8fbaa422411683c53e802cf7cc7cf9be0a0de00886ad4af057232e26b172a0c'
           unzip -lv "${apks[0]}" assets/nafnet_sidd_width32_fp16.tflite | awk '$8=="assets/nafnet_sidd_width32_fp16.tflite" {found=1; if ($1 != 62454048 || $2 != "Stored" || $3 != 62454048) exit 1} END {if (!found) exit 1}'
-          echo 'V2.26 APK MODEL PACKAGING: PASS'
+          echo 'V2.27 APK MODEL PACKAGING: PASS'
           mkdir -p output
-          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.26-debug.apk
-          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.26-source-candidate.tar "$GITHUB_SHA"
+          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.27-debug.apk
+          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.27-source-candidate.tar "$GITHUB_SHA"
           printf '%s\n' "$GITHUB_SHA" > output/SOURCE_COMMIT.txt
           cp compiled-runtime-manifest.tsv output/RUNTIME_SOURCE_MANIFEST.tsv
           cp compiled-repository-manifest.tsv output/REPOSITORY_SOURCE_MANIFEST.tsv
-          cp "$RUNNER_TEMP/V1.4.11-V2.25_to_V1.4.11-V2.26.forward.patch" output/V1.4.11-V2.25_to_V1.4.11-V2.26.forward.patch
-          cp "$RUNNER_TEMP/V1.4.11-V2.26_to_V1.4.11-V2.25.rollback.patch" output/V1.4.11-V2.26_to_V1.4.11-V2.25.rollback.patch
+          cp "$RUNNER_TEMP/V1.4.11-V2.26_to_V1.4.11-V2.27.forward.patch" output/V1.4.11-V2.26_to_V1.4.11-V2.27.forward.patch
+          cp "$RUNNER_TEMP/V1.4.11-V2.27_to_V1.4.11-V2.26.rollback.patch" output/V1.4.11-V2.27_to_V1.4.11-V2.26.rollback.patch
           cp "$RUNNER_TEMP/FORWARD_PATCH_SHA256.txt" output/FORWARD_PATCH_SHA256.txt
           cp "$RUNNER_TEMP/ROLLBACK_PATCH_SHA256.txt" output/ROLLBACK_PATCH_SHA256.txt
           cat > output/REGRESSIONS.txt <<'REGRESSIONS'
@@ -606,7 +606,7 @@ jobs:
           160 - Camera selector UI is compact ID<n>; detailed focal/hardware/sync capability text remains diagnostic logging only.
           161 - V2.25 intentionally supersedes historical V2.18 LONG-tail veto semantics: LONG_BODY is owned by robust body P50/P95 statistics; SHORT P98, LONG P98 and global near-clip fraction are forbidden as LONG exposure vetoes.
           162 - SHORT_HEADROOM is bidirectional: SHORT P99 target may lengthen or shorten SHORT; clipping pressure may only reduce SHORT exposure, never force LONG darker.
-          163 - BRACKET_RATIO is derived only after independent LONG_BODY and SHORT_HEADROOM products; 4x..64x is a final cross-owner constraint, and minimum-ratio correction may raise LONG but may never darken SHORT.
+          163 - HISTORICAL V2.25/V2.26: BRACKET_RATIO was derived only after independent LONG_BODY and SHORT_HEADROOM products with a 4x..64x cross-owner constraint. V2.27 regression 182 intentionally supersedes only the 4x floor while preserving independent ownership and never reducing LONG body exposure.
           164 - AUTO exposure convergence is bounded to at most 1EV on scene cuts and 0.30EV otherwise; the prior 6EV jump may not return.
           165 - AUTO presentation consumes each distinct complete synchronized SHORT/LONG pair at most once; three persistent pairs plus brightness/gamma deadbands are required before a target changes.
           166 - AUTO presentation step limits remain <=0.08EV brightness and <=0.025 gamma per accepted update; the observed V2.24 1.75<->1.80 same-exposure pumping may not return.
@@ -617,7 +617,7 @@ jobs:
           171 - Exact V2.25 window/noise regression: global LONG P95 is forbidden as LONG-body exposure authority; a bright window may not cancel the body median's request for more photons.
           172 - V2.26 LONG_BODY uses a highlight-excluded 32x24 population (encoded LONG peak <0.70) with >=20% support, body P50/P75 targets 0.015/0.065 and 70/30 multiplicative weighting; insufficient support fails closed to global lower percentiles.
           173 - Exact V2.25 sample direction: body P50~0.00384 / P75~0.01882 must request >3.5x (>1.8EV) more LONG exposure before physical bracket limits; SHORT P99 headroom remains independently owned.
-          174 - Saved V2.26 source ownership remains binary immutable LONG versus aligned complete SHORT RGB; no RGB crossfade, local hue synthesis, per-channel gain, gray-island hole punch or peach/orange fill may return.
+          174 - HISTORICAL V2.26: saved source ownership was binary immutable LONG versus aligned complete SHORT RGB. V2.27 regression 185 intentionally permits only confidence-gated low-DR temporal BODY averaging before the still-binary HDR highlight selector; local hue synthesis, per-channel gain, gray-island hole punch and peach/orange fill remain forbidden.
           175 - Pre-clipped effective LONG loss may be proven from medium/broad exposure-normalized SHORT information dominance in bright/upper-mid LONG regions; literal clipping is not required, but wildly inconsistent radiometry and low registration confidence fail closed.
           176 - Existing V2.20-V2.22 strict seed + mask-constrained geodesic topology and propagated residual-flow barriers remain byte-identical; V2.26 broadens information evidence, not topology mechanics.
           177 - V2.26 live HDR defaults to LONG body/SNR and admits SHORT only with a conservative direct-coordinate information-loss proof; globally lifted SHORT preview is forbidden.
@@ -625,19 +625,28 @@ jobs:
           179 - GPU saved/live, CameraController predictor and CPU fail-closed fallback use the synchronized stop-domain highlight shoulder; recovered 1/2/3/4-stop ordering must retain meaningful tonal separation and only asymptotically approach white.
           180 - V2.26 preserves exact successful V2.25 NAFNet/model/touch-AF/background/DNG/media ownership bytes; noise correction comes first from correctly exposed LONG body and LONG-owned live preview, not stronger texture-destructive ML.
           181 - vscode.dev handoffs may never upload/replace a partial parent directory such that siblings disappear; Source Control must equal the exact intended allowlist with zero unexpected deletions before commit.
+          182 - V2.27 permanently removes the universal 4x AUTO bracket floor: independently solved LONG_BODY and SHORT_HEADROOM may converge to 1x in low-DR scenes, while SHORT may never exceed LONG and the 64x maximum may never reduce LONG body exposure.
+          183 - Exact V2.26 dim-pair regression: 1/33s ISO400 LONG versus 1/33s ISO50 SHORT with weak body signal may not remain an 8x one-useful-frame pair when SHORT has no highlight demand; SHORT realization must be able to raise ISO after shutter headroom and converge toward LONG.
+          184 - V2.27 temporal body denoise is a separate low-DR owner: only registered/radiometrically agreeing body pixels may use one whole-RGB scalar inverse-variance proxy; uncertainty fails exactly to LONG and 4x-or-wider HDR pairs contribute zero SHORT body average.
+          185 - V2.27 HDR highlight ownership remains binary aligned SHORT versus body; temporal body averaging may never become fractional highlight RGB ownership, local hue synthesis, per-channel source weighting, gray-island hole punch, peach/orange fill or ghost authority.
+          186 - V2.27 preview/still processing ownership is split: live preview prefers Camera2 FAST NR (HIGH_QUALITY fallback only if FAST unavailable), while paired HDR still JPEG requests remain explicitly NR-OFF and RAW/DNG truth is unchanged.
+          187 - V2.27 recovered-highlight transfer reserves a guaranteed-slope detail interval through 0.965 with C1 stop-domain continuity into the specular tail; valid SHORT ordering must remain strict across 1x..64x brackets and gamma fades to identity through highlights.
+          188 - Exact V2.26 chandelier/bathroom class becomes a universal tonal regression: several stops of valid SHORT highlight detail may not collapse into a narrow near-white band after exposure normalization, tone mapping, or gamma.
+          189 - V2.27 AUTO presentation is SNR-aware: weak/high-ISO body evidence may not be disguised with the old +1EV/gamma2 software rescue; clean target-level min-ISO scenes must not be falsely noise-limited.
+          190 - V2.27 inherits successful V2.26 registration/geodesic topology, NAFNet/touch-AF/background/DNG/media ownership and all unchanged runtime bytes; this build does not reopen those authorities.
           REGRESSIONS
-          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.26-debug.apk \
-                    output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.26-source-candidate.tar \
+          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.27-debug.apk \
+                    output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.27-source-candidate.tar \
                     output/RUNTIME_SOURCE_MANIFEST.tsv \
                     output/REPOSITORY_SOURCE_MANIFEST.tsv \
-                    output/V1.4.11-V2.25_to_V1.4.11-V2.26.forward.patch \
-                    output/V1.4.11-V2.26_to_V1.4.11-V2.25.rollback.patch \
+                    output/V1.4.11-V2.26_to_V1.4.11-V2.27.forward.patch \
+                    output/V1.4.11-V2.27_to_V1.4.11-V2.26.rollback.patch \
                     output/REGRESSIONS.txt | tee output/SHA256SUMS.txt
 
-      - name: Upload compiled V1.4.11 V2.26 candidate artifact
+      - name: Upload compiled V1.4.11 V2.27 candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.26
+          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.27
           path: output/
           if-no-files-found: error
           retention-days: 14

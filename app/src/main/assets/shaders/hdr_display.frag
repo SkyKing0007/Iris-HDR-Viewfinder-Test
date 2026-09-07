@@ -79,21 +79,29 @@ float max3(vec3 value) {
 }
 
 vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
-    // V2.26 stop-domain highlight shoulder. Valid SHORT-derived highlight structure
-    // is separated in exposure stops before compression, so shutters/clouds/frosted
-    // lamp detail do not collapse into one near-white band. The curve remains
-    // strictly monotonic and whole-RGB scaling preserves source chromaticity.
+    // V2.27 universal recovered-highlight transfer. Reserve a real display interval
+    // for valid SHORT information with a guaranteed stop-domain slope; only energy
+    // beyond the recoverable bracket enters the final asymptotic specular tail.
+    // This is object-agnostic and whole-RGB, so windows, lamps, sky, chrome, fabric
+    // and any other recovered highlight obey the same monotonic radiance ordering.
     const float knee = 0.70;
+    const float detailTop = 0.965;
     float scenePeak = max3(sceneLinear);
     if (scenePeak <= knee || scenePeak <= 0.000001) return sceneLinear;
 
-    float shoulderStopScale = clamp(
-        2.10 + 0.18 * (bracketStops - 2.0), 2.00, 2.90);
+    float detailStops = clamp(max(bracketStops, 2.0), 2.0, 6.0);
     float highlightStops = max(log2(scenePeak / knee), 0.0);
-    float mappedPeak = knee + (1.0 - knee)
-        * (1.0 - exp(-highlightStops / shoulderStopScale));
+    float mappedPeak;
+    if (highlightStops <= detailStops) {
+        mappedPeak = knee + (detailTop - knee) * (highlightStops / detailStops);
+    } else {
+        float tailStops = highlightStops - detailStops;
+        // Match the stop-domain slope at detailTop exactly (C1 continuity).
+        float tailStopScale = (1.0 - detailTop) * detailStops / (detailTop - knee);
+        mappedPeak = detailTop + (1.0 - detailTop)
+            * (1.0 - exp(-tailStops / tailStopScale));
+    }
     mappedPeak = clamp(mappedPeak, knee, 1.0);
-
     return sceneLinear * (mappedPeak / scenePeak);
 }
 
@@ -109,11 +117,14 @@ vec3 applyDisplayGamma(vec3 rgb, float gammaValue) {
     float y = linearLuma(rgb);
     if (y <= 0.000001) return rgb;
     float gamma = clamp(gammaValue, 0.50, 2.00);
-    float mappedY = pow(clamp(y, 0.0, 1.0), 1.0 / gamma);
+    float pureGammaY = pow(clamp(y, 0.0, 1.0), 1.0 / gamma);
+    // Gamma remains a body/midtone presentation control. Its authority fades before
+    // the recovered-highlight interval so AUTO cannot re-compress SHORT ordering
+    // after HDR reconstruction has already established that ordering.
+    float gammaInfluence = 1.0 - smoothstep(0.50, 0.78, y);
+    float mappedY = mix(y, pureGammaY, gammaInfluence);
     float requestedScale = mappedY / y;
     float gamutScale = 1.0 / max(max3(rgb), 0.000001);
-    // Gamma is fail-closed for saturated colors: preserve RGB ratios rather than
-    // independently clipping channels when a positive midtone lift hits gamut.
     return rgb * min(requestedScale, gamutScale);
 }
 
@@ -294,6 +305,63 @@ float radiometricAgreementAt(vec2 sampleUv) {
     float errorEv = abs(log2(shortY / longY));
     return 1.0 - smoothstep(0.20, 0.65, errorEv);
 }
+
+// IRIS_V227_TEMPORAL_BODY_SNR_BEGIN
+float temporalExposureOverlap(float ratio) {
+    float stops = max(log2(max(ratio, 1.0)), 0.0);
+    // Equal/near-equal pairs are genuine temporal denoise evidence. By ~3.25x the
+    // SHORT has become an HDR auxiliary and contributes no body average.
+    return 1.0 - smoothstep(0.35, 1.70, stops);
+}
+
+float temporalRgbAgreement(vec3 shortScene, vec3 longScene) {
+    float scale = max(max3(longScene), 0.020);
+    float relativeError = max3(abs(shortScene - longScene)) / scale;
+    return 1.0 - smoothstep(0.08, 0.30, relativeError);
+}
+
+float temporalShortWeight(float ratio, float support) {
+    // Shot-noise-domain inverse-variance proxy after exposure normalization:
+    // normalized SHORT variance grows with exposure ratio, so its contribution is
+    // 1/(1+ratio). One scalar weight is applied to complete RGB, never per-channel.
+    return clamp(support, 0.0, 1.0) / (1.0 + max(ratio, 1.0));
+}
+
+float stillTemporalBodySupportAt(vec2 sampleUv, float ratio) {
+    float overlap = temporalExposureOverlap(ratio);
+    if (overlap <= 0.0) return 0.0;
+    vec3 longRgb = stillLongRgbAt(sampleUv);
+    vec3 shortRgb = stillShortRgbAt(sampleUv);
+    vec3 longScene = srgbToLinear(longRgb);
+    vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;
+    float body = 1.0 - smoothstep(0.62, 0.84, max3(longRgb));
+    float geometry = smoothstep(0.20, 0.50, registrationNeighborhoodConfidenceAt(sampleUv));
+    float radiometry = radiometricAgreementAt(sampleUv);
+    float rgbAgreement = temporalRgbAgreement(shortScene, longScene);
+    float shortSignal = smoothstep(0.006, 0.030, encodedLuma(shortRgb));
+    return overlap * body * geometry * radiometry * rgbAgreement * shortSignal;
+}
+
+float liveTemporalBodySupportAt(
+        vec2 sampleUv, float ratio, vec3 shortScene, vec3 longScene) {
+    float overlap = temporalExposureOverlap(ratio);
+    if (overlap <= 0.0) return 0.0;
+    vec3 longRgb = texture(longTex, sampleUv).rgb;
+    vec3 shortRgb = texture(shortTex, sampleUv).rgb;
+    float body = 1.0 - smoothstep(0.62, 0.84, max3(longRgb));
+    float shortY = max(linearLuma(shortScene), 0.00001);
+    float longY = max(linearLuma(longScene), 0.00001);
+    float temporalEvError = abs(log2(shortY / longY));
+    float radiometry = 1.0 - smoothstep(0.18, 0.48, temporalEvError);
+    float rgbAgreement = temporalRgbAgreement(shortScene, longScene);
+    vec2 localRanges = localLinearRangeAtRadius(sampleUv, 3.0);
+    // Live has no residual flow field. Average only locally smooth agreement regions;
+    // edges/motion fail closed to LONG. Preview FAST/HQ NR handles the rest.
+    float smoothInterior = 1.0 - smoothstep(0.010, 0.040, max(localRanges.x, localRanges.y));
+    float shortSignal = smoothstep(0.006, 0.030, encodedLuma(shortRgb));
+    return overlap * body * radiometry * rgbAgreement * smoothInterior * shortSignal;
+}
+// IRIS_V227_TEMPORAL_BODY_SNR_END
 
 float longHardLossBaseAt(vec2 sampleUv) {
     // Any near-saturated LONG channel is real information-loss evidence. Unlike
@@ -716,7 +784,7 @@ void main() {
         // image. There is deliberately no full-resolution recoveryProof re-test that
         // can punch gray/lavender LONG holes back through a valid SHORT highlight.
         float ratio = clamp(exposureRatio, 1.0, 65536.0);
-        float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
+        float bracketStops = clamp(log2(max(ratio, 1.0001)), 0.0, 6.0);
         vec4 support = texture(normalTex, uv);
         vec2 propagatedResidualPixels = (support.ba * 2.0 - vec2(1.0))
             * localFlowMaxPixels;
@@ -727,13 +795,17 @@ void main() {
         vec3 longRgb = stillLongRgbAt(uv);
         vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;
         vec3 longScene = srgbToLinear(longRgb);
-        float usableBracket = step(2.0, ratio);
-        float shortOwns = step(0.50, support.r) * usableBracket;
+        float shortOwns = step(0.50, support.r);
 
-        // Exactly one aligned real source owns high-frequency RGB at each output
-        // coordinate. Atlas interpolation affects only the location of the binary
-        // ownership boundary, never the RGB values themselves.
-        vec3 mergedScene = shortOwns > 0.5 ? shortScene : longScene;
+        // V2.27 low-DR body denoise is a separate owner from HDR replacement. Where
+        // both exposures carry the same registered body information, use one scalar
+        // inverse-variance weight to average complete RGB. Any registration/radiometry
+        // doubt returns exactly to LONG. Proven highlight regions remain binary SHORT.
+        vec3 bodyShortScene = srgbToLinear(stillShortRgbAt(uv)) * stillShortScalarGain;
+        float bodySupport = stillTemporalBodySupportAt(uv, ratio);
+        float bodyShortWeight = temporalShortWeight(ratio, bodySupport);
+        vec3 temporalBody = mix(longScene, bodyShortScene, bodyShortWeight);
+        vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;
 
         float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
         vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
@@ -744,17 +816,20 @@ void main() {
         return;
     }
 
-    // V2.26 live parity: LONG is the default body/SNR source exactly as in the
-    // saved still. SHORT is admitted only by the conservative direct-coordinate
-    // information-loss proof above. No fractional RGB blend is allowed.
+    // V2.27 live parity: LONG remains the default body source. A near-equal pair
+    // may contribute only smooth, direct-agreement temporal denoise; highlight
+    // replacement remains binary SHORT and motion/disocclusion fails closed to LONG.
     float ratio = clamp(exposureRatio, 1.0, 65536.0);
-    float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
+    float bracketStops = clamp(log2(max(ratio, 1.0001)), 0.0, 6.0);
     vec3 shortRgb = texture(shortTex, uv).rgb;
     vec3 longRgb = texture(longTex, uv).rgb;
     vec3 shortScene = srgbToLinear(shortRgb) * ratio;
     vec3 longScene = srgbToLinear(longRgb);
     float liveShortOwns = livePreviewShortOwnershipAt(uv);
-    vec3 mergedScene = liveShortOwns > 0.5 ? shortScene : longScene;
+    float liveBodySupport = liveTemporalBodySupportAt(uv, ratio, shortScene, longScene);
+    float liveBodyShortWeight = temporalShortWeight(ratio, liveBodySupport);
+    vec3 liveTemporalBody = mix(longScene, shortScene, liveBodyShortWeight);
+    vec3 mergedScene = liveShortOwns > 0.5 ? shortScene : liveTemporalBody;
 
     float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
     vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);

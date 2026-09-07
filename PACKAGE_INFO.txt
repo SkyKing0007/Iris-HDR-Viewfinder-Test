@@ -1,4 +1,4 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.26 LONG-BODY SNR + TRUE SHORT HIGHLIGHT FUSION + HDR PREVIEW PARITY PACKAGE INFO
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.27 ADAPTIVE-BRACKET + TEMPORAL BODY SNR + PREVIEW-NR SPLIT + HIGHLIGHT-RANGE PACKAGE INFO
 
 STATUS
 PREPARED / UPLOAD-READY only after packaged proof completes; NOT BUILD-PROVEN until GitHub Actions succeeds.
@@ -7,25 +7,25 @@ No backup requested or created. No source commit/push is performed by this hando
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 43
-Target versionName: 1.0-v1.4.11-v2.26
+Target versionCode: 44
+Target versionName: 1.0-v1.4.11-v2.27
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: 66b689922267396afa8b8cedf1ca848d1eabffcb
-Tree: 9253b753c8a808177e2cf166d30a52b109713318
-GitHub Actions run: 34057462644 — SUCCESS
-Artifact ID: 9996424736
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.25
-Artifact ZIP digest: sha256:2175daad147cd98168e8427850b16bc7caf7872262153b8dcf1a903f8fb4b7aa
-V2.25 APK SHA-256: e240609a070fac9f0d8a480bff7065cb335f48155f905f6580d0d1cf5702b107
-V2.25 source-candidate TAR SHA-256: 305c5cd315b91cdd1986f9e9e01eb19fa192139f36a188f3cd797dd55ac993db
-V2.25 runtime manifest SHA-256: 043b3e83585cae9a902e2267c2e246cdaebbb33682501ff5aa8f5548c2ebfe58
-V2.25 repository manifest SHA-256: f82c0c1b516f6f188b73b68400dd587af661f4d3c67a3265f7b9ee4891d7037d
-V2.25 regressions SHA-256: 31adaadb04b36e7c8b8dc5307cce1dc95a18a89d9fd2fdbe4626dfe14cf28dd1
+Commit: 555f06179f078f2a08453abbd032c67845b6e293
+Tree: 963625eeb789e0ecc675f0c217706e0e4de090a6
+GitHub Actions run: 34082370328 — SUCCESS
+Artifact ID: 10004124294
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.26
+Artifact ZIP digest: sha256:0c919dfdd7e863a72721254602c63a83739eddb13d61142193a1fdbb1ce2e7bb
+V2.26 APK SHA-256: 535af930f0210a29270c87dc6bdd6ba8505871315a6b323c9107f9294084dcbf
+V2.26 source-candidate TAR SHA-256: dc093c98c31d9f65aed6b0131bd36d109ed03574e33b20caf5135225a93e5a01
+V2.26 runtime manifest SHA-256: 36276eee01bcb15d98ecc8c51abf8b89442578f7c3bc1b6b7066fa78aeef7c9a
+V2.26 repository manifest SHA-256: ee791d4af5755f6792fc1ed84696c76dedcd2b3e1174e687ec168418e426abd0
+V2.26 regressions SHA-256: 00bb786363be64ce15b12b8c427df4e6a4f5d203d2497a90740993793fb0c6ce
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.25 procedure. Step order, action versions, authority-artifact reconstruction, strict changed-file allowlist, deterministic full-index patches at core.abbrev 7/12/40, pinned real GLSL compiler and commands, real project Java compile, regression replay, full :app:assembleDebug, post-build invariance, exactly-one-APK proof and deterministic artifact export remain unchanged. Core infrastructure mechanics delta: ZERO.
+Exact successful V2.26 procedure inherited from V2.25. The workflow remains exactly 15 steps. Java 17, Android SDK, Android API 37, Gradle 9.6.0, pinned glslang installation, complete reserved-identifier scan, exact runtime GLSL compile, real project Java compile and full :app:assembleDebug step bodies are byte-identical to successful V2.26. Candidate/authority/version/hash/regression/output payloads change as required; core compiler/build/post-build mechanics delta is ZERO.
 
 INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 4
 - app/src/main/assets/shaders/hdr_display.frag [MODIFY]
@@ -33,7 +33,7 @@ INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 4
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java [MODIFY]
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java [MODIFY]
 
-PROTECTED V2.25 RUNTIME FILES — BYTE-IDENTICAL
+PROTECTED V2.26 RUNTIME FILES — BYTE-IDENTICAL
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/licenses/NAFNet_LICENSE.txt
 - app/src/main/assets/nafnet_sidd_width32_fp16.tflite
@@ -47,12 +47,13 @@ PROTECTED V2.25 RUNTIME FILES — BYTE-IDENTICAL
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java
 
-PROTECTED V2.25 MECHANICS INSIDE MODIFIED FILES
-- HdrGlView saved-still registration/render orchestration is byte-identical to V2.25.
-- hdr_display.frag mode-4 geodesic topology propagation is byte-identical to V2.25.
-- hdr_display.frag mode-5 binary LONG-or-SHORT source-selection mechanics are byte-identical to V2.25.
-- CameraController physical pair realization and clean-AE bootstrap solvers remain byte-identical.
-- JpegFusion registration/provenance prefix remains byte-identical; only synchronized tone parity changes there.
+PROTECTED MECHANICS INSIDE MODIFIED FILES
+- HdrGlView saved-still registration/render orchestration remains byte-identical to successful V2.26.
+- hdr_display.frag mode-4 mask-constrained geodesic topology propagation remains byte-identical to successful V2.26/V2.25.
+- Final HDR highlight ownership remains a binary propagated SHORT decision; V2.27 adds a separate pre-highlight temporal BODY source only where low-DR confidence is proven.
+- CameraController MANUAL flicker safety/order math and clean-AE bootstrap solver remain byte-identical.
+- JpegFusion registration/provenance prefix remains byte-identical; only synchronized highlight/gamma parity changes there.
+- NAFNet, DNG, touch-AF, background-safe lifecycle, media writing and capture ownership are unchanged.
 
 BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - .github/workflows/build.yml
@@ -61,7 +62,7 @@ BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-Authority/version/hash/allowlist/regression/output payload text necessarily differs for V2.26. Core successful V2.25 setup/compiler/build/post-build mechanics and ordering do not differ.
+Authority/version/hash/allowlist/regression/output payload text necessarily differs for V2.27. Core successful V2.26 setup/compiler/build/post-build mechanics and ordering do not differ.
 
 DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - PACKAGE_INFO.txt
@@ -69,58 +70,64 @@ DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-TOTAL EXPECTED V2.25 -> V2.26 TRACKED CHANGESET — EXACTLY 12 PATHS
+TOTAL EXPECTED V2.26 -> V2.27 TRACKED CHANGESET — EXACTLY 12 PATHS
 
-V2.26 RUNTIME DIGEST
-36276eee01bcb15d98ecc8c51abf8b89442578f7c3bc1b6b7066fa78aeef7c9a
+V2.27 RUNTIME DIGEST
+1bf0edbf2ba4dcb870361c06ca716d7349e940f172fc1c65595ea2cb292e473a
 Runtime universe remains exactly 16 app/src files.
 
-V2.26 LONG-BODY SNR CONTRACT
-- HAL AE remains bootstrap only.
-- SHORT P99 headroom target remains 0.35 linear and remains bidirectional.
-- LONG exposure is solved from a highlight-excluded body population, not a global high percentile.
-- LONG body candidates require encoded peak <0.70 and usable linear signal; at least 20% body support is required, otherwise lower global percentiles are used fail-closed.
-- LONG body targets are P50=0.015 and P75=0.065 linear with 70/30 weighted geometric scaling.
-- Global LONG P95/P98, LONG near-clip fractions and SHORT highlight-tail statistics are forbidden as LONG-body vetoes.
-- Existing 4x..64x bracket realization, sensor/flicker bounds, <=0.30EV normal convergence and <=1.0EV scene-cut convergence remain unchanged.
-- Exact supplied V2.25 window regression requests >3.5x / >1.8EV more LONG exposure while the correctly exposed SHORT remains approximately stable.
+V2.27 ADAPTIVE AUTO EXPOSURE CONTRACT
+- HAL AE is bootstrap only.
+- LONG_BODY remains independently solved from the V2.26 highlight-excluded P50/P75 population and may blow highlights for usable body signal.
+- SHORT_HEADROOM remains independently solved from P99=0.35 plus near-clip pressure.
+- The universal 4x minimum is removed. Final physical bracket is the independent outcome from 1x through 64x.
+- SHORT may approach LONG in low-DR scenes but may never become the brighter exposure.
+- The 64x maximum is enforced by brightening SHORT if needed; bracket constraints may never reduce LONG body exposure.
+- SHORT realization is no longer hard-wired to ISO-min after shutter headroom is exhausted; it may raise ISO only enough to realize its independent solved product.
+- Existing <=0.30 EV normal convergence and <=1.0 EV scene-cut convergence remain.
 
-V2.26 SAVED SHORT-FUSION CONTRACT
-- LONG remains immutable body/detail geometry.
-- SHORT is the only source registered into LONG coordinates.
-- Source RGB is binary: each output coordinate is owned by one real LONG or aligned SHORT sample; fractional LONG/SHORT RGB blending and per-channel/local color synthesis remain forbidden.
-- Strict seeds still require real information advantage, usable SHORT and trustworthy registration.
-- Effective LONG information loss now admits pre-clipping flattening where exposure-normalized SHORT retains materially stronger medium/broad structure.
-- Radiometric plausibility and existing registration/motion barriers remain fail-closed protections against gray islands, peach/orange blocks, blotches and ghosts.
-- Once seeded, the successful V2.25 geodesic connected-component reconstruction remains byte-identical, preventing disconnected LONG holes inside one valid SHORT recovery component.
+V2.27 LOW-DR TWO-FRAME BODY SNR CONTRACT
+- Near-equal registered exposures may use both frames for body noise reduction instead of wasting SHORT as an unnecessarily dark highlight-only frame.
+- Exposure overlap tapers continuously with bracket width and is zero at a 4x-or-wider HDR pair.
+- Saved still body support requires usable SHORT signal, registration-neighborhood confidence, radiometric agreement, whole-RGB agreement and non-highlight LONG body evidence.
+- One scalar whole-RGB weight is used; no independent R/G/B weights or local hue synthesis exists.
+- At a fully supported 1x pair SHORT weight is exactly 0.5. With wider brackets normalized SHORT variance is conservatively penalized and its body contribution falls.
+- Any registration/radiometric/color uncertainty fails exactly to LONG.
+- Proven HDR highlight regions bypass the temporal body and remain binary aligned SHORT ownership.
 
-V2.26 HDR VIEWFINDER PARITY CONTRACT
-- The old globally lifted SHORT HDR preview is forbidden.
-- LONG is the live HDR body/SNR source by default.
-- SHORT is admitted only by a conservative direct-coordinate information-loss proof.
-- Live SHORT normalization uses one achromatic physical SHORT-to-LONG exposure ratio; no independent RGB gain is allowed.
-- Motion/radiometric disagreement fails closed to LONG.
-- Saved still keeps the more authoritative registered/geodesic topology; live viewfinder intentionally uses the bounded real-time selector rather than running full still reconstruction each frame.
+V2.27 PREVIEW / STILL ISP NR OWNERSHIP
+- Live processed preview prefers Camera2 NOISE_REDUCTION_MODE_FAST when supported.
+- HIGH_QUALITY may be used only as a live-preview fallback when FAST is unavailable.
+- HDR still source JPEG requests remain explicitly NOISE_REDUCTION_MODE_OFF when supported.
+- RAW/DNG truth remains unchanged and is never made dependent on preview ISP NR.
+- Final fused cleanliness comes from adaptive physical pairing + confidence-gated two-frame body denoise + existing constrained NAFNet residual cleanup, not hidden still ISP smoothing.
 
-V2.26 HIGHLIGHT TONE CONTRACT
-- GPU saved/live path, CameraController predictor and dormant CPU parity path use the same stop-domain shoulder.
-- Knee remains 0.70 linear.
-- Shoulder scale is derived from bracket stops and valid recovered highlight energy is mapped by log2(scene/knee), preserving visible separation over multiple recovered stops.
-- Retired whiteAnchor/displayCeiling gray plateaus remain forbidden.
-- Whole-RGB scaling preserves channel ratios.
-- CPU parity uses a precomputed LUT spanning scene-linear peak up to 128, so no expensive log/exp operation is added to the full-resolution per-pixel loop.
+V2.27 UNIVERSAL HIGHLIGHT RENDERING CONTRACT
+- V2.26 registration, effective-loss proof and geodesic highlight ownership are preserved.
+- The recovered-highlight transfer is scene-semantic-free: lamps, windows, sky, chrome, signs and other highlights use the same radiance ordering.
+- Knee remains 0.70 linear. Recovered detail is allocated a guaranteed-slope interval through 0.965; only energy beyond the recoverable interval enters the final specular tail.
+- Detail-to-specular transition is C1-continuous in stop space.
+- AUTO gamma influence fades to identity from 0.50 through 0.78 linear so it cannot re-compress valid recovered SHORT ordering after HDR mapping.
+- Whole-RGB scaling remains gamut-safe and channel-ratio preserving.
 
-NOISE CONTRACT
-- Primary noise correction is more physical LONG exposure and LONG-owned live/saved body information, not stronger post-fusion neural filtering.
-- Exact V2.25 NAFNet model and structure-safe denoiser bytes remain protected.
-- Denoise remains optional post-fusion residual cleanup and may not become an HDR source/ownership/tone authority.
+V2.27 SNR-AWARE AUTO PRESENTATION
+- Weak physical body evidence and elevated LONG ISO produce a scene-semantic-free noise-pressure term.
+- Strong noise pressure reduces the maximum AUTO brightness/gamma rescue and penalizes excessive median digital lift.
+- Clean target-level min-ISO evidence produces essentially no noise pressure.
+- Intentional low-DR 1x pairs are no longer treated as a failed/collapsed HDR bracket.
 
-PERMANENT VSCODE.DEV DELIVERY REGRESSION
-A partial parent directory must never be uploaded over an existing repository directory. Future handoffs are individual-file replacements into exact destination folders only. Source Control must equal the exact allowlist with zero unexpected A/D entries before commit. Unchanged protected binaries are never included in ordinary vscode.dev handoffs.
+PERMANENT REGRESSIONS ADDED
+- Exact V2.26 dim pair: 1/33s ISO400 LONG + 1/33s ISO50 SHORT may not remain an 8x one-useful-frame pair when SHORT has no highlight demand.
+- Temporal body averaging is permitted only under low-DR confidence and can never become fractional HDR highlight ownership.
+- Preview FAST/HQ NR is forbidden from leaking into HDR still-source NR ownership.
+- Recovered highlight mapping must remain strictly monotonic with minimum one-stop separation across 1x..64x and gamma may not collapse/reverse it.
+- The V2.26 chandelier/bathroom failure class is represented by generic recovered-radiance separation, not scene names or object thresholds.
+- SNR-aware AUTO may not disguise weak/high-ISO body evidence with the old +1EV/gamma2 software rescue.
+- vscode.dev parent-folder replacement remains forbidden; upload is individual-file only and Source Control must equal the exact allowlist.
 
 COMPILER STATUS BEFORE ACTIONS
-REAL GLSL COMPILE: NOT RUN locally for V2.26 (pinned Actions compiler is authoritative)
+REAL GLSL COMPILE: NOT RUN locally for V2.27 (pinned Actions compiler is authoritative)
 REAL KOTLIN COMPILE: N/A (no Kotlin runtime source change)
 REAL JAVA PROJECT COMPILE: NOT RUN locally
 FULL ANDROID :app:assembleDebug: NOT RUN locally
-FINAL ACTIONS AUTHORITY: V2.25 remains final until V2.26 succeeds
+FINAL ACTIONS AUTHORITY: V2.26 remains final until V2.27 succeeds

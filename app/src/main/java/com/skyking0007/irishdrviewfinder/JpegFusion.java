@@ -785,10 +785,9 @@ final class JpegFusion {
                 ? null
                 : buildGammaLut(clampedGamma);
         float ratio = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
-        float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 1.0f, 6.0f);
-        float shoulderStopScale = clamp(
-                2.10f + 0.18f * (bracketStops - 2.0f), 2.00f, 2.90f);
-        float[] highlightToneLut = buildHighlightToneLut(shoulderStopScale);
+        float bracketStops = clamp(log2(Math.max(ratio, 1.0001f)), 0.0f, 6.0f);
+        float detailStops = clamp(Math.max(bracketStops, 2.0f), 2.0f, 6.0f);
+        float[] highlightToneLut = buildHighlightToneLut(detailStops);
 
         for (int y = 0; y < height; y += rowsPerStrip) {
             int rows = Math.min(rowsPerStrip, height - y);
@@ -842,7 +841,10 @@ final class JpegFusion {
                     if (gammaLut != null) {
                         float gammaY = linearLuma(tr, tg, tb);
                         if (gammaY > 0.000001f) {
-                            float mappedGammaY = mapLut(gammaY, gammaLut);
+                            float pureGammaY = mapLut(gammaY, gammaLut);
+                            float gammaInfluence = 1.0f - smoothstep(0.50f, 0.78f, gammaY);
+                            float mappedGammaY = gammaY
+                                    + (pureGammaY - gammaY) * gammaInfluence;
                             float requestedGammaScale = mappedGammaY / gammaY;
                             float gammaPeak = Math.max(tr, Math.max(tg, tb));
                             float gammaGamutScale = 1.0f / Math.max(gammaPeak, 0.000001f);
@@ -937,16 +939,26 @@ final class JpegFusion {
         return lut[lo] + (lut[hi] - lut[lo]) * t;
     }
 
-    private static float[] buildHighlightToneLut(float shoulderStopScale) {
+    private static float[] buildHighlightToneLut(float detailStops) {
         float[] lut = new float[4096];
+        final float detailTop = 0.965f;
         for (int i = 0; i < lut.length; i++) {
             float scenePeak = HDR_TONE_MAX_SCENE * i / (float) (lut.length - 1);
             if (scenePeak <= HDR_KNEE) {
                 lut[i] = scenePeak;
             } else {
                 float highlightStops = log2(Math.max(scenePeak / HDR_KNEE, 1.0f));
-                float mappedPeak = HDR_KNEE + (1.0f - HDR_KNEE)
-                        * (1.0f - (float) Math.exp(-highlightStops / shoulderStopScale));
+                float mappedPeak;
+                if (highlightStops <= detailStops) {
+                    mappedPeak = HDR_KNEE + (detailTop - HDR_KNEE)
+                            * (highlightStops / detailStops);
+                } else {
+                    float tailStops = highlightStops - detailStops;
+                    float tailStopScale = (1.0f - detailTop) * detailStops
+                            / (detailTop - HDR_KNEE);
+                    mappedPeak = detailTop + (1.0f - detailTop)
+                            * (1.0f - (float) Math.exp(-tailStops / tailStopScale));
+                }
                 lut[i] = clamp(mappedPeak, HDR_KNEE, 1.0f);
             }
         }

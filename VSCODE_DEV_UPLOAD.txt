@@ -1,13 +1,15 @@
-V1.4.11 V2.26 — SAFE VSCODE.DEV INDIVIDUAL-FILE UPLOAD
+V1.4.11 V2.27 — SAFE VSCODE.DEV INDIVIDUAL-FILE UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: 66b689922267396afa8b8cedf1ca848d1eabffcb (successful V2.25)
+Required direct parent / runtime authority: 555f06179f078f2a08453abbd032c67845b6e293 (successful V2.26)
 No backup requested or needed for this build.
 
 PERMANENT SAFETY RULE
-DO NOT upload an extracted app/, scripts/, .github/, or other parent folder over the repository. Partial-directory replacement caused the V2.25 protected-file deletion incident. This handoff is intentionally delivered as individual replacement files.
+DO NOT upload an extracted app/, scripts/, .github/, or other parent folder over the repository. Upload/replace ONLY one individual file at a time in its exact existing destination folder.
 
-For each payload file below, open the exact destination folder in vscode.dev and upload/replace ONLY that individual file:
+The V2.27 delivery ZIP is flat and uses the real destination BASENAME for every payload. In particular, the payload is named `build.gradle.kts` — no `app__` renaming is required.
+
+For each payload file below, open the exact destination folder in vscode.dev and upload/replace ONLY that file:
 
 1. build.yml
    -> .github/workflows/build.yml
@@ -21,7 +23,7 @@ For each payload file below, open the exact destination folder in vscode.dev and
    -> README.md (repository root)
 6. VSCODE_DEV_UPLOAD.txt
    -> VSCODE_DEV_UPLOAD.txt (repository root)
-7. app__build.gradle.kts
+7. build.gradle.kts
    -> app/build.gradle.kts
 8. hdr_display.frag
    -> app/src/main/assets/shaders/hdr_display.frag
@@ -34,12 +36,11 @@ For each payload file below, open the exact destination folder in vscode.dev and
 12. verify_orientation.py
     -> scripts/verify_orientation.py
 
-Do not upload UPLOAD_MAP.txt if present in the local handoff ZIP; it is local guidance only.
 Do not upload the ZIP itself.
-Do not upload any unchanged NAFNet/model/protected sibling file.
+Do not upload unchanged NAFNet/model/protected sibling files.
 
 BEFORE COMMIT
-Source Control must show exactly 12 tracked modifications, all status [M], and ZERO [A] / [D]:
+Source Control must show exactly 12 tracked modifications, every one status [M], and ZERO [A] / [D]:
 - .github/workflows/build.yml [M]
 - BUILD_WORKFLOW_COPY.yml [M]
 - PACKAGE_INFO.txt [M]
@@ -53,10 +54,10 @@ Source Control must show exactly 12 tracked modifications, all status [M], and Z
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java [M]
 - scripts/verify_orientation.py [M]
 
-If the count is not exactly 12, or ANY file shows A/D, STOP before committing.
+If the count is not exactly 12, if ANY file shows A/D, or if `build.gradle.kts` appears at repository root instead of under app/, STOP before committing.
 
 Suggested commit message:
-V1.4.11 V2.26 fix LONG body SNR, SHORT highlight fusion and HDR preview parity
+V1.4.11 V2.27 adaptive bracket, temporal body SNR and highlight rendering
 
 Do not alter dev/main.
 Do not push an APK.

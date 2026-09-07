@@ -43,6 +43,8 @@ final class HdrGlView extends GLSurfaceView {
         final long longFrameNumber;
         final double shortExposureProduct;
         final double longExposureProduct;
+        final int shortIso;
+        final int longIso;
         final float shortP50Linear;
         final float shortP90Linear;
         final float shortP95Linear;
@@ -71,6 +73,8 @@ final class HdrGlView extends GLSurfaceView {
                 long longFrameNumber,
                 double shortExposureProduct,
                 double longExposureProduct,
+                int shortIso,
+                int longIso,
                 float shortP50Linear,
                 float shortP90Linear,
                 float shortP95Linear,
@@ -97,6 +101,8 @@ final class HdrGlView extends GLSurfaceView {
             this.longFrameNumber = longFrameNumber;
             this.shortExposureProduct = shortExposureProduct;
             this.longExposureProduct = longExposureProduct;
+            this.shortIso = shortIso;
+            this.longIso = longIso;
             this.shortP50Linear = shortP50Linear;
             this.shortP90Linear = shortP90Linear;
             this.shortP95Linear = shortP95Linear;
@@ -616,8 +622,8 @@ final class HdrGlView extends GLSurfaceView {
             int longBodyCount = 0;
             double ratio = Math.max(1.0,
                     lastLongMeta.exposureProduct() / Math.max(1.0, lastShortMeta.exposureProduct()));
-            float bracketStops = (float) Math.max(1.0, Math.min(6.0, Math.log(ratio) / Math.log(2.0)));
-            float clipStart = Math.max(0.90f, Math.min(0.95f, 0.90f + 0.01f * (bracketStops - 1.0f)));
+            float bracketStops = (float) Math.max(0.0, Math.min(6.0, Math.log(ratio) / Math.log(2.0)));
+            float clipStart = Math.max(0.89f, Math.min(0.95f, 0.89f + 0.01f * bracketStops));
 
             for (int i = 0; i < STATS_PIXELS; i++) {
                 int o = i * 4;
@@ -687,6 +693,8 @@ final class HdrGlView extends GLSurfaceView {
                     lastLongMeta.frameNumber,
                     lastShortMeta.exposureProduct(),
                     lastLongMeta.exposureProduct(),
+                    lastShortMeta.iso,
+                    lastLongMeta.iso,
                     percentileSorted(shortSorted, 0.50f),
                     percentileSorted(shortSorted, 0.90f),
                     percentileSorted(shortSorted, 0.95f),
@@ -807,7 +815,7 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillRegistrationConfidence"),
                     0.0f);
-            // V2.26 live parity uses the physical SHORT->LONG exposure ratio as one
+            // V2.27 live parity uses the physical SHORT->LONG exposure ratio as one
             // achromatic radiometric scale. Saved stills continue to use the robust
             // overlap-derived scalar computed after registration.
             GLES30.glUniform1f(

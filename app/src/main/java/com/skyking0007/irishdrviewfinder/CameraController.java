@@ -106,7 +106,7 @@ final class CameraController {
     private static final double AUTO_LIVE_SCENE_CUT_EV = 0.70;
     private static final double AUTO_LIVE_SCENE_CUT_MAX_STEP_EV = 1.0;
     private static final long AUTO_LIVE_UPDATE_MIN_NS = 80_000_000L;
-    private static final double AUTO_BRACKET_MIN_RATIO = 4.0;
+    private static final double AUTO_BRACKET_MIN_RATIO = 1.0;
     private static final double AUTO_BRACKET_MAX_RATIO = 64.0;
     // V2.25 semantic ownership: LONG owns body/SNR, SHORT owns highlight headroom,
     // and the bracket is the resulting physical LONG/SHORT ratio. These robust
@@ -242,6 +242,8 @@ final class CameraController {
     private boolean srgbTonemapSupported;
     private TonemapCurve srgbTonemapCurve;
     private boolean noiseReductionOffSupported;
+    private boolean noiseReductionFastSupported;
+    private boolean noiseReductionHighQualitySupported;
     private boolean edgeOffSupported;
     private Range<Integer> postRawBoostRange;
     private boolean sixtyFpsCapable;
@@ -618,9 +620,19 @@ final class CameraController {
         aeFpsRange = chooseAeFpsRange(ranges, targetPreviewFps);
         srgbTonemapSupported = supportsSrgbTonemap(characteristics);
         srgbTonemapCurve = srgbTonemapSupported ? buildSrgbTonemapCurve(characteristics) : null;
+        int[] noiseReductionModes = characteristics.get(
+                CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES);
         noiseReductionOffSupported = contains(
-                characteristics.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES),
-                CaptureRequest.NOISE_REDUCTION_MODE_OFF);
+                noiseReductionModes, CaptureRequest.NOISE_REDUCTION_MODE_OFF);
+        noiseReductionFastSupported = contains(
+                noiseReductionModes, CaptureRequest.NOISE_REDUCTION_MODE_FAST);
+        noiseReductionHighQualitySupported = contains(
+                noiseReductionModes, CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY);
+        RuntimeLogger.event(
+                "PREVIEW_NR_CAPABILITY",
+                noiseReductionFastSupported ? "FAST"
+                        : noiseReductionHighQualitySupported ? "HIGH_QUALITY"
+                        : noiseReductionOffSupported ? "OFF_ONLY" : "DEFAULT");
         edgeOffSupported = contains(
                 characteristics.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES),
                 CaptureRequest.EDGE_MODE_OFF);
@@ -828,7 +840,7 @@ final class CameraController {
             builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, aeFpsRange);
         }
         configurePreviewRotateAndCrop(builder);
-        configureProcessingControls(builder);
+        configurePreviewProcessingControls(builder);
         configureSrgbTonemap(builder);
     }
 
@@ -872,7 +884,11 @@ final class CameraController {
         if (maxFrame != null) frameDuration = Math.min(frameDuration, maxFrame);
         frameDuration = Math.max(frameDuration, exposure);
         builder.set(CaptureRequest.SENSOR_FRAME_DURATION, frameDuration);
-        configureProcessingControls(builder);
+        if (enforcePreviewCadence) {
+            configurePreviewProcessingControls(builder);
+        } else {
+            configureStillProcessingControls(builder);
+        }
         configureSrgbTonemap(builder);
     }
 
@@ -978,7 +994,31 @@ final class CameraController {
         }
     }
 
-    private void configureProcessingControls(CaptureRequest.Builder builder) {
+    private void configurePreviewProcessingControls(CaptureRequest.Builder builder) {
+        // V2.27 processing ownership split: the live processed PRIVATE/JPEG preview
+        // may use low-latency ISP denoise, but the HDR still source requests remain
+        // NR-OFF so fusion/DNG evidence is never pre-smoothed by a hidden still owner.
+        if (noiseReductionFastSupported) {
+            builder.set(
+                    CaptureRequest.NOISE_REDUCTION_MODE,
+                    CaptureRequest.NOISE_REDUCTION_MODE_FAST);
+        } else if (noiseReductionHighQualitySupported) {
+            builder.set(
+                    CaptureRequest.NOISE_REDUCTION_MODE,
+                    CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY);
+        } else if (noiseReductionOffSupported) {
+            builder.set(
+                    CaptureRequest.NOISE_REDUCTION_MODE,
+                    CaptureRequest.NOISE_REDUCTION_MODE_OFF);
+        }
+        if (edgeOffSupported) {
+            builder.set(CaptureRequest.EDGE_MODE, CaptureRequest.EDGE_MODE_OFF);
+        }
+    }
+
+    private void configureStillProcessingControls(CaptureRequest.Builder builder) {
+        // Capture source truth stays unsmoothed. RAW itself is unaffected by JPEG NR,
+        // and the paired still JPEGs used by our GPU fusion explicitly keep NR OFF.
         if (noiseReductionOffSupported) {
             builder.set(
                     CaptureRequest.NOISE_REDUCTION_MODE,
@@ -1805,13 +1845,13 @@ final class CameraController {
         double targetShortProduct = Math.max(
                 1.0, stats.shortExposureProduct * shortHeadroomScale);
 
-        // The proven V2.24 4x..64x physical bracket remains the only cross-owner
-        // constraint. If the minimum bracket must expand one side, expand LONG rather
-        // than darkening SHORT; SHORT remains solely responsible for highlight safety.
-        targetLongProduct = Math.max(
-                targetLongProduct, targetShortProduct * AUTO_BRACKET_MIN_RATIO);
-        targetLongProduct = Math.min(
-                targetLongProduct, targetShortProduct * AUTO_BRACKET_MAX_RATIO);
+        // V2.27 removes the inherited 4x floor. LONG_BODY remains the body/SNR
+        // authority and is never darkened to satisfy a bracket. SHORT_HEADROOM may
+        // approach LONG in low-DR scenes but may never become the brighter exposure.
+        // If a 64x ceiling is needed, brighten SHORT rather than sacrificing LONG.
+        targetShortProduct = Math.min(targetShortProduct, targetLongProduct);
+        targetShortProduct = Math.max(
+                targetShortProduct, targetLongProduct / AUTO_BRACKET_MAX_RATIO);
         double desiredRatio = Math.max(
                 AUTO_BRACKET_MIN_RATIO,
                 Math.min(AUTO_BRACKET_MAX_RATIO,
@@ -1838,13 +1878,12 @@ final class CameraController {
         autoLiveShortProduct = Math.max(
                 1.0, expectedShortProduct * Math.pow(2.0, shortStepEv));
 
-        // Preserve the physical ratio contract during convergence, not merely at the
-        // final target. This cannot make SHORT darker: any minimum-ratio correction
-        // is applied to LONG only.
-        double convergedMinLong = autoLiveShortProduct * AUTO_BRACKET_MIN_RATIO;
-        double convergedMaxLong = autoLiveShortProduct * AUTO_BRACKET_MAX_RATIO;
-        autoLiveLongProduct = Math.max(
-                convergedMinLong, Math.min(autoLiveLongProduct, convergedMaxLong));
+        // Preserve ordering/range without ever reducing the converged LONG body
+        // product. Cap SHORT at LONG for 1x minimum, and brighten SHORT if needed to
+        // respect the 64x maximum. These corrections cannot reduce body photons.
+        autoLiveShortProduct = Math.min(autoLiveShortProduct, autoLiveLongProduct);
+        autoLiveShortProduct = Math.max(
+                autoLiveShortProduct, autoLiveLongProduct / AUTO_BRACKET_MAX_RATIO);
         autoDesiredBracketRatio = Math.max(
                 AUTO_BRACKET_MIN_RATIO,
                 Math.min(AUTO_BRACKET_MAX_RATIO,
@@ -1896,7 +1935,7 @@ final class CameraController {
         ExposureSetting longSetting;
         ExposureSetting shortSetting = null;
         if (period > 0L) {
-            shortSetting = solveMinimumIsoFlickerSettingLocked(
+            shortSetting = solveShortHeadroomFlickerSettingLocked(
                     autoLiveShortProduct,
                     Math.min(autoShortExposureNs, lastAeExposureNs),
                     period,
@@ -1927,7 +1966,11 @@ final class CameraController {
         int minIso = sensorMinIsoLocked();
         long shortExposure = clampExposure(Math.round(autoLiveShortProduct / Math.max(1, minIso)));
         autoShortExposureNs = Math.min(shortExposure, maxAllowed);
-        autoShortIso = minIso;
+        // If shutter headroom reaches the preview cadence ceiling, raise SHORT ISO
+        // only as much as needed to reach its independently solved product. This is
+        // what lets a low-DR pair converge toward LONG instead of being hard-wired
+        // to ISOmin and wasting the second frame.
+        autoShortIso = solveIsoForProduct(autoLiveShortProduct, autoShortExposureNs);
         double achievedShortProduct = Math.max(1.0,
                 (double) autoShortExposureNs * autoShortIso);
         double feasibleLongProduct = Math.max(achievedShortProduct,
@@ -1967,6 +2010,7 @@ final class CameraController {
         double physicalRatio = Math.max(1.0, stats.longExposureProduct)
                 / Math.max(1.0, stats.shortExposureProduct);
         boolean collapsedBracket = physicalRatio < 2.0;
+        float autoNoisePressure = 0.0f;
         if (automatic) {
             // V2.21 full-distribution photographic key. V2.19 optimized only P50/P90,
             // so a high-dynamic window could satisfy those two anchors with a large
@@ -1988,14 +2032,18 @@ final class CameraController {
             // P90=0.40, while isolated bulbs/speculars lower the body toward 0.28.
             // A broad high-contrast window keeps a higher P90 but is allowed up to
             // 2.6 stops of body contrast instead of V2.19's hard 2-stop flattening.
+            autoNoisePressure = autoPresentationNoisePressureLocked(stats);
+            float cleanKeyScale = lerpFloat(1.00f, 0.88f, autoNoisePressure);
             float targetP90 = clampFloat(
-                    0.40f - 0.12f * isolatedSpecularPressure, 0.26f, 0.42f);
+                    (0.40f - 0.12f * isolatedSpecularPressure) * cleanKeyScale,
+                    0.24f, 0.42f);
             float contrastCeiling = lerpFloat(2.00f, 2.60f, highlightPressure);
             float targetContrastStops = clampFloat(
                     contrastStops, 1.00f, contrastCeiling);
+            float targetMedianFloor = lerpFloat(0.055f, 0.040f, autoNoisePressure);
             float targetMedian = clampFloat(
                     targetP90 / (float) Math.pow(2.0, targetContrastStops),
-                    0.055f, 0.18f);
+                    targetMedianFloor, 0.18f);
 
             // Preserve the scene's own low-end ordering instead of inventing a fixed
             // black level. These ratios come from the pre-presentation fused scene;
@@ -2019,11 +2067,20 @@ final class CameraController {
             float bestScore = Float.POSITIVE_INFINITY;
             float bestBrightness = 0.0f;
             float bestGamma = 1.0f;
+            // V2.27 SNR-aware presentation: when physical body evidence is weak or
+            // high-ISO, AUTO may not disguise that acquisition deficit with the old
+            // +1EV/gamma2 software rescue. A clean scene keeps the full V2.26 search.
+            float maxAutoBrightnessEv = lerpFloat(
+                    AUTO_PRESENT_BRIGHTNESS_MAX_EV, 0.45f, autoNoisePressure);
+            float maxAutoGamma = lerpFloat(
+                    AUTO_PRESENT_GAMMA_MAX, 1.80f, autoNoisePressure);
+            float maxMedianDigitalLiftEv = lerpFloat(
+                    5.00f, 3.60f, autoNoisePressure);
             for (float candidateBrightness = AUTO_PRESENT_BRIGHTNESS_MIN_EV;
-                    candidateBrightness <= AUTO_PRESENT_BRIGHTNESS_MAX_EV + 0.001f;
+                    candidateBrightness <= maxAutoBrightnessEv + 0.001f;
                     candidateBrightness += 0.10f) {
                 for (float candidateGamma = 0.80f;
-                        candidateGamma <= AUTO_PRESENT_GAMMA_MAX + 0.001f;
+                        candidateGamma <= maxAutoGamma + 0.001f;
                         candidateGamma += 0.05f) {
                     float predictedP10 = predictAutoPresentedLuma(
                             stats.fusedP10Linear, candidateBrightness, candidateGamma, physicalRatio);
@@ -2037,10 +2094,14 @@ final class CameraController {
                     float p25Error = log2RatioFloat(predictedP25, targetP25);
                     float medianError = log2RatioFloat(predictedMedian, targetMedian);
                     float p90Error = log2RatioFloat(predictedP90, targetP90);
+                    float sourceMedian = Math.max(0.00025f, stats.fusedP50Linear);
+                    float digitalLiftEv = log2RatioFloat(predictedMedian, sourceMedian);
+                    float excessLiftEv = Math.max(0.0f, digitalLiftEv - maxMedianDigitalLiftEv);
                     float score = p10Weight * p10Error * p10Error
                             + p25Weight * p25Error * p25Error
                             + 2.00f * medianError * medianError
                             + 1.20f * p90Error * p90Error
+                            + 3.00f * excessLiftEv * excessLiftEv
                             + 0.01f * candidateBrightness * candidateBrightness
                             + 0.01f * (candidateGamma - 1.20f) * (candidateGamma - 1.20f);
                     if (score < bestScore) {
@@ -2054,12 +2115,6 @@ final class CameraController {
                     bestBrightness, AUTO_PRESENT_BRIGHTNESS_MIN_EV, AUTO_PRESENT_BRIGHTNESS_MAX_EV);
             targetGamma = clampFloat(
                     bestGamma, AUTO_PRESENT_GAMMA_MIN, AUTO_PRESENT_GAMMA_MAX);
-
-            if (collapsedBracket) {
-                // A failed physical bracket may not be disguised with aggressive tone.
-                targetBrightness = Math.min(targetBrightness, 0.15f);
-                targetGamma = Math.min(targetGamma, 1.20f);
-            }
 
             if (immediate) {
                 autoPresentationPendingValid = false;
@@ -2147,9 +2202,10 @@ final class CameraController {
             RuntimeLogger.event(
                     "PRESENTATION_ADAPT",
                     String.format(Locale.US,
-                            "auto=%s p10=%.4f p50=%.4f p90=%.4f p95=%.4f shadowC=%.3f midC=%.3f -> brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
+                            "auto=%s p10=%.4f p50=%.4f p90=%.4f p95=%.4f longISO=%d noisePressure=%.3f shadowC=%.3f midC=%.3f -> brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
                             automatic, stats.fusedP10Linear, stats.fusedP50Linear,
                             stats.fusedP90Linear, stats.fusedP95Linear,
+                            stats.longIso, autoNoisePressure,
                             stats.shadowLocalContrast, stats.midLocalContrast,
                             displayBrightnessEv, displayGamma, displayDehaze, displayMicroContrast));
             publishPresentationLocked(automatic);
@@ -2186,22 +2242,43 @@ final class CameraController {
 
         float ratio = clampFloat((float) physicalRatio, 1.0f, 65536.0f);
         float bracketStops = clampFloat(
-                (float) (Math.log(Math.max(ratio, 1.0001f)) / Math.log(2.0)), 1.0f, 6.0f);
+                (float) (Math.log(Math.max(ratio, 1.0001f)) / Math.log(2.0)), 0.0f, 6.0f);
         if (y > 0.70f) {
-            // V2.26 stop-domain shoulder: each recovered exposure stop retains
-            // visible tonal distance. This avoids V2.25 collapsing 2x/4x/8x SHORT
-            // highlight structure into nearly the same near-white output.
-            float shoulderStopScale = clampFloat(
-                    2.10f + 0.18f * (bracketStops - 2.0f), 2.00f, 2.90f);
+            // V2.27 recovered-highlight transfer: allocate a guaranteed monotonic
+            // stop-domain interval before the final specular tail. The slope through
+            // valid SHORT detail never exponentially collapses toward white.
+            float detailStops = clampFloat(Math.max(bracketStops, 2.0f), 2.0f, 6.0f);
             float highlightStops = Math.max(
                     0.0f, (float) (Math.log(y / 0.70f) / Math.log(2.0)));
-            y = 0.70f + 0.30f
-                    * (1.0f - (float) Math.exp(-highlightStops / shoulderStopScale));
+            if (highlightStops <= detailStops) {
+                y = 0.70f + 0.265f * (highlightStops / detailStops);
+            } else {
+                float tailStops = highlightStops - detailStops;
+                float tailStopScale = 0.035f * detailStops / 0.265f;
+                y = 0.965f + 0.035f
+                        * (1.0f - (float) Math.exp(-tailStops / tailStopScale));
+            }
             y = clampFloat(y, 0.70f, 1.0f);
         }
 
         float safeGamma = clampFloat(gamma, AUTO_PRESENT_GAMMA_MIN, AUTO_PRESENT_GAMMA_MAX);
-        return (float) Math.pow(clampFloat(y, 0.0f, 1.0f), 1.0f / safeGamma);
+        float gammaMapped = (float) Math.pow(clampFloat(y, 0.0f, 1.0f), 1.0f / safeGamma);
+        float gammaInfluence = 1.0f - smoothstepFloat(0.50f, 0.78f, y);
+        return lerpFloat(y, gammaMapped, gammaInfluence);
+    }
+
+    private float autoPresentationNoisePressureLocked(HdrGlView.SceneStats stats) {
+        int minIso = Math.max(1, sensorMinIsoLocked());
+        float isoStops = log2RatioFloat(Math.max(minIso, stats.longIso), minIso);
+        float isoPressure = smoothstepFloat(1.0f, 3.5f, isoStops);
+        float p50Adequacy = stats.longBodyP50Linear / (float) AUTO_LONG_BODY_P50_TARGET;
+        float p75Adequacy = stats.longBodyP75Linear / (float) AUTO_LONG_BODY_P75_TARGET;
+        float p50Deficit = 1.0f - smoothstepFloat(0.55f, 1.00f, p50Adequacy);
+        float p75Deficit = 1.0f - smoothstepFloat(0.50f, 1.00f, p75Adequacy);
+        float signalPressure = 0.65f * p50Deficit + 0.35f * p75Deficit;
+        // Signal deficit is primary; ISO adds pressure only as corroborating evidence.
+        // This remains scene-semantic-free and does not classify closets/lamps/etc.
+        return clampFloat(0.82f * signalPressure + 0.30f * isoPressure, 0.0f, 1.0f);
     }
 
     private static float log2RatioFloat(float value, float target) {
@@ -2273,6 +2350,44 @@ final class CameraController {
             double productErrorEv = Math.abs(Math.log(achieved / Math.max(1.0, targetProduct)) / Math.log(2.0));
             double shutterErrorEv = Math.abs(Math.log(exposure / (double) preferred) / Math.log(2.0));
             double score = productErrorEv + 0.01 * shutterErrorEv;
+            if (score < bestScore) {
+                bestScore = score;
+                best = new ExposureSetting(exposure, iso);
+            }
+        }
+        return best;
+    }
+
+    private ExposureSetting solveShortHeadroomFlickerSettingLocked(
+            double targetProduct, long preferredExposureNs, long periodNs, long maxAllowedNs) {
+        if (periodNs <= 0L || characteristics == null) return null;
+        Range<Long> exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+        Range<Integer> isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+        if (exposureRange == null || isoRange == null) return null;
+
+        long lower = Math.max(exposureRange.getLower(), periodNs);
+        long upper = Math.min(exposureRange.getUpper(), maxAllowedNs);
+        long firstPeriods = Math.max(1L, (lower + periodNs - 1L) / periodNs);
+        long lastPeriods = upper / periodNs;
+        if (lastPeriods < firstPeriods) return null;
+
+        int minIso = isoRange.getLower();
+        long preferred = Math.max(periodNs, Math.min(upper, preferredExposureNs));
+        ExposureSetting best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (long periods = firstPeriods; periods <= lastPeriods; periods++) {
+            long exposure = periods * periodNs;
+            int iso = Math.max(isoRange.getLower(), Math.min(isoRange.getUpper(),
+                    (int) Math.round(targetProduct / Math.max(1.0, exposure))));
+            double achieved = Math.max(1.0, (double) exposure * iso);
+            double productErrorEv = Math.abs(
+                    Math.log(achieved / Math.max(1.0, targetProduct)) / Math.log(2.0));
+            double isoPenaltyStops = Math.max(0.0,
+                    Math.log(Math.max(1.0, iso / (double) Math.max(1, minIso))) / Math.log(2.0));
+            double shutterErrorEv = Math.abs(Math.log(exposure / (double) preferred) / Math.log(2.0));
+            // Product fidelity is primary. Among equivalent solutions prefer lower ISO
+            // (more photons / less normalized noise), then the prior shutter cadence.
+            double score = productErrorEv + 0.015 * isoPenaltyStops + 0.002 * shutterErrorEv;
             if (score < bestScore) {
                 bestScore = score;
                 best = new ExposureSetting(exposure, iso);
