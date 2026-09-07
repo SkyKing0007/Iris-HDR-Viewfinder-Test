@@ -113,7 +113,7 @@ final class CameraController {
     // LONG percentiles deliberately ignore the top highlight tail instead of letting
     // a small window or bulb globally veto the body exposure.
     private static final double AUTO_LONG_BODY_P50_TARGET = 0.015;
-    private static final double AUTO_LONG_BODY_P95_TARGET = 0.24;
+    private static final double AUTO_LONG_BODY_P75_TARGET = 0.065;
     private static final double AUTO_LONG_BODY_SCALE_MIN = 0.25;
     private static final double AUTO_LONG_BODY_SCALE_MAX = 8.0;
     // SHORT is a dedicated highlight-information exposure and may move in either
@@ -1771,14 +1771,18 @@ final class CameraController {
         //   SHORT_HEADROOM_TARGET = exposure needed to preserve highlight information.
         //   LONG_BODY_TARGET      = exposure needed to give the non-highlight body SNR.
         //   BRACKET_RATIO         = LONG_BODY_TARGET / SHORT_HEADROOM_TARGET afterward.
-        // No SHORT percentile, LONG P98, or global LONG clip fraction may masquerade
-        // as a LONG-body veto. P50/P95 are robust body statistics and inherently trim
-        // the top 5% highlight population (bulbs, windows, specular islands).
+        // No SHORT percentile, global LONG P95/P98, or global LONG clip fraction may
+        // masquerade as a LONG-body veto. V2.25 proved that a large bright window can
+        // occupy P95 and cancel the body's request for more photons. V2.26 therefore
+        // uses the highlight-excluded body population produced by HdrGlView. Median
+        // body exposure carries 70% of the solve and body P75 carries 30%, so LONG is
+        // genuinely allowed to blow highlights in exchange for body/shadow SNR.
         double longP50Scale = AUTO_LONG_BODY_P50_TARGET
-                / Math.max(0.00025, stats.longP50Linear);
-        double longP95Scale = AUTO_LONG_BODY_P95_TARGET
-                / Math.max(0.010, stats.longP95Linear);
-        double longBodyScale = Math.sqrt(longP50Scale * longP95Scale);
+                / Math.max(0.00025, stats.longBodyP50Linear);
+        double longP75Scale = AUTO_LONG_BODY_P75_TARGET
+                / Math.max(0.0020, stats.longBodyP75Linear);
+        double longBodyScale = Math.pow(longP50Scale, 0.70)
+                * Math.pow(longP75Scale, 0.30);
         longBodyScale = Math.max(
                 AUTO_LONG_BODY_SCALE_MIN,
                 Math.min(AUTO_LONG_BODY_SCALE_MAX, longBodyScale));
@@ -1861,10 +1865,11 @@ final class CameraController {
         RuntimeLogger.event(
                 "AUTO_SCENE_ADAPT",
                 String.format(Locale.US,
-                        "SHORT_HEADROOM p99=%.4f clip=%.4f scale=%.3fx err=%+.2fEV step=%+.2fEV; LONG_BODY p50=%.4f p95=%.4f scale=%.3fx err=%+.2fEV step=%+.2fEV; targetRatio=%.2fx short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
+                        "SHORT_HEADROOM p99=%.4f clip=%.4f scale=%.3fx err=%+.2fEV step=%+.2fEV; LONG_BODY bodyP50=%.4f bodyP75=%.4f bodyFrac=%.3f scale=%.3fx err=%+.2fEV step=%+.2fEV; targetRatio=%.2fx short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
                         stats.shortP99Linear, stats.shortNearClipFraction,
                         shortHeadroomScale, shortErrorEv, shortStepEv,
-                        stats.longP50Linear, stats.longP95Linear,
+                        stats.longBodyP50Linear, stats.longBodyP75Linear,
+                        stats.longBodyFraction,
                         longBodyScale, longErrorEv, longStepEv,
                         desiredRatio,
                         exposureText(autoShortExposureNs), autoShortIso,
@@ -2183,11 +2188,15 @@ final class CameraController {
         float bracketStops = clampFloat(
                 (float) (Math.log(Math.max(ratio, 1.0001f)) / Math.log(2.0)), 1.0f, 6.0f);
         if (y > 0.70f) {
-            float shoulderScale = clampFloat(
-                    0.45f + 0.06f * (bracketStops - 2.0f), 0.42f, 0.72f);
-            float distanceAboveKnee = Math.max(y - 0.70f, 0.0f);
+            // V2.26 stop-domain shoulder: each recovered exposure stop retains
+            // visible tonal distance. This avoids V2.25 collapsing 2x/4x/8x SHORT
+            // highlight structure into nearly the same near-white output.
+            float shoulderStopScale = clampFloat(
+                    2.10f + 0.18f * (bracketStops - 2.0f), 2.00f, 2.90f);
+            float highlightStops = Math.max(
+                    0.0f, (float) (Math.log(y / 0.70f) / Math.log(2.0)));
             y = 0.70f + 0.30f
-                    * (1.0f - (float) Math.exp(-distanceAboveKnee / shoulderScale));
+                    * (1.0f - (float) Math.exp(-highlightStops / shoulderStopScale));
             y = clampFloat(y, 0.70f, 1.0f);
         }
 

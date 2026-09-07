@@ -50,6 +50,9 @@ final class HdrGlView extends GLSurfaceView {
         final float shortP99Linear;
         final float shortNearClipFraction;
         final float longP50Linear;
+        final float longBodyP50Linear;
+        final float longBodyP75Linear;
+        final float longBodyFraction;
         final float longP95Linear;
         final float longP98Linear;
         final float longNearClipFraction;
@@ -75,6 +78,9 @@ final class HdrGlView extends GLSurfaceView {
                 float shortP99Linear,
                 float shortNearClipFraction,
                 float longP50Linear,
+                float longBodyP50Linear,
+                float longBodyP75Linear,
+                float longBodyFraction,
                 float longP95Linear,
                 float longP98Linear,
                 float longNearClipFraction,
@@ -98,6 +104,9 @@ final class HdrGlView extends GLSurfaceView {
             this.shortP99Linear = shortP99Linear;
             this.shortNearClipFraction = shortNearClipFraction;
             this.longP50Linear = longP50Linear;
+            this.longBodyP50Linear = longBodyP50Linear;
+            this.longBodyP75Linear = longBodyP75Linear;
+            this.longBodyFraction = longBodyFraction;
             this.longP95Linear = longP95Linear;
             this.longP98Linear = longP98Linear;
             this.longNearClipFraction = longNearClipFraction;
@@ -600,9 +609,11 @@ final class HdrGlView extends GLSurfaceView {
         private SceneStats buildSceneStats(ByteBuffer shortPixels, ByteBuffer longPixels) {
             float[] shortLuma = new float[STATS_PIXELS];
             float[] longLuma = new float[STATS_PIXELS];
+            float[] longBodyLuma = new float[STATS_PIXELS];
             float[] fusedLuma = new float[STATS_PIXELS];
             int shortNearClip = 0;
             int longNearClip = 0;
+            int longBodyCount = 0;
             double ratio = Math.max(1.0,
                     lastLongMeta.exposureProduct() / Math.max(1.0, lastShortMeta.exposureProduct()));
             float bracketStops = (float) Math.max(1.0, Math.min(6.0, Math.log(ratio) / Math.log(2.0)));
@@ -629,6 +640,16 @@ final class HdrGlView extends GLSurfaceView {
                 if (Math.max(lr, Math.max(lg, lb)) >= 0.985f) longNearClip++;
 
                 float longPeak = Math.max(lr, Math.max(lg, lb));
+                // V2.26 body-SNR authority deliberately excludes the bright/highlight
+                // population before computing LONG feedback. A window, bulb, sky or
+                // specular island may occupy far more than the top 5% of a scene, so
+                // global P95 is not a safe body statistic. The 0.70 encoded peak cut
+                // keeps ordinary shadows/midtones while leaving highlight protection
+                // exclusively to SHORT. If too little body evidence exists we fall
+                // back to conservative global lower percentiles below.
+                if (longPeak < 0.70f && longLuma[i] >= 0.00025f) {
+                    longBodyLuma[longBodyCount++] = longLuma[i];
+                }
                 float longScenePeak = Math.max(0.000001f, Math.max(llr, Math.max(llg, llb)));
                 float shortScenePeak = (float) ratio * Math.max(slr, Math.max(slg, slb));
                 float shortConfidence = smoothstep(0.35f, 0.65f, shortScenePeak / longScenePeak);
@@ -645,6 +666,22 @@ final class HdrGlView extends GLSurfaceView {
             java.util.Arrays.sort(shortSorted);
             java.util.Arrays.sort(longSorted);
             java.util.Arrays.sort(fusedSorted);
+            float globalLongP50 = percentileSorted(longSorted, 0.50f);
+            float globalLongP75 = percentileSorted(longSorted, 0.75f);
+            float longBodyP50;
+            float longBodyP75;
+            // Require at least 20% of the 32x24 grid before the highlight-excluded
+            // population becomes exposure authority. Extremely bright/high-key
+            // scenes therefore fail closed to global lower percentiles.
+            if (longBodyCount >= STATS_PIXELS / 5) {
+                java.util.Arrays.sort(longBodyLuma, 0, longBodyCount);
+                longBodyP50 = percentileSorted(longBodyLuma, longBodyCount, 0.50f);
+                longBodyP75 = percentileSorted(longBodyLuma, longBodyCount, 0.75f);
+            } else {
+                longBodyP50 = globalLongP50;
+                longBodyP75 = globalLongP75;
+            }
+            float longBodyFraction = longBodyCount / (float) STATS_PIXELS;
             return new SceneStats(
                     lastShortMeta.frameNumber,
                     lastLongMeta.frameNumber,
@@ -656,7 +693,10 @@ final class HdrGlView extends GLSurfaceView {
                     percentileSorted(shortSorted, 0.98f),
                     percentileSorted(shortSorted, 0.99f),
                     shortNearClip / (float) STATS_PIXELS,
-                    percentileSorted(longSorted, 0.50f),
+                    globalLongP50,
+                    longBodyP50,
+                    longBodyP75,
+                    longBodyFraction,
                     percentileSorted(longSorted, 0.95f),
                     percentileSorted(longSorted, 0.98f),
                     longNearClip / (float) STATS_PIXELS,
@@ -700,8 +740,13 @@ final class HdrGlView extends GLSurfaceView {
         }
 
         private static float percentileSorted(float[] sorted, float fraction) {
-            int index = Math.max(0, Math.min(sorted.length - 1,
-                    Math.round(fraction * (sorted.length - 1))));
+            return percentileSorted(sorted, sorted.length, fraction);
+        }
+
+        private static float percentileSorted(float[] sorted, int count, float fraction) {
+            if (count <= 0) return 0.0f;
+            int index = Math.max(0, Math.min(count - 1,
+                    Math.round(fraction * (count - 1))));
             return sorted[index];
         }
 
@@ -762,11 +807,15 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillRegistrationConfidence"),
                     0.0f);
+            // V2.26 live parity uses the physical SHORT->LONG exposure ratio as one
+            // achromatic radiometric scale. Saved stills continue to use the robust
+            // overlap-derived scalar computed after registration.
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillShortScalarGain"),
-                    1.0f);
-            // Local residual flow is saved-still-only. Live preview remains the
-            // proven V2.13 path and receives a neutral/disabled local field.
+                    ratio);
+            // Local residual flow remains saved-still-only. Live HDR uses a
+            // conservative direct-coordinate information-loss selector and fails
+            // closed to LONG whenever temporal mismatch makes SHORT uncertain.
             GLES30.glUniform1i(
                     GLES30.glGetUniformLocation(displayProgram, "haveLocalFlow"), 0);
             GLES30.glUniform2f(

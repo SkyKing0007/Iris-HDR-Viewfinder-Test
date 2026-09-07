@@ -1,30 +1,62 @@
-V1.4.11 V2.25 — VSCODE.DEV UPLOAD
+V1.4.11 V2.26 — SAFE VSCODE.DEV INDIVIDUAL-FILE UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: f5ed95f8da45adc806dd421bc8c805155a311ccf (successful V2.24)
+Required direct parent / runtime authority: 66b689922267396afa8b8cedf1ca848d1eabffcb (successful V2.25)
 No backup requested or needed for this build.
 
-This upload ZIP contains ONLY the files that are intended to change, to avoid marking protected V2.24 files modified/deleted in vscode.dev.
+PERMANENT SAFETY RULE
+DO NOT upload an extracted app/, scripts/, .github/, or other parent folder over the repository. Partial-directory replacement caused the V2.25 protected-file deletion incident. This handoff is intentionally delivered as individual replacement files.
 
-1. Open vscode.dev on the branch above and verify it is still at the required V2.24 parent.
-2. Upload/replace all extracted files at repository root, preserving their included paths.
-3. Do not commit the ZIP itself and do not add extra files.
-4. Source Control must show exactly 11 changed tracked paths relative to V2.24:
-   .github/workflows/build.yml [M]
-   BUILD_WORKFLOW_COPY.yml [M]
-   PACKAGE_INFO.txt [M]
-   PACKAGE_MANIFEST_SHA256.txt [M]
-   README.md [M]
-   VSCODE_DEV_UPLOAD.txt [M]
-   app/build.gradle.kts [M]
-   app/src/main/assets/shaders/hdr_display.frag [M]
-   app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java [M]
-   app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java [M]
-   scripts/verify_orientation.py [M]
-5. Commit once and push once.
+For each payload file below, open the exact destination folder in vscode.dev and upload/replace ONLY that individual file:
+
+1. build.yml
+   -> .github/workflows/build.yml
+2. BUILD_WORKFLOW_COPY.yml
+   -> BUILD_WORKFLOW_COPY.yml (repository root)
+3. PACKAGE_INFO.txt
+   -> PACKAGE_INFO.txt (repository root)
+4. PACKAGE_MANIFEST_SHA256.txt
+   -> PACKAGE_MANIFEST_SHA256.txt (repository root)
+5. README.md
+   -> README.md (repository root)
+6. VSCODE_DEV_UPLOAD.txt
+   -> VSCODE_DEV_UPLOAD.txt (repository root)
+7. app__build.gradle.kts
+   -> app/build.gradle.kts
+8. hdr_display.frag
+   -> app/src/main/assets/shaders/hdr_display.frag
+9. CameraController.java
+   -> app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+10. HdrGlView.java
+    -> app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+11. JpegFusion.java
+    -> app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+12. verify_orientation.py
+    -> scripts/verify_orientation.py
+
+Do not upload UPLOAD_MAP.txt if present in the local handoff ZIP; it is local guidance only.
+Do not upload the ZIP itself.
+Do not upload any unchanged NAFNet/model/protected sibling file.
+
+BEFORE COMMIT
+Source Control must show exactly 12 tracked modifications, all status [M], and ZERO [A] / [D]:
+- .github/workflows/build.yml [M]
+- BUILD_WORKFLOW_COPY.yml [M]
+- PACKAGE_INFO.txt [M]
+- PACKAGE_MANIFEST_SHA256.txt [M]
+- README.md [M]
+- VSCODE_DEV_UPLOAD.txt [M]
+- app/build.gradle.kts [M]
+- app/src/main/assets/shaders/hdr_display.frag [M]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java [M]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java [M]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java [M]
+- scripts/verify_orientation.py [M]
+
+If the count is not exactly 12, or ANY file shows A/D, STOP before committing.
 
 Suggested commit message:
-V1.4.11 V2.25 fix independent AUTO exposures and preserve highlight tone
+V1.4.11 V2.26 fix LONG body SNR, SHORT highlight fusion and HDR preview parity
 
 Do not alter dev/main.
 Do not push an APK.

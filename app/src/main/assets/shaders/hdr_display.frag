@@ -79,19 +79,19 @@ float max3(vec3 value) {
 }
 
 vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
-    // V2.25 monotonic highlight shoulder. Valid SHORT-derived highlight separation
-    // keeps a positive tonal slope all the way toward white; there is no artificial
-    // bracket-dependent gray ceiling/plateau. Only increasingly intense scene energy
-    // asymptotically converges to display white. Whole-RGB scaling preserves hue.
+    // V2.26 stop-domain highlight shoulder. Valid SHORT-derived highlight structure
+    // is separated in exposure stops before compression, so shutters/clouds/frosted
+    // lamp detail do not collapse into one near-white band. The curve remains
+    // strictly monotonic and whole-RGB scaling preserves source chromaticity.
     const float knee = 0.70;
     float scenePeak = max3(sceneLinear);
     if (scenePeak <= knee || scenePeak <= 0.000001) return sceneLinear;
 
-    float shoulderScale = clamp(
-        0.45 + 0.06 * (bracketStops - 2.0), 0.42, 0.72);
-    float distanceAboveKnee = max(scenePeak - knee, 0.0);
+    float shoulderStopScale = clamp(
+        2.10 + 0.18 * (bracketStops - 2.0), 2.00, 2.90);
+    float highlightStops = max(log2(scenePeak / knee), 0.0);
     float mappedPeak = knee + (1.0 - knee)
-        * (1.0 - exp(-distanceAboveKnee / shoulderScale));
+        * (1.0 - exp(-highlightStops / shoulderStopScale));
     mappedPeak = clamp(mappedPeak, knee, 1.0);
 
     return sceneLinear * (mappedPeak / scenePeak);
@@ -326,20 +326,32 @@ float longEffectiveLossAt(vec2 sampleUv) {
     float longMediumRange = mediumRanges.y;
     float shortBroadRange = broadRanges.x;
     float longBroadRange = broadRanges.y;
-    float nearHighlight = smoothstep(0.68, 0.90, max3(longRgb));
+
+    // V2.26 information-loss authority: LONG need not be numerically clipped.
+    // A bright/upper-mid LONG region is effectively lost when exposure-normalized
+    // SHORT preserves materially more local scene variation at medium or broad
+    // scale. This is what admits shutters/clouds/frosted housings that V2.25 left
+    // flattened even though SHORT visibly retained them.
+    float brightContext = smoothstep(0.55, 0.86, max3(longRgb));
     float mediumStructure = smoothstep(0.004, 0.022, shortMediumRange);
     float mediumDominance = smoothstep(
-        0.0015, 0.018, shortMediumRange - 1.06 * longMediumRange);
+        0.0020, 0.020, shortMediumRange - 1.10 * longMediumRange);
     float broadStructure = smoothstep(0.008, 0.050, shortBroadRange);
     float broadDominance = smoothstep(
-        0.003, 0.035, shortBroadRange - 1.04 * longBroadRange);
-    float agreement = radiometricAgreementAt(sampleUv);
-    // Smooth recovered shading is valid information. No fine-detail/band-pass test
-    // is required here; medium+broad response is enough to detect a LONG plateau.
-    return nearHighlight
-        * max(mediumStructure * mediumDominance,
-              broadStructure * broadDominance)
-        * smoothstep(0.18, 0.65, agreement);
+        0.004, 0.040, shortBroadRange - 1.08 * longBroadRange);
+
+    float shortY = max(mappedShortLinearLumaAt(sampleUv), 0.00001);
+    float longY = max(longLinearLumaAt(sampleUv), 0.00001);
+    float errorEv = abs(log2(shortY / longY));
+    // Absolute equality is not required inside a flattened/clipped LONG region,
+    // but wildly inconsistent radiometry remains a fail-closed guard against
+    // unrelated motion/color patches taking ownership.
+    float radiometricPlausibility = 1.0 - smoothstep(1.25, 2.75, errorEv);
+
+    float informationDominance = max(
+        mediumStructure * mediumDominance,
+        broadStructure * broadDominance);
+    return brightContext * informationDominance * radiometricPlausibility;
 }
 
 float shortRecoveryEvidenceAt(vec2 sampleUv) {
@@ -422,6 +434,34 @@ float broadRecoveryDomainAt(vec2 sampleUv) {
     return max(supportedInterior, hardConnectedCell);
 }
 // IRIS_V217_REVERSED_V215_LONG_TRUTH_END
+
+// IRIS_V226_LIVE_LONG_BODY_SHORT_HIGHLIGHT_BEGIN
+float livePreviewShortOwnershipAt(vec2 sampleUv) {
+    vec3 shortRgb = stillShortRgbAt(sampleUv);
+    float shortSignal = smoothstep(0.008, 0.035, encodedLuma(shortRgb));
+    float shortChannelValidity = 1.0 - smoothstep(
+        0.80, 0.995, channelClipDamage(shortRgb));
+
+    // Literal/compact LONG loss is safe enough for direct live recovery even
+    // without the saved-still residual field: LONG contains no detail to preserve.
+    float hardLoss = longHardLossBaseAt(sampleUv)
+        * smoothstep(0.05, 0.20, compactHardLossSupportAt(sampleUv));
+
+    // Effective-loss recovery is intentionally stricter in live preview because
+    // SHORT and LONG are temporally adjacent rather than registered. Require direct
+    // radiometric agreement in addition to the shared information-dominance test;
+    // motion/disocclusion therefore fails closed to clean LONG body.
+    float shortY = max(mappedShortLinearLumaAt(sampleUv), 0.00001);
+    float longY = max(longLinearLumaAt(sampleUv), 0.00001);
+    float directErrorEv = abs(log2(shortY / longY));
+    float directTemporalAgreement = 1.0 - smoothstep(0.65, 1.35, directErrorEv);
+    float effectiveLoss = longEffectiveLossAt(sampleUv) * directTemporalAgreement;
+
+    float ownershipProof = max(hardLoss, effectiveLoss)
+        * shortSignal * shortChannelValidity;
+    return step(0.35, ownershipProof);
+}
+// IRIS_V226_LIVE_LONG_BODY_SHORT_HIGHLIGHT_END
 
 // IRIS_V212_ADAPTIVE_CLARITY_BEGIN
 float presentationGuideLumaAt(vec2 sampleUv) {
@@ -704,14 +744,17 @@ void main() {
         return;
     }
 
-    // V2.17 leaves the successful live preview path unchanged. The reversed
-    // LONG-body ownership correction is saved-still-only; capture/viewfinder
-    // behavior is not reopened.
+    // V2.26 live parity: LONG is the default body/SNR source exactly as in the
+    // saved still. SHORT is admitted only by the conservative direct-coordinate
+    // information-loss proof above. No fractional RGB blend is allowed.
     float ratio = clamp(exposureRatio, 1.0, 65536.0);
     float bracketStops = clamp(log2(max(ratio, 1.0001)), 1.0, 6.0);
     vec3 shortRgb = texture(shortTex, uv).rgb;
+    vec3 longRgb = texture(longTex, uv).rgb;
     vec3 shortScene = srgbToLinear(shortRgb) * ratio;
-    vec3 mergedScene = shortScene;
+    vec3 longScene = srgbToLinear(longRgb);
+    float liveShortOwns = livePreviewShortOwnershipAt(uv);
+    vec3 mergedScene = liveShortOwns > 0.5 ? shortScene : longScene;
 
     float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
     vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
