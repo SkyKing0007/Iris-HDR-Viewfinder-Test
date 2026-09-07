@@ -28,6 +28,9 @@ final class JpegFusion {
         final float margin;
         final float confidence;
         final float cycleError;
+        final float analysisCycleError;
+        final float coarseCycleErrorAnalysis;
+        final float refinementConfidence;
 
         Registration(
                 float sampleDx,
@@ -35,13 +38,19 @@ final class JpegFusion {
                 float score,
                 float margin,
                 float confidence,
-                float cycleError) {
+                float cycleError,
+                float analysisCycleError,
+                float coarseCycleErrorAnalysis,
+                float refinementConfidence) {
             this.sampleDx = sampleDx;
             this.sampleDy = sampleDy;
             this.score = score;
             this.margin = margin;
             this.confidence = confidence;
             this.cycleError = cycleError;
+            this.analysisCycleError = analysisCycleError;
+            this.coarseCycleErrorAnalysis = coarseCycleErrorAnalysis;
+            this.refinementConfidence = refinementConfidence;
         }
     }
 
@@ -107,13 +116,24 @@ final class JpegFusion {
     private static final class OneWayRegistration {
         final float sampleDx;
         final float sampleDy;
+        final float coarseSampleDx;
+        final float coarseSampleDy;
         final float score;
         final float margin;
         final float confidence;
 
-        OneWayRegistration(float sampleDx, float sampleDy, float score, float margin, float confidence) {
+        OneWayRegistration(
+                float sampleDx,
+                float sampleDy,
+                float coarseSampleDx,
+                float coarseSampleDy,
+                float score,
+                float margin,
+                float confidence) {
             this.sampleDx = sampleDx;
             this.sampleDy = sampleDy;
+            this.coarseSampleDx = coarseSampleDx;
+            this.coarseSampleDy = coarseSampleDy;
             this.score = score;
             this.margin = margin;
             this.confidence = confidence;
@@ -124,24 +144,52 @@ final class JpegFusion {
         if (movingBitmap == null || referenceBitmap == null
                 || movingBitmap.getWidth() != referenceBitmap.getWidth()
                 || movingBitmap.getHeight() != referenceBitmap.getHeight()) {
-            return new Registration(0.0f, 0.0f, -1.0f, 0.0f, 0.0f, Float.POSITIVE_INFINITY);
+            return new Registration(
+                    0.0f, 0.0f, -1.0f, 0.0f, 0.0f,
+                    Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY,
+                    Float.POSITIVE_INFINITY, 0.0f);
         }
         OneWayRegistration forward = estimateOneWayRegistration(movingBitmap, referenceBitmap);
         OneWayRegistration backward = estimateOneWayRegistration(referenceBitmap, movingBitmap);
+
+        // V2.28: global registration is estimated on a <=384px analysis image.
+        // V2.27 incorrectly judged the bidirectional subpixel cycle in full-resolution
+        // pixels, multiplying harmless analysis-domain parabola asymmetry by the
+        // inverse downsample scale. A high-DR pair could therefore have excellent
+        // coarse forward/backward anchors yet globally zero every local SHORT seed.
+        // Keep coarse bidirectional consistency as the global authority. Refined
+        // subpixel cycle quality is measured in the analysis domain and only decides
+        // how much of the refinement is trusted; it cannot kill a valid coarse pair.
+        float analysisScale = registrationAnalysisScale(
+                movingBitmap.getWidth(), movingBitmap.getHeight());
         float cycleError = (float) Math.hypot(
                 forward.sampleDx + backward.sampleDx,
                 forward.sampleDy + backward.sampleDy);
-        float cycleConfidence = 1.0f - smoothstep(0.45f, 1.50f, cycleError);
+        float analysisCycleError = cycleError * analysisScale;
+        float coarseCycleErrorAnalysis = (float) Math.hypot(
+                (forward.coarseSampleDx + backward.coarseSampleDx) * analysisScale,
+                (forward.coarseSampleDy + backward.coarseSampleDy) * analysisScale);
+        float coarseCycleConfidence = 1.0f - smoothstep(
+                0.75f, 2.25f, coarseCycleErrorAnalysis);
+        float refinementConfidence = 1.0f - smoothstep(
+                0.45f, 1.50f, analysisCycleError);
         float bidirectional = (float) Math.sqrt(
                 Math.max(0.0f, forward.confidence * backward.confidence));
-        float confidence = bidirectional * cycleConfidence;
+        float confidence = bidirectional * coarseCycleConfidence;
+
+        float sampleDx = forward.coarseSampleDx
+                + refinementConfidence * (forward.sampleDx - forward.coarseSampleDx);
+        float sampleDy = forward.coarseSampleDy
+                + refinementConfidence * (forward.sampleDy - forward.coarseSampleDy);
         return new Registration(
-                forward.sampleDx,
-                forward.sampleDy,
-                forward.score,
-                forward.margin,
-                confidence,
-                cycleError);
+                sampleDx, sampleDy, forward.score, forward.margin, confidence,
+                cycleError, analysisCycleError, coarseCycleErrorAnalysis,
+                refinementConfidence);
+    }
+
+    private static float registrationAnalysisScale(int width, int height) {
+        final int maxDimension = 384;
+        return Math.min(1.0f, maxDimension / (float) Math.max(width, height));
     }
 
     private static OneWayRegistration estimateOneWayRegistration(
@@ -149,7 +197,7 @@ final class JpegFusion {
         final int width = referenceBitmap.getWidth();
         final int height = referenceBitmap.getHeight();
         final int maxDimension = 384;
-        float scale = Math.min(1.0f, maxDimension / (float) Math.max(width, height));
+        float scale = registrationAnalysisScale(width, height);
         int smallWidth = Math.max(48, Math.round(width * scale));
         int smallHeight = Math.max(36, Math.round(height * scale));
         Bitmap movingSmall = Bitmap.createScaledBitmap(movingBitmap, smallWidth, smallHeight, true);
@@ -204,7 +252,9 @@ final class JpegFusion {
             float confidence = quality * uniqueness * boundary;
             float invScale = 1.0f / scale;
             return new OneWayRegistration(
-                    subX * invScale, subY * invScale, bestScore, margin, confidence);
+                    subX * invScale, subY * invScale,
+                    bestX * invScale, bestY * invScale,
+                    bestScore, margin, confidence);
         } finally {
             if (movingSmall != movingBitmap) recycle(movingSmall);
             if (referenceSmall != referenceBitmap) recycle(referenceSmall);
@@ -757,10 +807,11 @@ final class JpegFusion {
         RuntimeLogger.event(
                 "CPU_STILL_REGISTRATION",
                 String.format(java.util.Locale.US,
-                        "sampleDx=%+.3f sampleDy=%+.3f score=%.4f margin=%.4f cycle=%.3f confidence=%.3f gain=%.3f/%.3f/%.3f",
+                        "sampleDx=%+.3f sampleDy=%+.3f score=%.4f margin=%.4f cycleFull=%.3f cycleAnalysis=%.3f coarseCycleAnalysis=%.3f refine=%.3f confidence=%.3f gain=%.3f/%.3f/%.3f",
                         registration.sampleDx, registration.sampleDy, registration.score,
-                        registration.margin, registration.cycleError, registration.confidence,
-                        appearanceGain.r, appearanceGain.g, appearanceGain.b));
+                        registration.margin, registration.cycleError, registration.analysisCycleError,
+                        registration.coarseCycleErrorAnalysis, registration.refinementConfidence,
+                        registration.confidence, appearanceGain.r, appearanceGain.g, appearanceGain.b));
 
         int width = shortBitmap.getWidth();
         int height = shortBitmap.getHeight();

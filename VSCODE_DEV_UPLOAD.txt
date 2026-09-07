@@ -1,15 +1,15 @@
-V1.4.11 V2.27 — SAFE VSCODE.DEV INDIVIDUAL-FILE UPLOAD
+V1.4.11 V2.28 — SAFE VSCODE.DEV INDIVIDUAL-FILE UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: 555f06179f078f2a08453abbd032c67845b6e293 (successful V2.26)
+Required direct parent / runtime authority: 6d19588bd1028c66d80609c9a9119de30df63f80 (successful V2.27)
 No backup requested or needed for this build.
 
 PERMANENT SAFETY RULE
 DO NOT upload an extracted app/, scripts/, .github/, or other parent folder over the repository. Upload/replace ONLY one individual file at a time in its exact existing destination folder.
 
-The V2.27 delivery ZIP is flat and uses the real destination BASENAME for every payload. In particular, the payload is named `build.gradle.kts` — no `app__` renaming is required.
+The V2.28 delivery ZIP is flat and uses the real destination BASENAME for every payload. `build.gradle.kts` is already named correctly.
 
-For each payload file below, open the exact destination folder in vscode.dev and upload/replace ONLY that file:
+Upload these 10 files one at a time:
 
 1. build.yml
    -> .github/workflows/build.yml
@@ -25,22 +25,18 @@ For each payload file below, open the exact destination folder in vscode.dev and
    -> VSCODE_DEV_UPLOAD.txt (repository root)
 7. build.gradle.kts
    -> app/build.gradle.kts
-8. hdr_display.frag
-   -> app/src/main/assets/shaders/hdr_display.frag
-9. CameraController.java
-   -> app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-10. HdrGlView.java
-    -> app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-11. JpegFusion.java
-    -> app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
-12. verify_orientation.py
+8. HdrGlView.java
+   -> app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+9. JpegFusion.java
+   -> app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
+10. verify_orientation.py
     -> scripts/verify_orientation.py
 
 Do not upload the ZIP itself.
-Do not upload unchanged NAFNet/model/protected sibling files.
+Do not upload unchanged shader, CameraController, NAFNet/model or other protected sibling files.
 
 BEFORE COMMIT
-Source Control must show exactly 12 tracked modifications, every one status [M], and ZERO [A] / [D]:
+Source Control must show exactly 10 tracked modifications, every one [M], and ZERO [A] / [D]:
 - .github/workflows/build.yml [M]
 - BUILD_WORKFLOW_COPY.yml [M]
 - PACKAGE_INFO.txt [M]
@@ -48,16 +44,14 @@ Source Control must show exactly 12 tracked modifications, every one status [M],
 - README.md [M]
 - VSCODE_DEV_UPLOAD.txt [M]
 - app/build.gradle.kts [M]
-- app/src/main/assets/shaders/hdr_display.frag [M]
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java [M]
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java [M]
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java [M]
 - scripts/verify_orientation.py [M]
 
-If the count is not exactly 12, if ANY file shows A/D, or if `build.gradle.kts` appears at repository root instead of under app/, STOP before committing.
+If the count is not exactly 10, if ANY file shows A/D, or if `build.gradle.kts` appears at repository root instead of under app/, STOP before committing.
 
 Suggested commit message:
-V1.4.11 V2.27 adaptive bracket, temporal body SNR and highlight rendering
+V1.4.11 V2.28 fix saved SHORT registration confidence and detail recovery
 
 Do not alter dev/main.
 Do not push an APK.

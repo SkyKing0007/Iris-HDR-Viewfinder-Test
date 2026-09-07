@@ -26,7 +26,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.27 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.28 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -56,7 +56,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.27 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.28 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -682,13 +682,59 @@ for detail_stops in (2.0, 3.0, 4.0, 5.0, 6.0):
     require(math.isclose(left, right, rel_tol=0.0, abs_tol=1e-9),
             "V2.27 detail/specular join lost C1 stop-domain continuity")
 
-# 038 / 042 / V2.27 - Exact successful V2.26 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.26' in workflow
-        and 'run-id: 34082370328' in workflow
-        and "authority='555f06179f078f2a08453abbd032c67845b6e293'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.26 Actions authority")
-require("authority='66b689922267396afa8b8cedf1ca848d1eabffcb'" not in workflow,
-        "V2.27 must not seed runtime from V2.25 after successful V2.26")
+# V2.28 visual-information acceptance regression. A flat/clipped LONG component is
+# not considered recovered merely because SHORT chroma appears. Once SHORT owns a
+# valid region, spatial luminance variation/rank from SHORT must survive the existing
+# whole-RGB V2.27 transfer with meaningful separation; a constant LONG plateau fails.
+def srgb_channel_to_linear_math(v):
+    x = v / 255.0
+    return x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4
+
+def luma_math(rgb):
+    return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+
+def v227_short_detail_luma(rgb8, scalar_gain=6.25, brightness_ev=0.8,
+                           gamma=1.35, ratio=6.25):
+    rgb = [srgb_channel_to_linear_math(v) * scalar_gain * (2.0 ** brightness_ev)
+           for v in rgb8]
+    y = luma_math(rgb)
+    if y > 1e-6:
+        toe = smoothstep_math(0.015, 0.090, y)
+        protect = 1.0 - smoothstep_math(0.45, 0.68, y)
+        target_y = y + 0.45 * toe * protect * y * (1.0 - max(0.0, min(1.0, y)))
+        scale = min(target_y / y, 1.0 / max(max(rgb), 1e-6))
+        rgb = [c * scale for c in rgb]
+    peak = max(rgb)
+    if peak > 0.70:
+        mapped_peak = map_peak_math(peak / (2.0 ** 0.0), ratio, 0.0)
+        scale = mapped_peak / peak
+        rgb = [c * scale for c in rgb]
+    y = luma_math(rgb)
+    if y > 1e-6:
+        mapped_y = gamma_safe_math(y, gamma)
+        scale = min(mapped_y / y, 1.0 / max(max(rgb), 1e-6))
+        rgb = [c * scale for c in rgb]
+    return luma_math(rgb)
+
+structured_short = [(80, 120, 160), (100, 140, 180),
+                    (120, 160, 200), (140, 180, 220)]
+structured_output = [v227_short_detail_luma(v) for v in structured_short]
+require(all(b > a for a, b in zip(structured_output, structured_output[1:])),
+        "SHORT-owned spatial luminance rank must survive fused presentation")
+require(structured_output[-1] - structured_output[0] > 0.05,
+        "SHORT-owned recovered detail collapsed toward a flat LONG-like plateau")
+flat_long_output = [0.225] * len(structured_output)
+require(max(flat_long_output) - min(flat_long_output) == 0.0
+        and structured_output[-1] - structured_output[0] > 0.05,
+        "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
+
+# 038 / 042 / V2.28 - Exact successful V2.27 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.27' in workflow
+        and 'run-id: 34143712210' in workflow
+        and "authority='6d19588bd1028c66d80609c9a9119de30df63f80'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.27 Actions authority")
+require("authority='555f06179f078f2a08453abbd032c67845b6e293'" not in workflow,
+        "V2.28 must not seed runtime from V2.26 after successful V2.27")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1214,8 +1260,16 @@ require(not (ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrF
 require('static Registration estimateRegistration(Bitmap movingBitmap, Bitmap referenceBitmap)' in fusion
         and 'estimateOneWayRegistration(movingBitmap, referenceBitmap)' in fusion
         and 'estimateOneWayRegistration(referenceBitmap, movingBitmap)' in fusion
-        and 'cycleConfidence = 1.0f - smoothstep(0.45f, 1.50f, cycleError)' in fusion,
-        "bidirectional global registration with cycle consistency is missing")
+        and 'registrationAnalysisScale(' in fusion
+        and 'float analysisCycleError = cycleError * analysisScale;' in fusion
+        and 'float coarseCycleConfidence = 1.0f - smoothstep(' in fusion
+        and '0.75f, 2.25f, coarseCycleErrorAnalysis' in fusion
+        and 'float refinementConfidence = 1.0f - smoothstep(' in fusion
+        and '0.45f, 1.50f, analysisCycleError' in fusion
+        and 'float confidence = bidirectional * coarseCycleConfidence;' in fusion,
+        "V2.28 bidirectional global registration must separate coarse authority from analysis-domain subpixel refinement")
+require('cycleConfidence = 1.0f - smoothstep(0.45f, 1.50f, cycleError)' not in fusion,
+        "V2.27 full-resolution subpixel cycle kill switch returned")
 require('static Bitmap alignLongToShort(Bitmap longBitmap, Registration registration)' in fusion
         and 'canvas.drawBitmap(longBitmap, matrix, paint);' in fusion,
         "byte-protected generic moving-frame alignment helper changed")
@@ -1238,6 +1292,11 @@ require('if (confidence < 0.28f)' in fusion
         and 'if (coherent >= 5 && rms <= 0.75f)' in fusion
         and 'if (disagreement > 1.0f) continue;' in fusion,
         "local residual field must fail closed and regularize only coherent camera motion")
+local_registration_slice = fusion[fusion.index('    static LocalRegistrationField estimateLocalRegistration('):
+                                  fusion.index('    private static LocalRegistrationField neutralLocalRegistration')]
+require(hashlib.sha256(local_registration_slice.encode()).hexdigest() ==
+        'ef711f360d9d5c65ad95af2f81a6862ecefbd3c555ac225faa87bf3cc5c7b525',
+        "V2.28 must not redesign the proven V2.27 local bidirectional residual field")
 require('GPU_STILL_LOCAL_REGISTRATION' in gl
         and 'uploadRgba8Texture(' in gl
         and 'localRegistration.rgba);' in gl
@@ -1439,9 +1498,22 @@ require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kt
 # saved-still registration/render orchestration and binary geodesic topology mechanics.
 saved_fusion_slice = gl[gl.index('        private byte[] fuseStillJpegs('):
                         gl.index('        private int[] countAtlasMasks(')]
-require(hashlib.sha256(saved_fusion_slice.encode()).hexdigest() ==
-        '6dad51348d2d8205c93cc307f528ac53292f860ce5646ead5e125ef07071f6db',
-        "successful V2.25 saved-still fusion/render orchestration changed")
+# V2.28 changes only the compact registration telemetry inside this orchestration
+# block. Normalize that one logger call and require every other orchestration byte to
+# remain identical to successful V2.27/V2.25 mechanics.
+reg_log_start = saved_fusion_slice.index(
+        '            RuntimeLogger.event(\n                    "GPU_STILL_REGISTRATION",')
+reg_log_end = saved_fusion_slice.index(
+        '            RuntimeLogger.event(\n                    "GPU_STILL_LOCAL_REGISTRATION",',
+        reg_log_start)
+saved_fusion_without_reg_log = (saved_fusion_slice[:reg_log_start]
+        + '            /* GPU_STILL_REGISTRATION_TELEMETRY */\n'
+        + saved_fusion_slice[reg_log_end:])
+require(hashlib.sha256(saved_fusion_without_reg_log.encode()).hexdigest() ==
+        '11729d7cb53461032f1351da701e7403d2e660882c8e27dae725e3c5087dd315',
+        "V2.28 changed saved-still orchestration outside the intended registration telemetry")
+require('cycleFull=%.3f cycleAnalysis=%.3f coarseCycleAnalysis=%.3f refine=%.3f confidence=%.3f' in saved_fusion_slice,
+        "V2.28 registration telemetry must expose full/analysis/coarse cycle and refinement confidence")
 v226_mode4 = hdr_shader[hdr_shader.index('    if (mode == 4) {'):
                           hdr_shader.index('    // IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_END')]
 require(hashlib.sha256(v226_mode4.encode()).hexdigest() ==
@@ -1462,9 +1534,15 @@ require('shortRecoveryValidityAt(uv)' not in v227_mode5_select
 fusion_provenance_prefix = fusion[
         fusion.index('    static byte[] fuse('):
         fusion.index('        float clampedBrightnessEv', fusion.index('    static byte[] fuse('))]
-require(hashlib.sha256(fusion_provenance_prefix.encode()).hexdigest() ==
-        '0b186fe57f767d97b1c928f227171206169492c2e5c89ec5f4defae59ce23e11',
-        "V2.25 CPU fallback registration/provenance changed outside intended tone correction")
+cpu_reg_log_start = fusion_provenance_prefix.index(
+        '        RuntimeLogger.event(\n                "CPU_STILL_REGISTRATION",')
+cpu_reg_log_end = fusion_provenance_prefix.index('\n\n        int width =', cpu_reg_log_start)
+fusion_provenance_without_reg_log = (fusion_provenance_prefix[:cpu_reg_log_start]
+        + '        /* CPU_STILL_REGISTRATION_TELEMETRY */'
+        + fusion_provenance_prefix[cpu_reg_log_end:])
+require(hashlib.sha256(fusion_provenance_without_reg_log.encode()).hexdigest() ==
+        '58bd480cb39f289424d1cd8ee069b65bc928b0e00015e3656e3f190a377494e2',
+        "V2.28 changed CPU fallback provenance outside intended registration telemetry")
 still_burst = camera[camera.index('    private void issueStillBurstLocked()'):
                      camera.index('    private final CameraCaptureSession.CaptureCallback stillCaptureCallback')]
 require(hashlib.sha256(still_burst.encode()).hexdigest() ==
@@ -1516,8 +1594,47 @@ registration_core = fusion[fusion.index('    static Registration estimateRegistr
 for token in ['estimateOneWayRegistration(movingBitmap, referenceBitmap)',
               'estimateOneWayRegistration(referenceBitmap, movingBitmap)',
               'forward.sampleDx + backward.sampleDx',
-              'forward.sampleDy + backward.sampleDy']:
-    require(token in registration_core, f"global registration matcher changed unexpectedly: {token}")
+              'forward.sampleDy + backward.sampleDy',
+              'forward.coarseSampleDx + backward.coarseSampleDx',
+              'forward.coarseSampleDy + backward.coarseSampleDy',
+              'analysisCycleError = cycleError * analysisScale',
+              'confidence = bidirectional * coarseCycleConfidence']:
+    require(token in registration_core, f"V2.28 global registration owner missing: {token}")
+require('float sampleDx = forward.coarseSampleDx' in registration_core
+        and '+ refinementConfidence * (forward.sampleDx - forward.coarseSampleDx);' in registration_core
+        and 'float sampleDy = forward.coarseSampleDy' in registration_core
+        and '+ refinementConfidence * (forward.sampleDy - forward.coarseSampleDy);' in registration_core,
+        "V2.28 bad subpixel refinement must fall back continuously toward the coarse anchor")
+
+# Exact 2026-09-07 backlit-window failure condition. The real pair had excellent
+# bidirectional coarse anchors at (0,0)/(0,0), but exposure-dependent parabolic
+# refinement produced ~1.36 full-resolution pixels of cycle residual on a 2048px
+# image. V2.27 judged that full-resolution value directly and collapsed confidence
+# below every shader seed threshold. V2.28 judges the residual in the <=384px domain.
+def registration_scale_v228(width, height):
+    return min(1.0, 384.0 / max(width, height))
+
+def global_registration_confidence_v228(width, height, refined_cycle_full,
+                                        coarse_cycle_analysis, bidirectional=1.0):
+    scale = registration_scale_v228(width, height)
+    analysis_cycle = refined_cycle_full * scale
+    coarse_conf = 1.0 - smoothstep_math(0.75, 2.25, coarse_cycle_analysis)
+    refine_conf = 1.0 - smoothstep_math(0.45, 1.50, analysis_cycle)
+    return bidirectional * coarse_conf, refine_conf, analysis_cycle
+
+old_window_confidence = 1.0 - smoothstep_math(0.45, 1.50, 1.36)
+new_window_confidence, new_window_refine, new_window_cycle = global_registration_confidence_v228(
+        1536, 2048, 1.36, 0.0, 1.0)
+require(old_window_confidence < 0.16,
+        "exact V2.27 window fixture must reproduce the historical global seed kill")
+require(new_window_cycle < 0.30 and new_window_confidence > 0.95 and new_window_refine > 0.95,
+        "V2.28 must retain a strong coarse-registered high-DR pair despite harmless scaled subpixel asymmetry")
+# Opposite regression: true coarse inconsistency remains a hard global failure.
+bad_coarse_confidence, _, _ = global_registration_confidence_v228(
+        1536, 2048, 0.4, 3.0, 1.0)
+require(bad_coarse_confidence < 0.01,
+        "V2.28 must still fail closed on genuinely inconsistent coarse bidirectional registration")
+
 
 # Global photographic body tone is tone reproduction only: black stays anchored,
 # body/midtones rise, and extra lift is zero before the 0.70 HDR shoulder.
@@ -1564,9 +1681,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 44' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.27"' in build_gradle,
-        "V2.27 version/build marker must be exact")
+require('versionCode = 45' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.28"' in build_gradle,
+        "V2.28 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -1950,12 +2067,12 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillJpegs(' not in service
         and 'fuseStillJpegs(' not in nafnet,
         "V2.24 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.26_to_V1.4.11-V2.27.forward.patch' in workflow
-        and 'V1.4.11-V2.27_to_V1.4.11-V2.26.rollback.patch' in workflow,
-        "V2.27 final artifact must export correctly named V2.26<->V2.27 patches")
+require('V1.4.11-V2.27_to_V1.4.11-V2.28.forward.patch' in workflow
+        and 'V1.4.11-V2.28_to_V1.4.11-V2.27.rollback.patch' in workflow,
+        "V2.28 final artifact must export correctly named V2.27<->V2.28 patches")
 require("if len(tracked) != 29:" in workflow
-        and "V1.4.11 V2.26 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "V1.4.11 V2.27 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.27 must preserve the 29-file V2.26 authority/candidate universe")
+        "V2.28 must preserve the 29-file V2.27 authority/candidate universe")
 
-print("V1.4.11 V2.27 REGRESSION PASS: successful V2.26 saved topology/registration, NAFNet/touch-AF/background/DNG ownership remain protected; AUTO bracket is independently solved from 1x..64x, low-DR pairs may provide confidence-gated whole-RGB temporal body SNR, preview-only ISP NR is split from NR-OFF still truth, and guaranteed-slope highlight tone plus gamma fade preserves recovered SHORT ordering")
+print("V1.4.11 V2.28 REGRESSION PASS: successful V2.27 adaptive bracket/SNR/tone and local geodesic registration remain protected; global coarse registration now survives analysis-scale subpixel asymmetry without bypassing local motion barriers, and SHORT-owned recovery must retain real spatial detail rather than color alone")
