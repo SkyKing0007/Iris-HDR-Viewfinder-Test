@@ -1,27 +1,27 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.27
+# Iris HDR Viewfinder Test V1.4.11 V2.28
 
-V2.27 is based on the exact successful V2.26 compiled candidate: commit `555f06179f078f2a08453abbd032c67845b6e293`, Actions run `34082370328`, artifact `10004124294`.
+V2.28 is based on the exact successful V2.27 compiled candidate: commit `6d19588bd1028c66d80609c9a9119de30df63f80`, Actions run `34143712210`, artifact `10026908607`.
 
-## What V2.27 corrects
+## What V2.28 corrects
 
-The V2.26 bright-window/chandelier/bathroom samples and the low-light closet samples isolate two different remaining problems under one AUTO architecture: valid SHORT highlight radiance was reaching the fused image but being compressed too aggressively near white, while low-dynamic-range scenes still wasted the second frame behind a forced bracket and then relied too heavily on digital brightness/gamma rescue.
+The V2.27 backlit-window sample isolated a saved-still registration-confidence failure rather than another exposure/tone failure. LONG was flat/white while SHORT retained blue sky, foliage and window detail, but the final FUSED JPEG remained a neutral LONG plateau because the global registration confidence collapsed before any SHORT recovery seed could form.
 
-V2.27 corrects the root owners instead of adding scene-specific thresholds:
+V2.28 corrects that root cause without reopening the V2.27 fusion/tone architecture:
 
-- **Adaptive 1x..64x bracket.** LONG body/SNR and SHORT highlight-headroom targets remain independent. The old universal 4x floor is removed, so low-DR scenes may converge toward an equal-exposure pair while high-DR scenes naturally retain a wide SHORT/LONG separation.
-- **Real two-frame body SNR when useful.** A near-equal, registered, radiometrically agreeing pair may average complete RGB with one conservative scalar weight. Motion/disagreement fails exactly to LONG. At a wide 4x HDR bracket SHORT body weight is zero.
-- **Binary HDR highlights stay protected.** V2.26 registration/effective-loss ownership and the successful geodesic topology remain. A proven highlight is still aligned SHORT RGB; temporal body averaging cannot become fractional highlight color ownership.
-- **Preview-only Camera2 denoise.** Live preview prefers `NOISE_REDUCTION_MODE_FAST` and may fall back to `HIGH_QUALITY` only when FAST is unavailable. HDR still source JPEGs remain NR-OFF; RAW/DNG truth is unchanged.
-- **Guaranteed highlight separation.** The V2.26 exponential shoulder is replaced by a universal stop-domain transfer with a guaranteed detail slope through 0.965 and a slope-continuous specular tail. Gamma fades to identity through recovered highlights so it cannot flatten SHORT detail afterward.
-- **SNR-aware AUTO presentation.** Weak/high-ISO physical evidence can no longer be hidden by simply reaching +1 EV / gamma 2.0. AUTO first uses the available physical pair; if evidence remains noisy, software rescue is restrained rather than exposing chroma noise.
-- **Existing NAFNet remains constrained cleanup.** Its model and structure-protection bytes are unchanged. V2.27 does not solve noise by increasing neural strength on fabric, hair, foliage, text or other coherent detail.
+- **Analysis-domain cycle consistency.** Global registration is solved on a <=384px analysis image. Subpixel forward/backward cycle error is now judged in that same analysis domain instead of incorrectly applying analysis-scale residuals to full-resolution pixel thresholds.
+- **Coarse anchor is global authority.** Strong bidirectional coarse registration can no longer be globally killed by exposure-dependent parabolic subpixel asymmetry. Genuine coarse inconsistency still fails closed.
+- **Subpixel refinement is soft.** If refined cycle quality is poor, the applied shift falls continuously back toward the coarse anchor instead of invalidating the pair.
+- **Local motion protection is unchanged.** The complete successful V2.27 bidirectional local residual-field method is byte-identical. Local motion/disocclusion barriers and the geodesic SHORT topology remain intact.
+- **SHORT visual detail is an acceptance condition.** A recovered region must preserve SHORT-supported luminance ordering/spatial variation through the existing V2.27 whole-RGB tone path; merely changing color while retaining a flat LONG plateau is insufficient.
 
 ## Protected architecture
 
-V2.26 saved-still registration/render orchestration, mode-4 geodesic topology, manual flicker math, clean-AE bootstrap, NAFNet/model, touch AF, background-safe processing, DNG handling, media writing and non-HDR shaders remain protected. The runtime change is exactly four files: `CameraController.java`, `HdrGlView.java`, `JpegFusion.java`, and `hdr_display.frag`.
+`hdr_display.frag`, `CameraController.java`, NAFNet/model, adaptive 1x..64x bracket, temporal body SNR, preview-only Camera2 NR, V2.27 highlight transfer/gamma fade, DNG, touch AF, background processing, media ownership and all non-registration runtime bytes are protected.
+
+The V2.28 runtime change is exactly two files: `JpegFusion.java` and `HdrGlView.java`.
 
 ## Build proof
 
-The successful V2.26 workflow remains exactly 15 steps. Java 17, Android SDK/API 37, Gradle 9.6.0, pinned glslang installation, reserved scan, exact GLSL compile, real project Java compile and full `:app:assembleDebug` step bodies are byte-identical to V2.26. Only authority/version/hash/allowlist/regression/output payloads change.
+The successful V2.27 workflow remains the verification-mechanics authority. Java 17, Android SDK/API 37, Gradle 9.6.0, pinned glslang installation, reserved-identifier scan, exact runtime GLSL compile, real project Java compile, full `:app:assembleDebug`, post-build invariance and artifact upload retain the same successful ordering/mechanics. Only authority/version/hash/allowlist/regression/output payloads change.
 
-V2.27 is **PREPARED / UPLOAD-READY only after final clean-extract replay**. It is not build-proven until its own GitHub Actions run succeeds.
+V2.28 is **PREPARED / UPLOAD-READY only after final clean-extract replay**. It is not build-proven until its own GitHub Actions run succeeds.

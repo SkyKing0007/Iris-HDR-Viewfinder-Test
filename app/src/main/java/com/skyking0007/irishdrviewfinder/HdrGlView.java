@@ -874,10 +874,12 @@ final class HdrGlView extends GLSurfaceView {
             RuntimeLogger.event(
                     "GPU_STILL_REGISTRATION",
                     String.format(java.util.Locale.US,
-                            "sampleDx=%+.3f sampleDy=%+.3f score=%.4f margin=%.4f cycle=%.3f confidence=%.3f gain=%.3f/%.3f/%.3f scalar=%.3f",
+                            "sampleDx=%+.3f sampleDy=%+.3f score=%.4f margin=%.4f cycleFull=%.3f cycleAnalysis=%.3f coarseCycleAnalysis=%.3f refine=%.3f confidence=%.3f gain=%.3f/%.3f/%.3f scalar=%.3f",
                             registration.sampleDx, registration.sampleDy, registration.score,
-                            registration.margin, registration.cycleError, registration.confidence,
-                            appearanceGain.r, appearanceGain.g, appearanceGain.b, scalarGain));
+                            registration.margin, registration.cycleError, registration.analysisCycleError,
+                            registration.coarseCycleErrorAnalysis, registration.refinementConfidence,
+                            registration.confidence, appearanceGain.r, appearanceGain.g,
+                            appearanceGain.b, scalarGain));
             RuntimeLogger.event(
                     "GPU_STILL_LOCAL_REGISTRATION",
                     String.format(java.util.Locale.US,
