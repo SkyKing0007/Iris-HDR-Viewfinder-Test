@@ -18,6 +18,7 @@ uniform float displayDehaze;
 uniform float displayMicroContrast;
 uniform float stillRegistrationConfidence;
 uniform float stillShortScalarGain;
+uniform vec2 stillGlobalShortOffsetPixels;
 uniform int haveLocalFlow;
 uniform vec2 stillImageSize;
 uniform float localFlowMaxPixels;
@@ -146,13 +147,14 @@ float stillLocalRegistrationConfidenceAt(vec2 sampleUv) {
 }
 
 vec2 stillShortUvAt(vec2 sampleUv) {
+    vec2 imageSize = max(stillImageSize, vec2(1.0));
+    vec2 globalUv = sampleUv + stillGlobalShortOffsetPixels / imageSize;
     if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) {
-        return clamp(sampleUv, vec2(0.0), vec2(1.0));
+        return clamp(globalUv, vec2(0.0), vec2(1.0));
     }
     vec4 flowValue = stillLocalFlowAt(sampleUv);
     vec2 residualPixels = (flowValue.rg * 2.0 - vec2(1.0)) * localFlowMaxPixels;
-    vec2 imageSize = max(stillImageSize, vec2(1.0));
-    return clamp(sampleUv + residualPixels / imageSize, vec2(0.0), vec2(1.0));
+    return clamp(globalUv + residualPixels / imageSize, vec2(0.0), vec2(1.0));
 }
 
 vec3 stillShortRgbAt(vec2 sampleUv) {

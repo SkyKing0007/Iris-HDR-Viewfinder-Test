@@ -30,7 +30,7 @@ final class CaptureSetSaver {
 
     private static final class CaptureData {
         TotalCaptureResult result;
-        byte[] jpegBytes;
+        RawFusion.RawFrame rawFrame;
         boolean rawSubmitted;
         boolean jpegSubmitted;
         boolean rawSaved;
@@ -42,6 +42,7 @@ final class CaptureSetSaver {
     private final CameraCharacteristics characteristics;
     private final String cameraId;
     private final String captureId;
+    private final int captureOrientationDegrees;
     private final int dngOrientation;
     private final float displayBrightnessEv;
     private final float displayGamma;
@@ -84,6 +85,7 @@ final class CaptureSetSaver {
         this.characteristics = characteristics;
         this.cameraId = cameraId;
         this.captureId = captureId;
+        this.captureOrientationDegrees = ((captureOrientationDegrees % 360) + 360) % 360;
         this.dngOrientation = dngOrientationForDegrees(captureOrientationDegrees);
         this.displayBrightnessEv = Math.max(-16.0f, Math.min(1.0f, displayBrightnessEv));
         this.displayGamma = Math.max(0.50f, Math.min(2.00f, displayGamma));
@@ -159,8 +161,19 @@ final class CaptureSetSaver {
 
         Image raw = pendingRaw.remove(timestamp);
         if (raw != null && !data.rawSubmitted) {
-            data.rawSubmitted = true;
-            submitRaw(label, data, raw);
+            try {
+                // V2.30 RAW fusion authority: copy the timestamp-matched sensor mosaic
+                // before DNG writing is allowed to close the Image. The compact copy is
+                // immutable production fusion input; HAL JPEG bytes are never consulted
+                // by the fusion owner.
+                data.rawFrame = RawFusion.copyFromImage(raw, characteristics, data.result);
+                data.rawSubmitted = true;
+                submitRaw(label, data, raw);
+            } catch (Throwable t) {
+                raw.close();
+                failLocked(t);
+                return;
+            }
         } else if (raw != null) {
             raw.close();
         }
@@ -168,7 +181,6 @@ final class CaptureSetSaver {
         byte[] jpeg = pendingJpeg.remove(timestamp);
         if (jpeg != null && !data.jpegSubmitted) {
             data.jpegSubmitted = true;
-            data.jpegBytes = jpeg;
             submitJpeg(label, data, jpeg);
         }
         maybeSubmitFusionLocked();
@@ -240,14 +252,14 @@ final class CaptureSetSaver {
 
     private void maybeSubmitFusionLocked() {
         if (terminal || fusionSubmitted) return;
-        if (shortData.jpegBytes == null || longData.jpegBytes == null
+        if (shortData.rawFrame == null || longData.rawFrame == null
                 || shortData.result == null || longData.result == null) {
             return;
         }
         fusionSubmitted = true;
-        byte[] shortJpeg = shortData.jpegBytes;
-        byte[] longJpeg = longData.jpegBytes;
-        double ratio = exposureRatio(shortData.result, longData.result);
+        RawFusion.RawFrame shortRaw = shortData.rawFrame;
+        RawFusion.RawFrame longRaw = longData.rawFrame;
+        double ratio = RawFusion.rawExposureRatio(shortRaw, longRaw);
         // V2.14 actual-result authority: never hide an inverted or unprovable pair
         // by clamping it to 1x. FUSED is forbidden unless capture metadata proves
         // that LONG effective exposure is at least SHORT effective exposure.
@@ -261,16 +273,16 @@ final class CaptureSetSaver {
         ratio = Math.min(65_536.0, ratio);
         if (stillFusionView == null) {
             failLocked(new IllegalStateException(
-                    "V2.9 GPU still fusion view unavailable; CPU HDR substitution is disabled"));
+                    "V2.30 GPU RAW still fusion view unavailable; CPU HDR substitution is disabled"));
             return;
         }
-        stillFusionView.fuseStillJpegs(
-                shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma,
-                displayDehaze, displayMicroContrast,
+        stillFusionView.fuseStillRaws(
+                shortRaw, longRaw, ratio, captureOrientationDegrees,
+                displayBrightnessEv, displayGamma, displayDehaze, displayMicroContrast,
                 (fused, error) -> {
                     if (error != null || fused == null) {
                         Throwable failure = error == null
-                                ? new IllegalStateException("V2.9 GPU still fusion returned no JPEG")
+                                ? new IllegalStateException("V2.30 GPU RAW still fusion returned no JPEG")
                                 : error;
                         RuntimeLogger.error("GPU_STILL_FUSION_REQUIRED", failure);
                         synchronized (CaptureSetSaver.this) {
@@ -279,6 +291,10 @@ final class CaptureSetSaver {
                         return;
                     }
                     synchronized (CaptureSetSaver.this) {
+                        // Fusion has consumed the immutable RAW copies. Release our
+                        // references promptly; DNG/JPEG saves remain independent.
+                        shortData.rawFrame = null;
+                        longData.rawFrame = null;
                         fusionBytesReady = true;
                         maybeNotifyBackgroundSafeLocked();
                     }
@@ -347,7 +363,7 @@ final class CaptureSetSaver {
                 JSONObject root = new JSONObject();
                 root.put("captureId", captureId);
                 root.put("cameraId", cameraId);
-                root.put("fusion", "V2.11 GPU-only scene-domain saved fusion + V2.12 adaptive presentation: LONG reference, source-supported registered SHORT recovery, no CPU HDR substitution");
+                root.put("fusion", "V2.30 RAW_SENSOR scene-domain saved fusion: LONG reference, RAW-derived registration, source-supported registered SHORT recovery, no JPEG fusion input");
                 root.put("short", resultJson(shortResult));
                 root.put("long", resultJson(longResult));
                 root.put("longToShortExposureProductRatio", exposureRatio(shortResult, longResult));
@@ -360,7 +376,7 @@ final class CaptureSetSaver {
                 JSONArray physicalIds = new JSONArray();
                 for (String id : characteristics.getPhysicalCameraIds()) physicalIds.put(id);
                 root.put("physicalCameraIds", physicalIds);
-                root.put("notes", "RAW/DNG files are diagnostic sensor references. FUSED_HDR.jpg is generated from the matched short/long HAL JPEG pair, not from DNG processing.");
+                root.put("notes", "FUSED_HDR.jpg is generated from the timestamp-matched SHORT/LONG RAW_SENSOR mosaics and RAW metadata. HAL JPEGs are saved references only and never feed fusion.");
                 byte[] json = root.toString(2).getBytes(StandardCharsets.UTF_8);
                 MediaStoreWriter.writeBytes(
                         context,
