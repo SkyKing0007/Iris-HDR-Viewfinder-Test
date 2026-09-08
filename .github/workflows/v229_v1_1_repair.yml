@@ -1,0 +1,110 @@
+name: V2.29 V1.1 exact Gradle-placement repair
+
+on:
+  push:
+    branches:
+      - v229-v1-1-repair-runner
+    paths:
+      - '.github/workflows/v229_v1_1_repair.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repair runner history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create exact V2.29 V1.1 two-parent repair commit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          production='experiment-v1.4.11-v2-brightness-4ev'
+          runner_branch='v229-v1-1-repair-runner'
+          authority='07d6259f1c2a5a0d9143b5c4dafd7d466090220c'
+          authority_tree='dfda60594a13abaa0bf943a9eeb71610d514c4a3'
+          failed='4b4706a4baebc6895cf9120b06e77db8391bc234'
+          failed_tree='7a6be7cfde47a8a3096ef35a348e12424efe6cdd'
+          expected_root_blob='fd4b88199ff5d5e066f958d055895f2e28196980'
+          expected_v229_app_blob='da84b1e88a33496d36dd54c9fcd97cdb962f7c33'
+          repair_workflow='.github/workflows/v229_v1_1_repair.yml'
+
+          test "$GITHUB_REF_NAME" = "$runner_branch"
+          test "$(git rev-parse HEAD^)" = "$failed"
+          test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
+          test "$(git rev-parse "$failed^{tree}")" = "$failed_tree"
+
+          runner_delta="$(git diff --name-only "$failed" HEAD)"
+          test "$runner_delta" = "$repair_workflow"
+
+          test "$(git rev-parse "$authority:build.gradle.kts")" = "$expected_root_blob"
+          test "$(git rev-parse "$failed:build.gradle.kts")" = "$expected_v229_app_blob"
+
+          idx="$RUNNER_TEMP/v229-v1-1-repair.index"
+          rm -f "$idx"
+          GIT_INDEX_FILE="$idx" git read-tree "$failed^{tree}"
+          GIT_INDEX_FILE="$idx" git update-index --cacheinfo 100644 "$expected_root_blob" build.gradle.kts
+          GIT_INDEX_FILE="$idx" git update-index --cacheinfo 100644 "$expected_v229_app_blob" app/build.gradle.kts
+          repaired_tree="$(GIT_INDEX_FILE="$idx" git write-tree)"
+
+          repair_delta="$(git diff --name-only "$failed^{tree}" "$repaired_tree" | LC_ALL=C sort)"
+          expected_repair_delta=$'app/build.gradle.kts\nbuild.gradle.kts'
+          test "$repair_delta" = "$expected_repair_delta"
+
+          runtime_delta="$(git diff --name-only "$authority^{tree}" "$repaired_tree" -- app/src | LC_ALL=C sort)"
+          expected_runtime_delta=$'app/src/main/assets/shaders/hdr_display.frag\napp/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java\napp/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java'
+          test "$runtime_delta" = "$expected_runtime_delta"
+
+          all_delta="$(git diff --name-only "$authority^{tree}" "$repaired_tree" | LC_ALL=C sort)"
+          expected_all_delta=$'.github/workflows/build.yml\nBUILD_WORKFLOW_COPY.yml\nPACKAGE_INFO.txt\nPACKAGE_MANIFEST_SHA256.txt\nREADME.md\nVSCODE_DEV_UPLOAD.txt\napp/build.gradle.kts\napp/src/main/assets/shaders/hdr_display.frag\napp/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java\napp/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java\nscripts/verify_orientation.py'
+          test "$all_delta" = "$expected_all_delta"
+
+          candidate="$RUNNER_TEMP/v229-v1-1-candidate"
+          rm -rf "$candidate"
+          mkdir -p "$candidate"
+          git archive "$repaired_tree" | tar -x -C "$candidate"
+
+          (
+            cd "$candidate"
+            cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
+            grep -Fq 'versionCode = 46' app/build.gradle.kts
+            grep -Fq 'versionName = "1.0-v1.4.11-v2.29"' app/build.gradle.kts
+            grep -Fq 'version "9.2.1"' build.gradle.kts
+            sha256sum -c PACKAGE_MANIFEST_SHA256.txt
+            IRIS_WORKFLOW_SYNTAX_ONLY=1 python3 scripts/verify_orientation.py
+          )
+
+          test "$(git rev-parse "$failed:.github/workflows/build.yml")" = "$(git rev-parse "$repaired_tree:.github/workflows/build.yml")"
+          test "$(git rev-parse "$failed:BUILD_WORKFLOW_COPY.yml")" = "$(git rev-parse "$repaired_tree:BUILD_WORKFLOW_COPY.yml")"
+          test "$(git rev-parse "$failed:app/src/main/assets/shaders/hdr_display.frag")" = "$(git rev-parse "$repaired_tree:app/src/main/assets/shaders/hdr_display.frag")"
+          test "$(git rev-parse "$failed:app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java")" = "$(git rev-parse "$repaired_tree:app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java")"
+          test "$(git rev-parse "$failed:app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java")" = "$(git rev-parse "$repaired_tree:app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java")"
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          message=$'V1.4.11 V2.29 V1.1 repair app Gradle placement\n\nRestore root Gradle to successful V2.28 and place the intended V2.29 app Gradle file at app/build.gradle.kts without changing V2.29 runtime bytes.'
+          repair_commit="$(printf '%s\n' "$message" | git commit-tree "$repaired_tree" -p "$authority" -p "$failed")"
+
+          test "$(git rev-parse "$repair_commit^{tree}")" = "$repaired_tree"
+          test "$(git show -s --format=%P "$repair_commit")" = "$authority $failed"
+          git merge-base --is-ancestor "$failed" "$repair_commit"
+
+          git fetch --no-tags origin "+refs/heads/$production:refs/remotes/origin/$production"
+          test "$(git rev-parse "refs/remotes/origin/$production")" = "$failed"
+
+          git push origin "$repair_commit:refs/heads/$production"
+
+          echo "V1.4.11 V2.29 V1.1 REPAIR COMMIT: PASS"
+          echo "REPAIR COMMIT: $repair_commit"
+          echo "FIRST PARENT AUTHORITY: $authority"
+          echo "SECOND PARENT FAILED V2.29: $failed"
+          echo "RUNTIME DELTA FROM FAILED V2.29: ZERO"
+          echo "BUILD WORKFLOW DELTA FROM FAILED V2.29: ZERO"
+          echo "NEXT: manually dispatch the existing V2.29 build workflow on $production"
