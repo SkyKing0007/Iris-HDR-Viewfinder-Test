@@ -1363,6 +1363,11 @@ require('JpegFusion.estimateAppearanceGain(' in gl
         and 'float scalarGain = median3(' in gl
         and 'physicalRatio=%.3f' in gl,
         "V2.31 RAW saved path must restore V2.28/V2.29 robust overlap-derived achromatic radiometric scale using RAW-derived proxies only")
+require(gl.count('private static float median3(float a, float b, float c)') == 1
+        and 'return a + b + c' in gl
+        and '- Math.max(a, Math.max(b, c))' in gl
+        and '- Math.min(a, Math.min(b, c))' in gl,
+        "V2.31 V1.1 javac regression: median3 helper must exist exactly once when overlap radiometry calls it")
 require('JpegFusion.estimateRegistration(longBitmap, shortBitmap)' not in gl,
         "V2.16 LONG-moving geometry direction survived into V2.17")
 require('final int maxDimension = 1024;' in fusion
@@ -1856,9 +1861,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 48' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.31"' in build_gradle,
-        "V2.31 version/build marker must be exact")
+require('versionCode = 49' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.31-v1.1"' in build_gradle,
+        "V2.31 V1.1 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2244,9 +2249,14 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillRaws(' not in service
         and 'fuseStillRaws(' not in nafnet,
         "V2.30 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.30_to_V1.4.11-V2.31.forward.patch' in workflow
-        and 'V1.4.11-V2.31_to_V1.4.11-V2.30.rollback.patch' in workflow,
-        "V2.31 final artifact must export correctly named V2.30<->V2.31 patches")
+require('V1.4.11-V2.30_to_V1.4.11-V2.31-V1.1.forward.patch' in workflow
+        and 'V1.4.11-V2.31-V1.1_to_V1.4.11-V2.30.rollback.patch' in workflow,
+        "V2.31 V1.1 final artifact must export correctly named V2.30<->V2.31 V1.1 patches")
+require("failed_v231='e6c1e4abab0101772cfe9a882b5c3de85b0fdc7b'" in workflow
+        and "failed_v231_tree='81f74beebddbf6837cd8741b93c3dee5eb4f4aa5'" in workflow
+        and 'test "$(git rev-parse HEAD^)" = "$failed_v231"' in workflow
+        and 'test "$(git rev-parse "$failed_v231^")" = "$authority"' in workflow,
+        "V2.31 V1.1 repair must prove exact failed V2.31 parent and successful V2.30 authority lineage")
 require("if len(tracked) != 31:" in workflow
         and "V1.4.11 V2.30 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "if len(tracked) != 33:" in workflow

@@ -1,4 +1,4 @@
-name: Build Iris HDR Viewfinder Test V1.4.11 V2.31
+name: Build Iris HDR Viewfinder Test V1.4.11 V2.31 V1.1
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: 34250645187
 
-      - name: Reconstruct exact V1.4.11 V2.30 authority and prove V1.4.11 V2.31 candidate before compilers
+      - name: Reconstruct exact V1.4.11 V2.30 authority and prove V1.4.11 V2.31 V1.1 repair candidate before compilers
         shell: bash
         run: |
           set -euo pipefail
@@ -46,13 +46,17 @@ jobs:
           authority_dir="$RUNNER_TEMP/v1411v230-authority-artifact"
           authority_src="$RUNNER_TEMP/v1411v230-authority-source"
 
+          failed_v231='e6c1e4abab0101772cfe9a882b5c3de85b0fdc7b'
+          failed_v231_tree='81f74beebddbf6837cd8741b93c3dee5eb4f4aa5'
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'experiment-v1.4.11-v2-brightness-4ev'
-          test "$(git rev-parse HEAD^)" = "$authority"
+          test "$(git rev-parse HEAD^)" = "$failed_v231"
+          test "$(git rev-parse "$failed_v231^{tree}")" = "$failed_v231_tree"
+          test "$(git rev-parse "$failed_v231^")" = "$authority"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
-          grep -Fq 'versionCode = 48' app/build.gradle.kts
-          grep -Fq 'versionName = "1.0-v1.4.11-v2.31"' app/build.gradle.kts
+          grep -Fq 'versionCode = 49' app/build.gradle.kts
+          grep -Fq 'versionName = "1.0-v1.4.11-v2.31-v1.1"' app/build.gradle.kts
           grep -Fq 'compileSdk = 37' app/build.gradle.kts
           grep -Fq 'minSdk = 29' app/build.gradle.kts
           grep -Fq 'targetSdk = 37' app/build.gradle.kts
@@ -158,7 +162,7 @@ jobs:
               parts = line.split('\t')
               actual[parts[-1]] = parts[0][0]
           if actual != expected_changes:
-              raise SystemExit(f'V1.4.11 V2.31 ALLOWLIST FAIL: actual={actual} expected={expected_changes}')
+              raise SystemExit(f'V1.4.11 V2.31 V1.1 ALLOWLIST FAIL: actual={actual} expected={expected_changes}')
 
           expected_tracked = [
               '.github/workflows/build.yml', '.gitignore', 'BUILD_WORKFLOW_COPY.yml',
@@ -192,16 +196,16 @@ jobs:
 
           files = sorted(p for p in Path('app/src').rglob('*') if p.is_file())
           if len(files) != 20:
-              raise SystemExit(f'V1.4.11 V2.31 RUNTIME FILE COUNT FAIL: {len(files)}')
+              raise SystemExit(f'V1.4.11 V2.31 V1.1 RUNTIME FILE COUNT FAIL: {len(files)}')
           rows=[]
           for p in files:
               b=p.read_bytes(); lines=b.count(b'\n') + (1 if b and not b.endswith(b'\n') else 0)
               rows.append(f"{hashlib.sha256(b).hexdigest()}\t{len(b)}\t{lines}\t{p.as_posix()}\n")
           manifest=''.join(rows).encode()
           digest=hashlib.sha256(manifest).hexdigest()
-          expected='29a924836f56d39984ebca4a50973e44b4df22006b2a28de80e4e1649085b8e2'
+          expected='cbe4cf549b6e198a95db93b5d14f3b535e861175e9ded10a401b5795bc248b69'
           if digest != expected:
-              raise SystemExit(f'V1.4.11 V2.31 RUNTIME MANIFEST FAIL: {digest} != {expected}')
+              raise SystemExit(f'V1.4.11 V2.31 V1.1 RUNTIME MANIFEST FAIL: {digest} != {expected}')
           Path('bootstrap-runtime-manifest.tsv').write_bytes(manifest)
 
           protected = {
@@ -223,7 +227,7 @@ jobs:
           for rel, sha in protected.items():
               got=hashlib.sha256(Path(rel).read_bytes()).hexdigest()
               if got != sha:
-                  raise SystemExit(f'V1.4.11 V2.31 PROTECTED RUNTIME FAIL: {rel} {got} != {sha}')
+                  raise SystemExit(f'V1.4.11 V2.31 V1.1 PROTECTED RUNTIME FAIL: {rel} {got} != {sha}')
 
           # Permanent exact regression from failed V2.13 run 33900980849.
           camera_text = Path('app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java').read_text()
@@ -233,7 +237,7 @@ jobs:
                   and 'this.shortP90Linear = shortP90Linear;' in gl_text
                   and 'percentileSorted(shortSorted, 0.90f),' in gl_text):
               raise SystemExit('REGRESSION FAIL 092: CameraController shortP90Linear consumer has no SceneStats P90 producer')
-          print(f'V1.4.11 V2.31 MINIMUM CANDIDATE PASS: changed={len(actual)} runtime=20 digest={digest} protected={len(protected)}/{len(protected)}')
+          print(f'V1.4.11 V2.31 V1.1 MINIMUM CANDIDATE PASS: changed={len(actual)} runtime=20 digest={digest} protected={len(protected)}/{len(protected)}')
           PY
 
           # Canonical forward/rollback patches remain full-index binary Git patches.
@@ -270,10 +274,10 @@ jobs:
           cmp -s "$RUNNER_TEMP/forward-text-7.patch" "$RUNNER_TEMP/forward-text-40.patch"
           cmp -s "$RUNNER_TEMP/rollback-text-7.patch" "$RUNNER_TEMP/rollback-text-12.patch"
           cmp -s "$RUNNER_TEMP/rollback-text-7.patch" "$RUNNER_TEMP/rollback-text-40.patch"
-          cp "$RUNNER_TEMP/forward-7.patch" "$RUNNER_TEMP/V1.4.11-V2.30_to_V1.4.11-V2.31.forward.patch"
-          cp "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/V1.4.11-V2.31_to_V1.4.11-V2.30.rollback.patch"
+          cp "$RUNNER_TEMP/forward-7.patch" "$RUNNER_TEMP/V1.4.11-V2.30_to_V1.4.11-V2.31-V1.1.forward.patch"
+          cp "$RUNNER_TEMP/rollback-7.patch" "$RUNNER_TEMP/V1.4.11-V2.31-V1.1_to_V1.4.11-V2.30.rollback.patch"
 
-          python3 - "$authority_src" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/V1.4.11-V2.30_to_V1.4.11-V2.31.forward.patch" "$RUNNER_TEMP/V1.4.11-V2.31_to_V1.4.11-V2.30.rollback.patch" "$RUNNER_TEMP/forward-text-7.patch" "$RUNNER_TEMP/rollback-text-7.patch" "$model_rel" <<'PY'
+          python3 - "$authority_src" "$GITHUB_WORKSPACE" "$RUNNER_TEMP/V1.4.11-V2.30_to_V1.4.11-V2.31-V1.1.forward.patch" "$RUNNER_TEMP/V1.4.11-V2.31-V1.1_to_V1.4.11-V2.30.rollback.patch" "$RUNNER_TEMP/forward-text-7.patch" "$RUNNER_TEMP/rollback-text-7.patch" "$model_rel" <<'PY'
           from pathlib import Path
           import hashlib, shutil, subprocess, sys, tempfile
           authority, candidate, forward, rollback, forward_text, rollback_text = map(Path, sys.argv[1:7])
@@ -373,7 +377,7 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:compileDebugJavaWithJavac
 
-      - name: Replay V1.4.11 V2.31 runtime regressions on compiler-tested candidate
+      - name: Replay V1.4.11 V2.31 V1.1 runtime regressions on compiler-tested candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -384,7 +388,7 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
-      - name: Post-build invariance and freeze compiled V1.4.11 V2.31 candidate
+      - name: Post-build invariance and freeze compiled V1.4.11 V2.31 V1.1 candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -397,10 +401,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, subprocess
-          expected_runtime='29a924836f56d39984ebca4a50973e44b4df22006b2a28de80e4e1649085b8e2'
+          expected_runtime='cbe4cf549b6e198a95db93b5d14f3b535e861175e9ded10a401b5795bc248b69'
           # Permanent exact regression from failed V2.13 V1.1 run 33903152566:
           # post-build runtime expectation must equal the compiler-tested bootstrap digest.
-          if expected_runtime != '29a924836f56d39984ebca4a50973e44b4df22006b2a28de80e4e1649085b8e2':
+          if expected_runtime != 'cbe4cf549b6e198a95db93b5d14f3b535e861175e9ded10a401b5795bc248b69':
               raise SystemExit('REGRESSION FAIL 093: stale post-build runtime digest returned')
           files=sorted(p for p in Path('app/src').rglob('*') if p.is_file())
           rows=[]
@@ -447,13 +451,13 @@ jobs:
           unzip -lv "${apks[0]}" assets/nafnet_sidd_width32_fp16.tflite | awk '$8=="assets/nafnet_sidd_width32_fp16.tflite" {found=1; if ($1 != 62454048 || $2 != "Stored" || $3 != 62454048) exit 1} END {if (!found) exit 1}'
           echo 'V2.31 APK MODEL PACKAGING: PASS'
           mkdir -p output
-          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-debug.apk
-          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-source-candidate.tar "$GITHUB_SHA"
+          cp "${apks[0]}" output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-V1.1-debug.apk
+          git archive --format=tar --output=output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-V1.1-source-candidate.tar "$GITHUB_SHA"
           printf '%s\n' "$GITHUB_SHA" > output/SOURCE_COMMIT.txt
           cp compiled-runtime-manifest.tsv output/RUNTIME_SOURCE_MANIFEST.tsv
           cp compiled-repository-manifest.tsv output/REPOSITORY_SOURCE_MANIFEST.tsv
-          cp "$RUNNER_TEMP/V1.4.11-V2.30_to_V1.4.11-V2.31.forward.patch" output/V1.4.11-V2.30_to_V1.4.11-V2.31.forward.patch
-          cp "$RUNNER_TEMP/V1.4.11-V2.31_to_V1.4.11-V2.30.rollback.patch" output/V1.4.11-V2.31_to_V1.4.11-V2.30.rollback.patch
+          cp "$RUNNER_TEMP/V1.4.11-V2.30_to_V1.4.11-V2.31-V1.1.forward.patch" output/V1.4.11-V2.30_to_V1.4.11-V2.31-V1.1.forward.patch
+          cp "$RUNNER_TEMP/V1.4.11-V2.31-V1.1_to_V1.4.11-V2.30.rollback.patch" output/V1.4.11-V2.31-V1.1_to_V1.4.11-V2.30.rollback.patch
           cp "$RUNNER_TEMP/FORWARD_PATCH_SHA256.txt" output/FORWARD_PATCH_SHA256.txt
           cp "$RUNNER_TEMP/ROLLBACK_PATCH_SHA256.txt" output/ROLLBACK_PATCH_SHA256.txt
           cat > output/REGRESSIONS.txt <<'REGRESSIONS'
@@ -677,19 +681,20 @@ jobs:
           218 - Exact V2.29 bathroom continuation: a strong sky seed may propagate through moderately flattened connected house/siding/tree exterior structure; strict seed/geometry barriers remain, but the former 0.30 domain and 0.16 final re-test may not leave disconnected LONG holes.
           219 - V2.31 bathroom completion preserves binary whole-RGB source truth: broadened connected recovery may never introduce fractional/per-channel LONG-SHORT chroma mixing or path-propagated final warps.
           220 - V2.31 GPU lifetime invariant: one sequential RAW input texture, one shading map texture, and the inherited short/long/presentation RGBA8 carriers are reused; no second simultaneous RAW pair or new persistent full-resolution RGB scratch may return.
+          221 - V2.31 V1.1 javac regression: any median3(...) overlap-radiometry call must retain exactly one in-scope private static median3(float,float,float) helper; missing helper must fail pre-compiler semantic verification.
           REGRESSIONS
-          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-debug.apk \
-                    output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-source-candidate.tar \
+          sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-V1.1-debug.apk \
+                    output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-V1.1-source-candidate.tar \
                     output/RUNTIME_SOURCE_MANIFEST.tsv \
                     output/REPOSITORY_SOURCE_MANIFEST.tsv \
-                    output/V1.4.11-V2.30_to_V1.4.11-V2.31.forward.patch \
-                    output/V1.4.11-V2.31_to_V1.4.11-V2.30.rollback.patch \
+                    output/V1.4.11-V2.30_to_V1.4.11-V2.31-V1.1.forward.patch \
+                    output/V1.4.11-V2.31-V1.1_to_V1.4.11-V2.30.rollback.patch \
                     output/REGRESSIONS.txt | tee output/SHA256SUMS.txt
 
-      - name: Upload compiled V1.4.11 V2.31 candidate artifact
+      - name: Upload compiled V1.4.11 V2.31 V1.1 candidate artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.31
+          name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-V1.1
           path: output/
           if-no-files-found: error
           retention-days: 14

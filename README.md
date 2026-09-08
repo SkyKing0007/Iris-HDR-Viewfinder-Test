@@ -1,8 +1,12 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.31
+# Iris HDR Viewfinder Test V1.4.11 V2.31 V1.1
 
 V2.31 continues from the exact successful V2.30 compiled candidate, commit `3d11f41dc4ec6989b925ac117ff86fd49b1b079d`, tree `4fd09b02019f72c1acc5f3bcb6cb6691c751970e`, Actions run `34250645187`, artifact `10065909599`.
 
 V2.30 passed the real GLSL/Java/full Android build but was rejected on device. The supplied capture exposed two exact runtime failures: integer `GL_R16UI` RAW samples were normalized against black/white values that Java had incorrectly divided by 65535, producing a nearly uniform purple fused image; and a bright-window scene captured SHORT and LONG at the same approximately 1/120 ISO50 setting, leaving a 0EV pair with no physical HDR information.
+
+## V2.31 V1.1 compiler repair
+
+The first V2.31 commit (`e6c1e4abab0101772cfe9a882b5c3de85b0fdc7b`) failed Actions run `34270364791` in real javac because `HdrGlView` called `median3(float,float,float)` without retaining the helper. V1.1 restores that single helper and adds a permanent semantic regression requiring the call and helper to coexist. The V2.31 RAW reconstruction, HDR acquisition policy, bathroom connected recovery, chroma/moire correction, registration/source ownership, NAFNet integration and protected runtime files are otherwise unchanged.
 
 ## V2.31 RAW reconstruction before proven fusion
 
@@ -40,6 +44,6 @@ V2.29 could recover the obviously lost sky while still leaving moderately flatte
 
 V2.30 -> V2.31 runtime changes are exactly six files: `hdr_display.frag`, new `raw_chroma_dealias.frag`, new `raw_preprocess.frag`, `raw_reconstruct.frag`, `CameraController.java`, and `HdrGlView.java`. Build/verification changes are exactly `.github/workflows/build.yml`, `BUILD_WORKFLOW_COPY.yml`, `app/build.gradle.kts`, and `scripts/verify_orientation.py`. Delivery-document changes are exactly this README, `PACKAGE_INFO.txt`, `PACKAGE_MANIFEST_SHA256.txt`, and `VSCODE_DEV_UPLOAD.txt`.
 
-The candidate runtime universe is exactly 20 `app/src` files with manifest digest `29a924836f56d39984ebca4a50973e44b4df22006b2a28de80e4e1649085b8e2`.
+The candidate runtime universe is exactly 20 `app/src` files with manifest digest `cbe4cf549b6e198a95db93b5d14f3b535e861175e9ded10a401b5795bc248b69`.
 
-The successful V2.29-derived 15-step Actions procedure remains verification-mechanics authority. Local reserved-identifier and semantic/regression checks pass; deterministic patch and final clean-extract proofs are sealed with the handoff. The pinned real GLSL compiler, real project Java compiler and full `:app:assembleDebug` remain authoritative GitHub Actions gates, so this handoff is upload-ready rather than build-proven until V2.31 Actions succeeds.
+The successful V2.29-derived 15-step Actions procedure remains verification-mechanics authority. Local reserved-identifier and semantic/regression checks pass; deterministic patch and final clean-extract proofs are sealed with the handoff. The pinned real GLSL compiler, real project Java compiler and full `:app:assembleDebug` remain authoritative GitHub Actions gates, so this handoff is upload-ready rather than build-proven until V2.31 V1.1 Actions succeeds.

@@ -1468,6 +1468,12 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, filter);
         }
 
+        private static float median3(float a, float b, float c) {
+            return a + b + c
+                    - Math.max(a, Math.max(b, c))
+                    - Math.min(a, Math.min(b, c));
+        }
+
         private void bindQuad() {
             vertexBuffer.position(0);
             displayUvBuffer.position(0);

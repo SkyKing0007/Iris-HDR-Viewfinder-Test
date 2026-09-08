@@ -1,4 +1,4 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.31 — RAW PARITY / HIGH-DR / CHROMA-MOIRE CORRECTION
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.31 V1.1 — JAVAC REPAIR / RAW PARITY / HIGH-DR / CHROMA-MOIRE
 
 STATUS
 PREPARED / UPLOAD-READY only after the final clean-extract proof described below passes.
@@ -8,8 +8,8 @@ No backup requested or created. No source commit or push is performed by this ha
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 48
-Target versionName: 1.0-v1.4.11-v2.31
+Target versionCode: 49
+Target versionName: 1.0-v1.4.11-v2.31-v1.1
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL ACTIONS COMPILED CANDIDATE
@@ -30,6 +30,15 @@ V2.30 is compiler/build successful but device-runtime rejected. The supplied cap
 1. GL_R16UI returned integer RAW codes while Java scaled black/white by 1/65535, saturating reconstruction and producing the nearly uniform purple FUSED_HDR.
 2. AUTO physically captured SHORT and LONG at the same approximately 1/120 ISO50 setting in a bright-window/high-DR scene, yielding a 1.00x / 0EV pair with no real HDR acquisition.
 These conditions are permanent V2.31 regressions and V2.30 remains the exact byte authority only; V2.28/V2.29 successful fusion behavior is the semantic authority described below.
+
+
+V2.31 V1.1 COMPILER-REPAIR AUTHORITY
+Failed V2.31 commit: e6c1e4abab0101772cfe9a882b5c3de85b0fdc7b
+Failed V2.31 tree: 81f74beebddbf6837cd8741b93c3dee5eb4f4aa5
+Failed Actions run: 34270364791
+Exact javac failure: HdrGlView.java called median3(float,float,float) but the helper was absent.
+Repair: restore exactly one private static median3 helper and add a permanent pre-compiler regression requiring call+helper coexistence.
+No RAW math, fusion ownership, HDR policy, chroma/moire algorithm, JpegFusion, RawFusion, CaptureSetSaver, NAFNet model, or protected runtime behavior is changed by V1.1.
 
 VERIFICATION-MECHANICS AUTHORITY
 Exact successful V2.29-derived 15-step procedure, inherited through successful V2.30 Actions run 34250645187. Authority reconstruction, deterministic full-index forward/rollback proof, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, reserved-identifier scan, real GLSL compile, real project Java compile, regression replay, full :app:assembleDebug, post-build invariance, exactly-one-APK proof and deterministic artifact export retain the proven ordering.
@@ -111,7 +120,7 @@ TOTAL EXPECTED V2.30 -> V2.31 TRACKED CHANGESET — EXACTLY 14 PATHS
 Runtime: 6. Infrastructure: 4. Delivery documents: 4.
 Candidate tracked universe: exactly 33 files.
 Runtime universe: exactly 20 app/src files.
-V2.31 runtime manifest digest: 29a924836f56d39984ebca4a50973e44b4df22006b2a28de80e4e1649085b8e2
+V2.31 V1.1 runtime manifest digest: cbe4cf549b6e198a95db93b5d14f3b535e861175e9ded10a401b5795bc248b69
 
 LOCAL VERIFICATION STATUS BEFORE FINAL ZIP SEAL
 - Exact V2.30 Actions artifact/source candidate and protected runtime authority: PASS; artifact ZIP SHA-256 3522348db40ef43e19a73c58778026219ca76c89195c452e3736195e10c1b6a6 and compiled-candidate tree 4fd09b02019f72c1acc5f3bcb6cb6691c751970e are pinned.
@@ -128,4 +137,4 @@ REAL PINNED GLSL COMPILE: NOT RUN locally; the exact package glslang-tools=15.1.
 REAL KOTLIN COMPILE: N/A.
 REAL PROJECT JAVA COMPILE: NOT RUN locally; mandatory Actions gate.
 FULL ANDROID :app:assembleDebug: NOT RUN locally; mandatory Actions gate.
-FINAL ACTIONS AUTHORITY: successful V2.30 run 34250645187 remains the last successful compiled authority until V2.31 passes.
+FINAL ACTIONS AUTHORITY: successful V2.30 run 34250645187 remains the last successful compiled authority until V2.31 V1.1 passes.
