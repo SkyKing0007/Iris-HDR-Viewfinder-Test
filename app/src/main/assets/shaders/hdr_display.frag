@@ -405,12 +405,28 @@ float longEffectiveLossAt(vec2 sampleUv) {
     // observability -- not highlight brightness -- the contextual gate.
     float observableContext = smoothstep(0.08, 0.20, max3(longRgb));
     // IRIS_V229_INFORMATION_LOSS_NOT_WHITE_GATED_END
+    // IRIS_V231_CONNECTED_EFFECTIVE_LOSS_COMPLETION_BEGIN
+    // V2.29 device evidence proved that the sky could seed recovery while moderately
+    // bright exterior house/siding/tree structure still stayed LONG-owned. Keep
+    // SHORT structure mandatory, but detect information dominance in both relative
+    // and absolute terms instead of requiring the old ~8-10% range advantage at
+    // every pixel. This remains luminance/structure evidence only; source ownership
+    // below is still complete binary RGB and remains connectivity/registration gated.
     float mediumStructure = smoothstep(0.004, 0.022, shortMediumRange);
-    float mediumDominance = smoothstep(
-        0.0020, 0.020, shortMediumRange - 1.10 * longMediumRange);
+    float mediumRelativeDominance = smoothstep(
+        1.03, 1.18, shortMediumRange / max(longMediumRange, 0.0025));
+    float mediumAbsoluteDominance = smoothstep(
+        0.0010, 0.012, shortMediumRange - longMediumRange);
+    float mediumDominance = max(
+        0.72 * mediumRelativeDominance, mediumAbsoluteDominance);
     float broadStructure = smoothstep(0.008, 0.050, shortBroadRange);
-    float broadDominance = smoothstep(
-        0.004, 0.040, shortBroadRange - 1.08 * longBroadRange);
+    float broadRelativeDominance = smoothstep(
+        1.02, 1.15, shortBroadRange / max(longBroadRange, 0.0040));
+    float broadAbsoluteDominance = smoothstep(
+        0.0020, 0.025, shortBroadRange - longBroadRange);
+    float broadDominance = max(
+        0.75 * broadRelativeDominance, broadAbsoluteDominance);
+    // IRIS_V231_CONNECTED_EFFECTIVE_LOSS_COMPLETION_END
 
     float shortY = max(mappedShortLinearLumaAt(sampleUv), 0.00001);
     float longY = max(longLinearLumaAt(sampleUv), 0.00001);
@@ -691,7 +707,11 @@ void main() {
             smoothstep(0.08, 0.30, seedStats.x) * smoothstep(2.0, 7.0, seedStats.y),
             smoothstep(0.22, 0.52, seedStats.z) * smoothstep(1.0, 4.0, seedStats.y));
         float seed = step(0.30, seedStrength);
-        float recoveryDomain = step(0.30, broadRecoveryDomainAt(uv));
+        // V2.31 bathroom regression: strict seeds remain unchanged, but a connected
+        // component may traverse moderately flattened exterior structure. The domain
+        // is not ownership by itself; mode 4 still enforces coherent geometry and mode
+        // 5 performs a full-resolution physical-loss check before selecting SHORT.
+        float recoveryDomain = step(0.16, broadRecoveryDomainAt(uv));
         vec2 localFlow = registrationNeighborhoodFlowAt(uv);
         vec2 seedFlow = mix(vec2(0.5), localFlow, seed);
         outColor = vec4(seed, recoveryDomain, seedFlow);
@@ -803,7 +823,11 @@ void main() {
         float connectedRecovery = step(0.50, support.r);
         float fullResolutionLoss = max(
             longLossRecoveryDomainAt(uv), shortRecoveryEvidenceAt(uv));
-        float shortOwns = connectedRecovery * step(0.16, fullResolutionLoss);
+        // V2.31 completes the connected exterior component at native resolution.
+        // The V2.29 0.16 re-test left house/siding/tree holes even after a valid sky
+        // seed had proven the component. Connectivity + physical loss remain mandatory;
+        // this lower final threshold cannot grant SHORT ownership to unrelated body.
+        float shortOwns = connectedRecovery * step(0.08, fullResolutionLoss);
 
         // The globally registered SHORT bitmap is already in immutable LONG geometry.
         // Use the proven local residual field only where that field itself supplies it;

@@ -108,6 +108,15 @@ final class CameraController {
     private static final long AUTO_LIVE_UPDATE_MIN_NS = 80_000_000L;
     private static final double AUTO_BRACKET_MIN_RATIO = 1.0;
     private static final double AUTO_BRACKET_MAX_RATIO = 64.0;
+    // V2.31 high-dynamic-range acquisition guard. V2.27 may still collapse toward
+    // 1x for genuinely low-DR scenes, but a scene with a bright highlight population
+    // separated from a materially darker body must retain a real physical bracket.
+    // This is scene-statistical rather than object/semantic classification.
+    private static final double AUTO_HIGH_DR_MIN_RATIO = 8.0;
+    private static final float AUTO_HIGH_DR_HIGHLIGHT_P98 = 0.55f;
+    private static final float AUTO_HIGH_DR_NEAR_CLIP_FRACTION = 0.0015f;
+    private static final float AUTO_HIGH_DR_BODY_P50_MAX = 0.18f;
+    private static final double AUTO_HIGH_DR_MIN_SEPARATION_STOPS = 3.0;
     // V2.25 semantic ownership: LONG owns body/SNR, SHORT owns highlight headroom,
     // and the bracket is the resulting physical LONG/SHORT ratio. These robust
     // LONG percentiles deliberately ignore the top highlight tail instead of letting
@@ -1143,6 +1152,14 @@ final class CameraController {
                     "FROZEN pair cannot satisfy SHORT<=LONG within sensor bounds");
             return;
         }
+        if (!enforceFrozenHighDynamicRangeBracketLocked()) {
+            capturing = false;
+            listener.onStatus("Capture blocked: high-DR scene has no valid LONG bracket");
+            RuntimeLogger.event(
+                    "HDR_HIGH_DR_BRACKET_FAIL",
+                    "FROZEN high-DR pair cannot satisfy physical 3EV LONG/SHORT bracket");
+            return;
+        }
         capturePostRawBoost = autoHdrExposure ? autoPostRawBoost : DEFAULT_POST_RAW_BOOST;
         captureDisplayBrightnessEv = displayBrightnessEv;
         captureDisplayGamma = displayGamma;
@@ -1854,6 +1871,21 @@ final class CameraController {
         double targetShortProduct = Math.max(
                 1.0, stats.shortExposureProduct * shortHeadroomScale);
 
+        // V2.31 does not restore the old universal bracket floor. It adds a strict
+        // high-DR invariant only when the measured scene simultaneously contains
+        // real highlight pressure and a body several stops below that highlight.
+        // In that state SHORT may only stay the same or get darker, LONG may only
+        // stay the same or get brighter, and the solved target must preserve at
+        // least 3EV of physical sensor exposure. Low-DR scenes retain V2.27's 1x
+        // temporal-denoise capability.
+        boolean highDrGuard = isHighDynamicRangeSceneLocked(stats);
+        if (highDrGuard) {
+            targetLongProduct = Math.max(targetLongProduct, expectedLongProduct);
+            targetShortProduct = Math.min(targetShortProduct, expectedShortProduct);
+            targetLongProduct = Math.max(
+                    targetLongProduct, targetShortProduct * AUTO_HIGH_DR_MIN_RATIO);
+        }
+
         // V2.27 removes the inherited 4x floor. LONG_BODY remains the body/SNR
         // authority and is never darkened to satisfy a bracket. SHORT_HEADROOM may
         // approach LONG in low-DR scenes but may never become the brighter exposure.
@@ -1862,7 +1894,7 @@ final class CameraController {
         targetShortProduct = Math.max(
                 targetShortProduct, targetLongProduct / AUTO_BRACKET_MAX_RATIO);
         double desiredRatio = Math.max(
-                AUTO_BRACKET_MIN_RATIO,
+                highDrGuard ? AUTO_HIGH_DR_MIN_RATIO : AUTO_BRACKET_MIN_RATIO,
                 Math.min(AUTO_BRACKET_MAX_RATIO,
                         targetLongProduct / Math.max(1.0, targetShortProduct)));
 
@@ -1894,7 +1926,7 @@ final class CameraController {
         autoLiveShortProduct = Math.max(
                 autoLiveShortProduct, autoLiveLongProduct / AUTO_BRACKET_MAX_RATIO);
         autoDesiredBracketRatio = Math.max(
-                AUTO_BRACKET_MIN_RATIO,
+                highDrGuard ? AUTO_HIGH_DR_MIN_RATIO : AUTO_BRACKET_MIN_RATIO,
                 Math.min(AUTO_BRACKET_MAX_RATIO,
                         autoLiveLongProduct / Math.max(1.0, autoLiveShortProduct)));
 
@@ -1913,13 +1945,13 @@ final class CameraController {
         RuntimeLogger.event(
                 "AUTO_SCENE_ADAPT",
                 String.format(Locale.US,
-                        "SHORT_HEADROOM p99=%.4f clip=%.4f scale=%.3fx err=%+.2fEV step=%+.2fEV; LONG_BODY bodyP50=%.4f bodyP75=%.4f bodyFrac=%.3f scale=%.3fx err=%+.2fEV step=%+.2fEV; targetRatio=%.2fx short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
+                        "SHORT_HEADROOM p99=%.4f clip=%.4f scale=%.3fx err=%+.2fEV step=%+.2fEV; LONG_BODY bodyP50=%.4f bodyP75=%.4f bodyFrac=%.3f scale=%.3fx err=%+.2fEV step=%+.2fEV; highDR=%s targetRatio=%.2fx short=%s ISO%d long=%s ISO%d bracket=%.2fEV flicker=%s",
                         stats.shortP99Linear, stats.shortNearClipFraction,
                         shortHeadroomScale, shortErrorEv, shortStepEv,
                         stats.longBodyP50Linear, stats.longBodyP75Linear,
                         stats.longBodyFraction,
                         longBodyScale, longErrorEv, longStepEv,
-                        desiredRatio,
+                        highDrGuard, desiredRatio,
                         exposureText(autoShortExposureNs), autoShortIso,
                         exposureText(autoLongExposureNs), autoLongIso,
                         bracketEv, flickerStatusLocked()));
@@ -2585,6 +2617,102 @@ final class CameraController {
                         + oldLongIso + " -> " + exposureText(autoLongExposureNs) + " ISO"
                         + autoLongIso + " to keep SHORT<=LONG");
         // IRIS_V229_LONG_PHYSICAL_SNR_BODY_END
+    }
+
+    private boolean isHighDynamicRangeSceneLocked(HdrGlView.SceneStats stats) {
+        if (stats == null) return false;
+        float highlight = Math.max(stats.longP98Linear, stats.shortP99Linear);
+        float body = Math.max(0.00025f, stats.longBodyP50Linear);
+        double separationStops = Math.log(
+                Math.max(0.0005f, highlight) / body) / Math.log(2.0);
+        boolean highlightPressure = stats.longP98Linear >= AUTO_HIGH_DR_HIGHLIGHT_P98
+                || stats.longNearClipFraction >= AUTO_HIGH_DR_NEAR_CLIP_FRACTION
+                || stats.shortNearClipFraction >= AUTO_HIGH_DR_NEAR_CLIP_FRACTION;
+        return highlightPressure
+                && stats.longBodyP50Linear <= AUTO_HIGH_DR_BODY_P50_MAX
+                && separationStops >= AUTO_HIGH_DR_MIN_SEPARATION_STOPS;
+    }
+
+    private ExposureSetting solveStillLongSnrSettingForProductLocked(
+            double minimumProduct, long preferredExposureNs) {
+        if (characteristics == null || !(minimumProduct > 0.0)) return null;
+        Range<Long> exposureRange = characteristics.get(
+                CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE);
+        Range<Integer> isoRange = characteristics.get(
+                CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE);
+        if (exposureRange == null || isoRange == null) return null;
+
+        int minIso = isoRange.getLower();
+        int maxIso = isoRange.getUpper();
+        long lower = exposureRange.getLower();
+        long upper = exposureRange.getUpper();
+        long period = effectiveFlickerPeriodNsLocked();
+        if (period > 0L) {
+            long firstPeriods = Math.max(1L, (lower + period - 1L) / period);
+            long lastPeriods = upper / period;
+            ExposureSetting best = null;
+            double bestScore = Double.POSITIVE_INFINITY;
+            for (long periods = firstPeriods; periods <= lastPeriods; periods++) {
+                long exposure = periods * period;
+                int iso = Math.max(minIso, (int) Math.ceil(
+                        minimumProduct / Math.max(1.0, exposure)));
+                if (iso > maxIso) continue;
+                double achieved = Math.max(1.0, (double) exposure * iso);
+                if (achieved + 0.5 < minimumProduct) continue;
+                double isoStops = Math.log(
+                        Math.max(1.0, iso / (double) Math.max(1, minIso))) / Math.log(2.0);
+                double overshootEv = Math.log(achieved / minimumProduct) / Math.log(2.0);
+                double shutterErrorEv = Math.abs(Math.log(
+                        exposure / (double) Math.max(1L, preferredExposureNs)) / Math.log(2.0));
+                // Physical SNR is primary: prefer the lowest ISO. At equal ISO, choose
+                // the closest exposure product, then minimize gratuitous shutter change.
+                double score = 10.0 * isoStops + overshootEv + 0.001 * shutterErrorEv;
+                if (score < bestScore) {
+                    bestScore = score;
+                    best = new ExposureSetting(exposure, iso);
+                }
+            }
+            if (best != null) return best;
+        }
+
+        long desiredExposure = clampExposure((long) Math.ceil(
+                minimumProduct / Math.max(1, minIso)));
+        desiredExposure = Math.max(lower, Math.min(upper, desiredExposure));
+        int iso = Math.max(minIso, (int) Math.ceil(
+                minimumProduct / Math.max(1.0, desiredExposure)));
+        if (iso > maxIso) return null;
+        return new ExposureSetting(desiredExposure, iso);
+    }
+
+    private boolean enforceFrozenHighDynamicRangeBracketLocked() {
+        if (!autoHdrExposure || !isHighDynamicRangeSceneLocked(latestSceneStats)) return true;
+
+        double shortProduct = Math.max(
+                1.0, (double) captureShortExposureNs * captureShortIso);
+        double longProduct = Math.max(
+                1.0, (double) captureLongExposureNs * captureLongIso);
+        double requiredLongProduct = shortProduct * AUTO_HIGH_DR_MIN_RATIO;
+        if (longProduct >= requiredLongProduct * 0.999) return true;
+
+        long oldLongExposure = captureLongExposureNs;
+        int oldLongIso = captureLongIso;
+        ExposureSetting protectedLong = solveStillLongSnrSettingForProductLocked(
+                requiredLongProduct, captureLongExposureNs);
+        if (protectedLong == null) return false;
+        captureLongExposureNs = Math.max(protectedLong.exposureNs, captureShortExposureNs);
+        captureLongIso = protectedLong.iso;
+        double correctedLongProduct = Math.max(
+                1.0, (double) captureLongExposureNs * captureLongIso);
+        double correctedRatio = correctedLongProduct / shortProduct;
+        RuntimeLogger.event(
+                "HDR_HIGH_DR_BRACKET_GUARD",
+                String.format(Locale.US,
+                        "high-DR LONG physical-SNR bracket %.2fx -> %.2fx; LONG %s ISO%d -> %s ISO%d; SHORT %s ISO%d",
+                        longProduct / shortProduct, correctedRatio,
+                        exposureText(oldLongExposure), oldLongIso,
+                        exposureText(captureLongExposureNs), captureLongIso,
+                        exposureText(captureShortExposureNs), captureShortIso));
+        return correctedRatio >= AUTO_HIGH_DR_MIN_RATIO * 0.999;
     }
 
     private boolean enforceFrozenExposureOrderingLocked() {

@@ -1,13 +1,13 @@
-V1.4.11 V2.30 — SAFE VSCODE.DEV INDIVIDUAL-FILE UPLOAD
+V1.4.11 V2.31 — SAFE VSCODE.DEV INDIVIDUAL-FILE UPLOAD
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required direct parent / runtime authority: ddcefd30a4f203f83c6b67d131f63b1533cc4d66 (successful V2.29)
+Required direct parent / runtime authority: 3d11f41dc4ec6989b925ac117ff86fd49b1b079d (successful V2.30 V1.1/V1.2 authority)
 No backup requested or created.
 
 PERMANENT SAFETY RULE
-DO NOT upload an extracted app/, scripts/, .github/, or other parent folder over the repository. Upload/replace ONLY one individual file at a time in its exact destination folder.
+DO NOT upload an extracted app/, scripts/, .github/, or other parent folder over the repository. vscode.dev may treat every overwritten file as dirty, and replacing a partial parent folder can also appear as sibling deletions. Upload/replace ONLY the individual payload file in its exact destination folder.
 
-The V2.30 delivery ZIP is flat and uses unique delivery names where duplicate basenames would otherwise collide. Follow the destination mapping below exactly.
+The V2.31 delivery ZIP is FLAT, matching the successful V2.29/V2.30 delivery procedure. Unique delivery names are used where duplicate basenames would otherwise collide.
 
 Upload these 14 files one at a time:
 
@@ -27,21 +27,21 @@ Upload these 14 files one at a time:
    -> app/build.gradle.kts
 8. hdr_display.frag
    -> app/src/main/assets/shaders/hdr_display.frag
-9. raw_reconstruct.frag
-   -> app/src/main/assets/shaders/raw_reconstruct.frag   [NEW FILE]
-10. CameraController.java
+9. raw_chroma_dealias.frag
+   -> app/src/main/assets/shaders/raw_chroma_dealias.frag   [NEW FILE]
+10. raw_preprocess.frag
+    -> app/src/main/assets/shaders/raw_preprocess.frag   [NEW FILE]
+11. raw_reconstruct.frag
+    -> app/src/main/assets/shaders/raw_reconstruct.frag
+12. CameraController.java
     -> app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-11. CaptureSetSaver.java
-    -> app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
-12. HdrGlView.java
+13. HdrGlView.java
     -> app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-13. RawFusion.java
-    -> app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java   [NEW FILE]
 14. verify_orientation.py
     -> scripts/verify_orientation.py
 
 Do not upload the ZIP itself.
-Do not alter JpegFusion.java, NafNetDenoiser.java, model, or other unchanged sibling files. CameraController.java is intentionally modified only to request the timestamp-matched lens-shading map for the two still requests.
+Do not upload unchanged JpegFusion.java, RawFusion.java, CaptureSetSaver.java, NafNetDenoiser.java, model, AndroidManifest.xml, verify_shaders.py, or any other protected sibling.
 
 BEFORE COMMIT
 Source Control must show exactly 14 tracked changes:
@@ -53,17 +53,17 @@ Source Control must show exactly 14 tracked changes:
 - VSCODE_DEV_UPLOAD.txt [M]
 - app/build.gradle.kts [M]
 - app/src/main/assets/shaders/hdr_display.frag [M]
-- app/src/main/assets/shaders/raw_reconstruct.frag [A]
+- app/src/main/assets/shaders/raw_chroma_dealias.frag [A]
+- app/src/main/assets/shaders/raw_preprocess.frag [A]
+- app/src/main/assets/shaders/raw_reconstruct.frag [M]
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java [M]
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java [M]
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java [M]
-- app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java [A]
 - scripts/verify_orientation.py [M]
 
-There must be ZERO other modified/added/deleted paths. The two intended [A] paths are raw_reconstruct.frag and RawFusion.java only. If anything else appears, STOP before committing.
+There must be ZERO other modified/added/deleted paths. The only intended [A] paths are raw_chroma_dealias.frag and raw_preprocess.frag. If anything else appears, STOP before committing.
 
 Suggested commit message:
-V1.4.11 V2.30 switch saved HDR fusion to RAW_SENSOR
+V1.4.11 V2.31 RAW HDR parity chroma moire and high-DR correction
 
 Do not alter dev/main.
 Do not push an APK.

@@ -1,63 +1,45 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.30
+# Iris HDR Viewfinder Test V1.4.11 V2.31
 
-V2.30 continues directly from the exact successful V2.29 compiled candidate: commit `ddcefd30a4f203f83c6b67d131f63b1533cc4d66`, Actions run `34183494359`, artifact `10039754784`.
+V2.31 continues from the exact successful V2.30 compiled candidate, commit `3d11f41dc4ec6989b925ac117ff86fd49b1b079d`, tree `4fd09b02019f72c1acc5f3bcb6cb6691c751970e`, Actions run `34250645187`, artifact `10065909599`.
 
-## What V2.30 changes
+V2.30 passed the real GLSL/Java/full Android build but was rejected on device. The supplied capture exposed two exact runtime failures: integer `GL_R16UI` RAW samples were normalized against black/white values that Java had incorrectly divided by 65535, producing a nearly uniform purple fused image; and a bright-window scene captured SHORT and LONG at the same approximately 1/120 ISO50 setting, leaving a 0EV pair with no physical HDR information.
 
-V2.29 still generated saved HDR from the matched SHORT/LONG **HAL JPEG** pair while simultaneously saving RAW/DNG only as diagnostic sensor references. V2.30 changes the saved-still fusion source authority to the actual timestamp-matched **SHORT/LONG RAW_SENSOR mosaics and RAW metadata**.
+## V2.31 RAW reconstruction before proven fusion
 
-The production saved path is now:
+Production fusion remains RAW-only: timestamp-matched SHORT/LONG `RAW_SENSOR` mosaics and their matched Camera2 metadata are the sole saved-fusion inputs. HAL JPEGs remain independent references only.
 
-`SHORT RAW_SENSOR + LONG RAW_SENSOR -> RAW normalization/reconstruction -> RAW-derived SHORT-to-LONG registration -> inherited V2.29 source selection/HDR tone -> FUSED_HDR.jpg`
+The RAW path is now staged:
 
-HAL JPEGs may still be saved as independent references, but they are not fusion inputs.
+`RAW R16UI -> sensor-code black/white + lens-shading preprocess -> edge-directed Bayer reconstruction -> luminance-preserving chroma de-alias -> V2.28/V2.29 registration/source ownership -> FUSED_HDR.jpg`
 
-### RAW lifetime and metadata ownership
+`raw_preprocess.frag` keeps RAW sample, black and white in identical sensor-code units, applies each frame's lens-shading map once in Bayer space, and carries the normalized sensor signal through an exact 16-bit fixed-point RGBA8 representation.
 
-- `CaptureSetSaver` copies each timestamp-matched RAW sensor plane before DNG writing is allowed to close the `Image`.
-- Each copied RAW observation retains its own sensor timestamp, dimensions/CFA arrangement, dynamic black/white information and physical exposure metadata.
-- Fusion exposure ratio is based on `SENSOR_EXPOSURE_TIME * SENSOR_SENSITIVITY`; post-RAW JPEG sensitivity boost is deliberately excluded.
-- Per-frame black/white levels remain local to each RAW observation.
-- The matched LONG white-balance gains and sensor-to-linear-sRGB transform are used as the common color owner for both reconstructed observations, preventing a source boundary from acquiring a different color transform.
-- `ColorSpaceTransform.getElement(column,row)` ordering is explicitly preserved.
-- Both still requests explicitly request the Camera2 lens-shading correction map. The matched `[R, G-even, G-odd, B]` map travels with each RAW and is applied in Bayer space before WB/demosaic.
+`raw_reconstruct.frag` uses bounded edge-directed green and diagonal selection plus green-difference R/B reconstruction. WB is applied only after structure reconstruction. LONG's matched WB/color transform remains the common color owner for both observations, and whole-RGB same-luminance gamut projection prevents one transformed channel from clipping independently into a pink/green bright-edge fringe.
 
-### RAW reconstruction and registration
+`raw_chroma_dealias.frag` filters only opponent chroma around the exact center luminance. It is aimed at Bayer false color, one-pixel colored bright-edge artifacts and chroma moire without blurring or replacing luminance detail.
 
-A new active `raw_reconstruct.frag` performs the sensor-domain handoff needed by saved fusion: black subtraction, white normalization, CFA reconstruction, common LONG-owned WB/color transform, and an RGB carrier for the existing saved-still HDR pipeline.
+The GPU path reuses one RAW input, one shading texture, and the inherited full-resolution SHORT/LONG/presentation carriers sequentially; no second simultaneous RAW pair or new persistent full-resolution RGB scratch is introduced.
 
-Registration is estimated from those RAW-derived reconstructions. The successful V2.29 `JpegFusion.java` registration mathematics remain byte-identical; only their input evidence changes from decoded HAL JPEGs to RAW-derived proxies.
+## V2.28/V2.29 fusion behavior remains authority
 
-LONG remains immutable output geometry. SHORT remains the only aligned auxiliary, with global and bounded local displacement applied only when SHORT is sampled.
+`JpegFusion.java` is byte-identical (`569754e8043928cf86b1f1d34f2ad6b2885e3bf7948789725d4c2092129d4782`). The proven bidirectional global registration, bounded local residual registration, immutable LONG geometry, SHORT-only displacement, binary whole-RGB source ownership and fail-closed motion/disocclusion behavior remain intact.
 
-## Protected V2.29 architecture
+V2.31 also restores the successful robust achromatic overlap-derived appearance scalar using RAW-derived proxies only. Physical exposure*ISO is fallback; no HAL JPEG and no independent RGB gain participates.
 
-V2.30 does not reopen capture exposure policy, live preview ownership, NAFNet, DNG publication, JpegFusion registration math, or the successful V2.29 connected-region/full-resolution source-selection and HDR tone topology. CameraController changes only by the two explicit still-request lens-shading metadata requests; the verifier removes those additions and requires the remaining successful V2.29 still-burst bytes to match exactly.
+## Real high-DR acquisition
 
-The V2.30 runtime change is exactly six files:
+Low-DR scenes may still converge toward 1x for temporal denoise. A scene with simultaneous highlight pressure, a materially darker body and at least roughly 3 stops of highlight/body separation is instead classified high-DR. Such a scene must retain at least an 8x / 3EV physical LONG/SHORT pair. SHORT cannot be brightened and LONG cannot be darkened to fake that requirement. The frozen still pair rechecks the invariant and raises LONG only, preferring physical integration/low ISO while respecting known 50/60Hz integer-cycle timing.
 
-- `app/src/main/assets/shaders/hdr_display.frag`
-- `app/src/main/assets/shaders/raw_reconstruct.frag` **(new)**
-- `app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java`
-- `app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java`
-- `app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java`
-- `app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java` **(new)**
+The exact V2.30 bright-window failure—SHORT=LONG around 1/120 ISO50—is a permanent regression fixture.
 
-The runtime universe is exactly 18 `app/src` files with manifest digest:
+## Bathroom / house / tree recovery
 
-`9e09b637209eba35e9d45a9ea0f6406ac8ae6e841d45200d795f04e6fb4e6d40`
+V2.29 could recover the obviously lost sky while still leaving moderately flattened house/siding/tree structure LONG-owned. V2.31 keeps the strict SHORT recovery seed unchanged, but permits the connected physical-loss domain and final native-resolution recheck to complete a proven exterior component when SHORT retains a modest real multi-scale structure advantage. Healthy near-equal body structure remains LONG-owned. Final ownership is still binary whole RGB, never a per-channel blend.
 
-## Verification status
+## Scope and verification
 
-The successful V2.29 procedure remains the verification-mechanics authority. Its 15-step ordering is preserved. The new active RAW reconstruction shader is added to the same pinned real GLSL compiler gate before the real Java compiler and full `:app:assembleDebug`.
+V2.30 -> V2.31 runtime changes are exactly six files: `hdr_display.frag`, new `raw_chroma_dealias.frag`, new `raw_preprocess.frag`, `raw_reconstruct.frag`, `CameraController.java`, and `HdrGlView.java`. Build/verification changes are exactly `.github/workflows/build.yml`, `BUILD_WORKFLOW_COPY.yml`, `app/build.gradle.kts`, and `scripts/verify_orientation.py`. Delivery-document changes are exactly this README, `PACKAGE_INFO.txt`, `PACKAGE_MANIFEST_SHA256.txt`, and `VSCODE_DEV_UPLOAD.txt`.
 
-Current local replay:
+The candidate runtime universe is exactly 20 `app/src` files with manifest digest `29a924836f56d39984ebca4a50973e44b4df22006b2a28de80e4e1649085b8e2`.
 
-- complete reserved-identifier scan: **PASS** on all 5 active shaders;
-- V2.30 RAW/JPEG ownership, radiometry, color-domain, geometry and inherited-regression suite: **PASS**;
-- deterministic full-index forward/rollback proof at `core.abbrev` 7/12/40 with fuzz=0 replay: **PASS**;
-- real pinned GLSL compile: **NOT RUN locally**;
-- real project Java compile: **NOT RUN locally**;
-- full Android assemble: **NOT RUN locally**.
-
-V2.30 is not build-proven until its own GitHub Actions run succeeds.
+The successful V2.29-derived 15-step Actions procedure remains verification-mechanics authority. Local reserved-identifier and semantic/regression checks pass; deterministic patch and final clean-extract proofs are sealed with the handoff. The pinned real GLSL compiler, real project Java compiler and full `:app:assembleDebug` remain authoritative GitHub Actions gates, so this handoff is upload-ready rather than build-proven until V2.31 Actions succeeds.

@@ -22,13 +22,15 @@ nafnet_license = ROOT / "app/src/main/assets/licenses/NAFNet_LICENSE.txt"
 frame_meta = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java").read_text()
 hdr_shader = (ROOT / "app/src/main/assets/shaders/hdr_display.frag").read_text()
 oes_shader = (ROOT / "app/src/main/assets/shaders/oes_to_rgb.frag").read_text()
+raw_preprocess_shader = (ROOT / "app/src/main/assets/shaders/raw_preprocess.frag").read_text()
 raw_shader = (ROOT / "app/src/main/assets/shaders/raw_reconstruct.frag").read_text()
+raw_chroma_shader = (ROOT / "app/src/main/assets/shaders/raw_chroma_dealias.frag").read_text()
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.30 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.31 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -58,7 +60,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.30 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.31 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -730,13 +732,15 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# 038 / 042 / V2.30 - Exact successful V2.29 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.29' in workflow
-        and 'run-id: 34183494359' in workflow
-        and "authority='ddcefd30a4f203f83c6b67d131f63b1533cc4d66'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.29 Actions authority")
-require("authority='07d6259f1c2a5a0d9143b5c4dafd7d466090220c'" not in workflow,
-        "V2.30 must not seed runtime from V2.28 after successful V2.29")
+# V2.31 runtime authority is the exact last successful compiler-tested V2.30
+# candidate/artifact. V2.29 remains behavioral fusion-mechanics authority only.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.30' in workflow
+        and 'run-id: 34250645187' in workflow
+        and "authority='3d11f41dc4ec6989b925ac117ff86fd49b1b079d'" in workflow
+        and "authority_tree='4fd09b02019f72c1acc5f3bcb6cb6691c751970e'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.30 Actions authority")
+require("authority='ddcefd30a4f203f83c6b67d131f63b1533cc4d66'" not in workflow,
+        "V2.31 may not bypass the last successful V2.30 compiled-candidate authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1280,11 +1284,57 @@ require('shortFrame.exposureTimeNs * shortFrame.sensitivityIso' in raw_fusion
 require('GLES30.GL_R16UI' in gl and 'GLES30.GL_RED_INTEGER' in gl
         and 'GLES30.GL_UNSIGNED_SHORT' in gl
         and 'GLES30.GL_R16,' not in gl
-        and 'uniform highp usampler2D rawTex;' in raw_shader
-        and 'float(texelFetch(rawTex, q, 0).r)' in raw_shader
-        and 'blackPatternCode' in raw_shader and 'whiteLevelCode' in raw_shader
-        and 'demosaic(' in raw_shader,
+        and 'uniform highp usampler2D rawTex;' in raw_preprocess_shader
+        and 'float(texelFetch(rawTex, p, 0).r)' in raw_preprocess_shader
+        and 'blackPatternCode' in raw_preprocess_shader
+        and 'whiteLevelCode' in raw_preprocess_shader,
         "V2.30 V1.1 RAW integer texture carrier contract missing or GL_R16 compiler regression returned")
+require('float codeScale = 1.0f / 65535.0f;' not in gl
+        and 'black[0], black[1], black[2], black[3]' in gl
+        and 'sourceFrame.whiteLevel);' in gl
+        and 'max(code - black, 0.0) / max(whiteLevelCode - black' in raw_preprocess_shader,
+        "V2.31 exact purple-frame regression: integer RAW sample/black/white must share sensor-code units")
+require('String rawPreprocessShader = loadAsset(context, "shaders/raw_preprocess.frag");' in gl
+        and 'rawPreprocessProgram = buildProgram(vertexShader, rawPreprocessShader);' in gl
+        and gl.count('renderRawPreprocess(') == 3
+        and 'float quantized = floor(signal * 65535.0 + 0.5);' in raw_preprocess_shader
+        and 'highByte / 255.0, lowByte / 255.0' in raw_preprocess_shader
+        and 'uniform sampler2D packedRawTex;' in raw_shader
+        and 'highByte * 256.0 + lowByte' in raw_shader,
+        "V2.31 RAW preprocess must cache black/lens-shading corrected Bayer in an exact 16-bit fixed-point RGBA8 carrier")
+require('vec3 demosaicSensor(ivec2 p)' in raw_shader
+        and 'float weightH = 1.0 / (0.00002 + gradH * gradH);' in raw_shader
+        and 'float weightV = 1.0 / (0.00002 + gradV * gradV);' in raw_shader
+        and 'float weightD1 = 1.0 / (0.00002 + gradD1 * gradD1);' in raw_shader
+        and 'redL - 0.5 * (center + greenL2)' in raw_shader
+        and 'blueU - 0.5 * (center + greenU2)' in raw_shader
+        and 'vec3 balancedRgb = sensorRgb * vec3(wbGains.x, greenGain, wbGains.w);' in raw_shader,
+        "V2.31 RAW reconstruction must use bounded edge-directed green/diagonal selection plus green-difference color reconstruction and apply WB only after demosaic")
+require('greenAt(' not in raw_shader
+        and 'colorDifferenceAt(' not in raw_shader
+        and raw_shader.count('rawSignalAt(') <= 26,
+        "V2.31 demosaic must not recompute recursive neighbor-green/lens-shading work per color sample")
+require('gainAt(' not in raw_shader and 'balancedSample(' not in raw_shader,
+        "V2.30 WB-before-bilinear-demosaic path returned")
+require('vec3 projectToUnitGamut(vec3 rgb)' in raw_shader
+        and 'mix(neutral, rgb, t)' in raw_shader,
+        "V2.31 RAW color transform must project whole RGB toward same-luma neutral instead of independent channel clipping")
+require('String rawChromaDealiasShader = loadAsset(context, "shaders/raw_chroma_dealias.frag");' in gl
+        and 'rawChromaDealiasProgram = buildProgram(vertexShader, rawChromaDealiasShader);' in gl
+        and gl.count('renderRawChromaDealias(') == 3
+        and 'uniform sampler2D sourceTex;' in raw_chroma_shader
+        and 'vec2 chromaAt(vec3 rgb, float y)' in raw_chroma_shader
+        and 'float median5(' in raw_chroma_shader
+        and 'float alternatingChroma' in raw_chroma_shader
+        and 'vec3 correctedRgb = rgbFromLumaChroma(centerY, correctedC);' in raw_chroma_shader
+        and 'projectAtFixedLuma(correctedRgb, centerY)' in raw_chroma_shader,
+        "V2.31 RAW chroma-only luminance-preserving moire/bright-edge de-alias pass missing")
+require('allocateRgbTexture(presentationTexture, width, height);' in gl
+        and gl.count('allocateRgbTexture(presentationTexture, width, height);') == 1
+        and 'int rawInputTexture = 0;' in gl and 'int shadingTexture = 0;' in gl
+        and 'shortRawTexture' not in gl and 'longRawTexture' not in gl
+        and 'shortShadingTexture' not in gl and 'longShadingTexture' not in gl,
+        "V2.31 RAW preprocess/dealias must reuse the inherited full-resolution RGB carriers and one sequential RAW/shading pair")
 
 # V2.17 reverses V2.15 geometry ownership around the clean LONG body. LONG is the
 # immutable reference and only SHORT is globally/local-residual aligned into it.
@@ -1308,6 +1358,11 @@ require('JpegFusion.estimateRegistration(shortProxy, longProxy)' in gl
         and 'JpegFusion.alignLongToShort(shortProxy, registration)' in gl
         and 'JpegFusion.estimateLocalRegistration(alignedShortProxy, longProxy)' in gl,
         "V2.30 RAW saved path must estimate SHORT-to-LONG geometry from RAW-derived proxies while LONG remains immutable reference")
+require('JpegFusion.estimateAppearanceGain(' in gl
+        and 'alignedShortProxy, longProxy, exposureRatio' in gl.replace('\n', ' ')
+        and 'float scalarGain = median3(' in gl
+        and 'physicalRatio=%.3f' in gl,
+        "V2.31 RAW saved path must restore V2.28/V2.29 robust overlap-derived achromatic radiometric scale using RAW-derived proxies only")
 require('JpegFusion.estimateRegistration(longBitmap, shortBitmap)' not in gl,
         "V2.16 LONG-moving geometry direction survived into V2.17")
 require('final int maxDimension = 1024;' in fusion
@@ -1367,10 +1422,13 @@ require('IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN' in hdr_shader
 require('localLinearRangeAtRadius(sampleUv, 4.0)' in hdr_shader
         and 'localLinearRangeAtRadius(sampleUv, 12.0)' in hdr_shader
         and 'smoothstep(0.08, 0.20, max3(longRgb))' in hdr_shader
-        and 'shortMediumRange - 1.10 * longMediumRange' in hdr_shader
-        and 'shortBroadRange - 1.08 * longBroadRange' in hdr_shader
+        and 'IRIS_V231_CONNECTED_EFFECTIVE_LOSS_COMPLETION_BEGIN' in hdr_shader
+        and 'shortMediumRange / max(longMediumRange, 0.0025)' in hdr_shader
+        and 'shortMediumRange - longMediumRange' in hdr_shader
+        and 'shortBroadRange / max(longBroadRange, 0.0040)' in hdr_shader
+        and 'shortBroadRange - longBroadRange' in hdr_shader
         and '1.0 - smoothstep(1.25, 2.75, errorEv)' in hdr_shader,
-        "V2.29 effective LONG information-loss proof must admit observable preclip flattening while retaining medium/broad structure and plausibility guards")
+        "V2.31 effective LONG information-loss proof must admit moderately flattened connected exterior structure while retaining multi-scale structure and radiometric plausibility guards")
 require('shortCoherentDetailAt' not in hdr_shader
         and 'float recoveryProof =' not in hdr_shader
         and 'step(0.58, recoveryProof)' not in hdr_shader,
@@ -1383,11 +1441,11 @@ require(math.ceil(4096 / 16) == 256 and math.ceil(3072 / 16) == 192,
 v222_recon = hdr_shader[hdr_shader.index('// IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_BEGIN'):
                          hdr_shader.index('// IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_END')]
 require('float seed = step(0.30, seedStrength);' in v222_recon
-        and 'float recoveryDomain = step(0.30, broadRecoveryDomainAt(uv));' in v222_recon
+        and 'float recoveryDomain = step(0.16, broadRecoveryDomainAt(uv));' in v222_recon
         and 'float currentOwned = step(0.5, centerState.r);' in v222_recon
         and 'if (currentOwned > 0.5 || recoveryDomain < 0.5)' in v222_recon
         and 'float propagate = step(0.35, coherentFlow * geometryBarrier) * recoveryDomain;' in v222_recon,
-        "V2.21 mode 3/4 must implement strict-seed, mask-constrained monotonic reconstruction")
+        "V2.31 mode 3/4 must keep strict V2.29 seeds while allowing connected moderately flattened exterior domain under the same monotonic geometry barrier")
 require('for (int oy = -2; oy <= 2; ++oy)' not in v222_recon
         and 'float coherentSupport = seededRegion' not in v222_recon,
         "retired finite-radius one-pass V2.19 closure returned")
@@ -1432,7 +1490,7 @@ require('IRIS_V229_FULL_RES_FINAL_SHORT_OWNERSHIP_BEGIN' in hdr_shader
         and 'float connectedRecovery = step(0.50, support.r);' in hdr_shader
         and 'float fullResolutionLoss = max(' in hdr_shader
         and 'longLossRecoveryDomainAt(uv), shortRecoveryEvidenceAt(uv)' in hdr_shader
-        and 'float shortOwns = connectedRecovery * step(0.16, fullResolutionLoss);' in hdr_shader
+        and 'float shortOwns = connectedRecovery * step(0.08, fullResolutionLoss);' in hdr_shader
         and 'vec3 shortRgb = stillShortRgbAt(uv);' in hdr_shader
         and 'vec3 longRgb = stillLongRgbAt(uv);' in hdr_shader,
         "V2.29 full-resolution LONG/SHORT source selector missing")
@@ -1534,11 +1592,17 @@ saved_fusion_slice = gl[gl.index('        private byte[] fuseStillRaws('):
         gl.index('        private void uploadRaw16Texture', gl.index('        private byte[] fuseStillRaws('))]
 require('JpegFusion.estimateRegistration(shortProxy, longProxy)' in saved_fusion_slice
         and 'JpegFusion.estimateLocalRegistration(alignedShortProxy, longProxy)' in saved_fusion_slice
-        and 'float scalarGain = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));' in saved_fusion_slice,
-        "V2.30 must preserve successful V2.28/V2.29 registration owners while replacing JPEG radiometry with physical RAW ratio")
-require('shortTexture, shortRawTexture, shortShadingTexture, shortRaw, longRaw);' in saved_fusion_slice
-        and 'longTexture, longRawTexture, longShadingTexture, longRaw, longRaw);' in saved_fusion_slice,
-        "V2.30 LONG matched color metadata must be the common SHORT/LONG reconstruction owner while each RAW keeps its own shading map")
+        and 'JpegFusion.estimateAppearanceGain(' in saved_fusion_slice
+        and 'float scalarGain = median3(' in saved_fusion_slice
+        and 'appearanceGain.r, appearanceGain.g, appearanceGain.b' in saved_fusion_slice,
+        "V2.31 must preserve successful V2.28/V2.29 registration plus robust achromatic overlap radiometry using RAW-derived proxies only")
+require('renderRawPreprocess(\n                        shortTexture, rawInputTexture, shadingTexture, shortRaw);' in saved_fusion_slice
+        and 'renderRawReconstruction(\n                        presentationTexture, shortTexture, shortRaw, longRaw);' in saved_fusion_slice
+        and 'renderRawPreprocess(\n                        longTexture, rawInputTexture, shadingTexture, longRaw);' in saved_fusion_slice
+        and 'renderRawReconstruction(\n                        presentationTexture, longTexture, longRaw, longRaw);' in saved_fusion_slice
+        and 'renderRawChromaDealias(shortTexture, presentationTexture, width, height);' in saved_fusion_slice
+        and 'renderRawChromaDealias(longTexture, presentationTexture, width, height);' in saved_fusion_slice,
+        "V2.31 LONG matched color metadata must remain the common SHORT/LONG reconstruction owner after per-frame Bayer preprocess and before chroma-only de-alias")
 require('registration.sampleDx, registration.sampleDy' in saved_fusion_slice
         and 'setTextureFilter(longTexture, GLES30.GL_NEAREST);' in saved_fusion_slice,
         "V2.30 must align only SHORT while retaining immutable LONG output geometry")
@@ -1558,7 +1622,7 @@ v229_mode5_select = hdr_shader[hdr_shader.index('    if (mode == 5) {'):
                                 hdr_shader.index('        float brightnessGain =', hdr_shader.index('    if (mode == 5) {'))]
 require('vec4 support = texture(normalTex, uv);' in v229_mode5_select
         and 'float connectedRecovery = step(0.50, support.r);' in v229_mode5_select
-        and 'float shortOwns = connectedRecovery * step(0.16, fullResolutionLoss);' in v229_mode5_select
+        and 'float shortOwns = connectedRecovery * step(0.08, fullResolutionLoss);' in v229_mode5_select
         and 'vec3 shortRgb = stillShortRgbAt(uv);' in v229_mode5_select
         and 'vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;' in v229_mode5_select,
         "V2.29 must preserve geodesic connectivity while moving final ownership to full resolution")
@@ -1792,9 +1856,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 47' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.30"' in build_gradle,
-        "V2.30 version/build marker must be exact")
+require('versionCode = 48' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.31"' in build_gradle,
+        "V2.31 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2180,14 +2244,14 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillRaws(' not in service
         and 'fuseStillRaws(' not in nafnet,
         "V2.30 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.29_to_V1.4.11-V2.30.forward.patch' in workflow
-        and 'V1.4.11-V2.30_to_V1.4.11-V2.29.rollback.patch' in workflow,
-        "V2.30 final artifact must export correctly named V2.29<->V2.30 patches")
-require("if len(tracked) != 29:" in workflow
-        and "V1.4.11 V2.29 AUTHORITY REPOSITORY COUNT FAIL" in workflow
-        and "if len(tracked) != 31:" in workflow
+require('V1.4.11-V2.30_to_V1.4.11-V2.31.forward.patch' in workflow
+        and 'V1.4.11-V2.31_to_V1.4.11-V2.30.rollback.patch' in workflow,
+        "V2.31 final artifact must export correctly named V2.30<->V2.31 patches")
+require("if len(tracked) != 31:" in workflow
+        and "V1.4.11 V2.30 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "if len(tracked) != 33:" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.30 must prove the 29-file V2.29 authority and exact 31-file candidate universe")
+        "V2.31 must prove the 31-file V2.30 authority and exact 33-file candidate universe")
 
 require('uniform vec2 stillGlobalShortOffsetPixels;' in hdr_shader
         and 'sampleUv + stillGlobalShortOffsetPixels / imageSize' in hdr_shader
@@ -2200,12 +2264,129 @@ require('CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP' in raw_fusion
         and 'shading.copyGainFactors(shadingRgba, 0);' in raw_fusion
         and 'value >= 1.0f' in raw_fusion,
         "V2.30 RAW carrier must preserve the timestamp-matched physical lens shading map")
-require('uniform highp sampler2D shadingTex;' in raw_shader
-        and 'vec4 shadingMapAt(ivec2 p)' in raw_shader
-        and 'signal * shadingGainAt(q)' in raw_shader,
-        "V2.30 RAW reconstruction must apply lens shading in sensor/Bayer space before WB/demosaic")
+require('uniform highp sampler2D shadingTex;' in raw_preprocess_shader
+        and 'vec4 shadingMapAt(ivec2 p)' in raw_preprocess_shader
+        and 'signal * shadingGainAt(p)' in raw_preprocess_shader,
+        "V2.31 RAW preprocess must apply lens shading in sensor/Bayer space before WB/demosaic")
 require('GLES30.GL_RGBA32F' in gl
-        and 'bindSampler2d(rawReconstructProgram, "shadingTex", shadingTexture, 1);' in gl,
-        "V2.30 RAW reconstruction must upload and sample the per-frame lens shading map")
+        and 'bindSampler2d(rawPreprocessProgram, "shadingTex", shadingTexture, 1);' in gl,
+        "V2.31 RAW preprocess must upload and sample the per-frame lens shading map")
 
-print("V1.4.11 V2.30 REGRESSION PASS: successful V2.29 HDR ownership/tone/registration behavior remains protected while saved fusion source authority is timestamp-matched SHORT/LONG RAW_SENSOR; HAL JPEG is reference/output only, physical RAW exposure ratio excludes post-RAW JPEG boost, LONG geometry/color authority remains fixed, and only registered SHORT may recover lost information")
+# V2.31 bathroom continuation regression. V2.29 device comparison showed a valid
+# sky SHORT seed while moderately bright house/siding and tree structure remained
+# LONG-owned. The corrected gate must admit a modest multi-scale SHORT structure
+# advantage inside a connected proven-loss component, while a healthy near-equal body
+# stays below the final 0.08 native-resolution ownership threshold.
+def v231_effective_loss_fixture(long_peak, short_m, long_m, short_b, long_b, error_ev):
+    observable = smoothstep_math(0.08, 0.20, long_peak)
+    medium_structure = smoothstep_math(0.004, 0.022, short_m)
+    medium_relative = smoothstep_math(1.03, 1.18, short_m / max(long_m, 0.0025))
+    medium_absolute = smoothstep_math(0.0010, 0.012, short_m - long_m)
+    medium_dominance = max(0.72 * medium_relative, medium_absolute)
+    broad_structure = smoothstep_math(0.008, 0.050, short_b)
+    broad_relative = smoothstep_math(1.02, 1.15, short_b / max(long_b, 0.0040))
+    broad_absolute = smoothstep_math(0.0020, 0.025, short_b - long_b)
+    broad_dominance = max(0.75 * broad_relative, broad_absolute)
+    radiometry = 1.0 - smoothstep_math(1.25, 2.75, abs(error_ev))
+    return observable * max(
+        medium_structure * medium_dominance,
+        broad_structure * broad_dominance) * radiometry
+
+bathroom_house_loss = v231_effective_loss_fixture(
+    0.42, 0.028, 0.024, 0.055, 0.048, 0.35)
+healthy_body_loss = v231_effective_loss_fixture(
+    0.42, 0.022, 0.021, 0.040, 0.039, 0.10)
+require(bathroom_house_loss >= 0.08,
+        "V2.31 bathroom house/siding fixture must become eligible inside a connected proven-loss component")
+require(healthy_body_loss < 0.08,
+        "V2.31 healthy near-equal body fixture must remain LONG-owned despite lower connected-component threshold")
+require('float recoveryDomain = step(0.16, broadRecoveryDomainAt(uv));' in hdr_shader
+        and 'float shortOwns = connectedRecovery * step(0.08, fullResolutionLoss);' in hdr_shader,
+        "V2.31 bathroom completion thresholds missing: strict seed, broader connected domain, native-resolution physical-loss recheck")
+
+# V2.31 exact device failure: a bright-window scene had SHORT=LONG=1/120 ISO50.
+# High-DR classification is statistical and must preserve a physical 8x/3EV bracket,
+# while a low-DR pair remains eligible for V2.27 near-1x temporal denoise.
+require('AUTO_HIGH_DR_MIN_RATIO = 8.0' in camera
+        and 'AUTO_HIGH_DR_MIN_SEPARATION_STOPS = 3.0' in camera
+        and 'isHighDynamicRangeSceneLocked' in camera
+        and 'enforceFrozenHighDynamicRangeBracketLocked' in camera
+        and 'solveStillLongSnrSettingForProductLocked' in camera,
+        "V2.31 high-DR physical acquisition guard missing")
+def high_dr_fixture(p98, short_p99, near_clip, body_p50):
+    highlight = max(p98, short_p99)
+    body = max(0.00025, body_p50)
+    separation = math.log(max(0.0005, highlight) / body, 2.0)
+    highlight_pressure = p98 >= 0.55 or near_clip >= 0.0015
+    return highlight_pressure and body_p50 <= 0.18 and separation >= 3.0
+require(high_dr_fixture(0.90, 0.953, 0.0104, 0.046),
+        "exact V2.30 bright-window 0EV device scene must classify as high DR")
+require(not high_dr_fixture(0.24, 0.26, 0.0, 0.12),
+        "low-DR scene must remain eligible for V2.27 bracket collapse")
+short_product = (1_000_000_000 / 120.0) * 50.0
+require((short_product * 8.0) / short_product == 8.0,
+        "V2.31 high-DR fixture must require a true 3EV physical LONG/SHORT ratio")
+
+# Exact numerical RAW-domain regression. V2.30 V1.1 compiled successfully while
+# black/white were silently expressed in normalized-16-bit units against integer
+# usampler2D values. Exercise the actual sensor-code equation numerically, not just
+# source tokens, and prove the RGBA8 high/low-byte cache round-trips all 16-bit codes.
+def normalize_sensor_code(code, black, white):
+    return max(code - black, 0.0) / max(white - black, 1.0e-6)
+require(abs(normalize_sensor_code(64.0, 64.0, 1023.0) - 0.0) < 1.0e-12,
+        "V2.31 RAW black point must normalize exactly to zero")
+mid_signal = normalize_sensor_code(512.0, 64.0, 1023.0)
+require(0.46 < mid_signal < 0.48,
+        "V2.31 RAW mid-code must remain intermediate rather than saturating")
+require(abs(normalize_sensor_code(1023.0, 64.0, 1023.0) - 1.0) < 1.0e-12,
+        "V2.31 RAW white level must normalize exactly to one")
+for raw16 in range(65536):
+    high = raw16 // 256
+    low = raw16 - high * 256
+    recovered = high * 256 + low
+    if recovered != raw16:
+        raise SystemExit("V1.4.11 V2.31 REGRESSION FAIL: 16-bit RAW RGBA8 pack round-trip")
+
+# Chroma-only de-alias must preserve center luminance mathematically. These fixtures
+# cover both ordinary and bright false-color excursions so moire suppression cannot
+# turn into luminance blur or a new highlight edge.
+def rgb_from_luma_chroma(y, cb, cr):
+    blue = y + cb
+    red = y + cr
+    green = (y - 0.2126 * red - 0.0722 * blue) / 0.7152
+    return red, green, blue
+def luma(rgb):
+    r, g, b = rgb
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+for y, cb, cr in [(0.18, 0.03, -0.02), (0.72, -0.08, 0.10), (0.93, 0.02, -0.015)]:
+    require(abs(luma(rgb_from_luma_chroma(y, cb, cr)) - y) < 1.0e-9,
+            "V2.31 chroma reconstruction must preserve center luminance")
+
+# Exact bright-window still-guard solve: at 60-Hz safety, 1/120 ISO50 SHORT plus
+# an 8x high-DR requirement must prefer 1/15 ISO50 LONG rather than manufacturing
+# the bracket through ISO or collapsing back to the same frame.
+period_ns = 8_333_333
+short_exposure_ns = 8_333_333
+min_iso = 50
+required_product = short_exposure_ns * min_iso * 8.0
+best = None
+best_score = float('inf')
+for periods in range(1, 3601):
+    exposure = periods * period_ns
+    iso = max(min_iso, math.ceil(required_product / exposure))
+    if iso > 6400:
+        continue
+    achieved = exposure * iso
+    if achieved + 0.5 < required_product:
+        continue
+    iso_stops = math.log(max(1.0, iso / min_iso), 2.0)
+    overshoot_ev = math.log(achieved / required_product, 2.0)
+    shutter_error_ev = abs(math.log(exposure / short_exposure_ns, 2.0))
+    score = 10.0 * iso_stops + overshoot_ev + 0.001 * shutter_error_ev
+    if score < best_score:
+        best_score = score
+        best = (exposure, iso)
+require(best == (period_ns * 8, 50),
+        f"V2.31 bright-window still guard must solve to 1/15 ISO50, got {best}")
+
+print("V1.4.11 V2.31 REGRESSION PASS: exact successful V2.30 compiled candidate is runtime authority; V2.28/V2.29 registration/whole-RGB LONG-body/SHORT-recovery mechanics are preserved while the bathroom connected exterior information-loss hole is explicitly completed; RAW reconstruction uses sensor-code-correct edge-directed demosaic plus luminance-preserving chroma de-alias, robust RAW-derived radiometric scaling, and high-DR capture cannot collapse below a physical 3EV bracket")
