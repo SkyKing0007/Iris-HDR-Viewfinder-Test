@@ -13,6 +13,7 @@ camera = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/CameraCont
 gl = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java").read_text()
 fusion = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java").read_text()
 saver = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java").read_text()
+raw_fusion = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java").read_text()
 service = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java").read_text()
 nafnet = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java").read_text()
 build_gradle = (ROOT / "app/build.gradle.kts").read_text()
@@ -21,12 +22,13 @@ nafnet_license = ROOT / "app/src/main/assets/licenses/NAFNet_LICENSE.txt"
 frame_meta = (ROOT / "app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java").read_text()
 hdr_shader = (ROOT / "app/src/main/assets/shaders/hdr_display.frag").read_text()
 oes_shader = (ROOT / "app/src/main/assets/shaders/oes_to_rgb.frag").read_text()
+raw_shader = (ROOT / "app/src/main/assets/shaders/raw_reconstruct.frag").read_text()
 workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.29 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.30 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -56,7 +58,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.29 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.30 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -728,13 +730,13 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# 038 / 042 / V2.29 - Exact successful V2.28 V1.1 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.28' in workflow
-        and 'run-id: 34159490301' in workflow
-        and "authority='07d6259f1c2a5a0d9143b5c4dafd7d466090220c'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.28 Actions authority")
-require("authority='6d19588bd1028c66d80609c9a9119de30df63f80'" not in workflow,
-        "V2.29 must not seed runtime from V2.27 after successful V2.28")
+# 038 / 042 / V2.30 - Exact successful V2.29 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.29' in workflow
+        and 'run-id: 34183494359' in workflow
+        and "authority='ddcefd30a4f203f83c6b67d131f63b1533cc4d66'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.29 Actions authority")
+require("authority='07d6259f1c2a5a0d9143b5c4dafd7d466090220c'" not in workflow,
+        "V2.30 must not seed runtime from V2.28 after successful V2.29")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1205,9 +1207,9 @@ require('displayDehaze' in saver and 'displayMicroContrast' in saver
         and 'root.put("displayDehaze", displayDehaze);' in saver
         and 'root.put("displayMicroContrast", displayMicroContrast);' in saver,
         "saved metadata must record the frozen adaptive clarity state")
-require('shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma,' in saver.replace('\n', ' ')
-        and 'displayDehaze, displayMicroContrast,' in saver.replace('\n', ' '),
-        "CaptureSetSaver must carry frozen Brightness/Gamma/dehaze/microcontrast to GPU still fusion")
+require('shortRaw, longRaw, ratio, captureOrientationDegrees,' in saver.replace('\n', ' ')
+        and 'displayBrightnessEv, displayGamma, displayDehaze, displayMicroContrast,' in saver.replace('\n', ' '),
+        "CaptureSetSaver must carry timestamp-matched RAW pair plus frozen presentation state to GPU still fusion")
 require('brightnessBar.setEnabled(enabled)' in main and 'gammaBar.setEnabled(enabled)' in main,
         "AUTO must own Brightness/Gamma sliders while MANUAL keeps them user-authoritative")
 require('Brightness AUTO' in main and 'Dehaze' in main and 'Micro' in main,
@@ -1243,17 +1245,43 @@ require('controller.setStillFusionView(glView);' in main
         and 'while (propagationPasses < maxPropagationPasses)' in gl
         and 'stillFusionProgram' not in gl
         and 'still_fusion.frag' not in gl
-        and 'GPU_STILL_FUSION' in gl,
-        "saved HDR must remain GPU-only with mode-4-only convergent topology reconstruction")
+        and 'GPU_STILL_RAW_FUSION' in gl,
+        "saved HDR must remain GPU-only with RAW-derived input and mode-4-only convergent topology reconstruction")
 require('submitCpuFusionFallback' not in saver
         and 'JpegFusion.fuse(' not in saver
         and 'GPU_STILL_FUSION_REQUIRED' in saver
         and 'CPU HDR substitution is disabled' in saver,
         "production capture must never substitute independent CPU HDR after GPU failure")
-require(not (ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/RawHdrFusion.java').exists()
-        and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_demosaic.frag').exists()
-        and not (ROOT / 'app/src/main/assets/shaders/raw_hdr_fusion.frag').exists(),
-        "V2.14 must remain on the successful JPEG-source architecture")
+require('final class RawFusion' in raw_fusion
+        and 'RawFusion.copyFromImage(raw, characteristics, data.result)' in saver
+        and 'stillFusionView.fuseStillRaws(' in saver
+        and 'void fuseStillRaws(' in gl
+        and 'shaders/raw_reconstruct.frag' in gl,
+        "V2.30 production saved fusion must be owned by timestamp-matched RAW_SENSOR inputs")
+require('fuseStillJpegs(' not in saver
+        and 'fuseStillJpegs(' not in gl
+        and 'decodeUpright(' not in gl,
+        "V2.30 HAL JPEG decode/fusion owner survived in production saved HDR")
+require('data.jpegBytes' not in saver and 'byte[] jpegBytes;' not in saver,
+        "V2.30 may save HAL JPEG references but may not retain them as fusion payload")
+require('result SENSOR_TIMESTAMP == image.getTimestamp()' in raw_fusion
+        or ('timestamp != image.getTimestamp()' in raw_fusion and 'RAW/result timestamp mismatch' in raw_fusion),
+        "V2.30 RAW/result timestamp equality gate missing")
+require('SENSOR_DYNAMIC_BLACK_LEVEL' in raw_fusion
+        and 'SENSOR_DYNAMIC_WHITE_LEVEL' in raw_fusion
+        and 'COLOR_CORRECTION_GAINS' in raw_fusion
+        and 'COLOR_CORRECTION_TRANSFORM' in raw_fusion
+        and 'transform.getElement(col, row)' in raw_fusion,
+        "V2.30 RAW black/white/WB/color metadata contract missing or matrix transposed")
+require('shortFrame.exposureTimeNs * shortFrame.sensitivityIso' in raw_fusion
+        and 'longFrame.exposureTimeNs * longFrame.sensitivityIso' in raw_fusion
+        and 'POST_RAW_SENSITIVITY_BOOST' not in raw_fusion,
+        "V2.30 RAW radiometric ratio must use physical exposure*ISO and exclude post-RAW JPEG boost")
+require('GL_R16' in gl and 'GL_UNSIGNED_SHORT' in gl
+        and 'uniform highp sampler2D rawTex;' in raw_shader
+        and 'blackPatternCode' in raw_shader and 'whiteLevelCode' in raw_shader
+        and 'demosaic(' in raw_shader,
+        "V2.30 RAW sensor upload/reconstruction path missing")
 
 # V2.17 reverses V2.15 geometry ownership around the clean LONG body. LONG is the
 # immutable reference and only SHORT is globally/local-residual aligned into it.
@@ -1273,10 +1301,10 @@ require('cycleConfidence = 1.0f - smoothstep(0.45f, 1.50f, cycleError)' not in f
 require('static Bitmap alignLongToShort(Bitmap longBitmap, Registration registration)' in fusion
         and 'canvas.drawBitmap(longBitmap, matrix, paint);' in fusion,
         "byte-protected generic moving-frame alignment helper changed")
-require('JpegFusion.estimateRegistration(shortBitmap, longBitmap)' in gl
-        and 'JpegFusion.alignLongToShort(shortBitmap, registration)' in gl
-        and 'JpegFusion.estimateLocalRegistration(shortBitmap, longBitmap)' in gl,
-        "GPU saved path must treat SHORT as moving and LONG as immutable reference")
+require('JpegFusion.estimateRegistration(shortProxy, longProxy)' in gl
+        and 'JpegFusion.alignLongToShort(shortProxy, registration)' in gl
+        and 'JpegFusion.estimateLocalRegistration(alignedShortProxy, longProxy)' in gl,
+        "V2.30 RAW saved path must estimate SHORT-to-LONG geometry from RAW-derived proxies while LONG remains immutable reference")
 require('JpegFusion.estimateRegistration(longBitmap, shortBitmap)' not in gl,
         "V2.16 LONG-moving geometry direction survived into V2.17")
 require('final int maxDimension = 1024;' in fusion
@@ -1297,7 +1325,7 @@ local_registration_slice = fusion[fusion.index('    static LocalRegistrationFiel
 require(hashlib.sha256(local_registration_slice.encode()).hexdigest() ==
         'ef711f360d9d5c65ad95af2f81a6862ecefbd3c555ac225faa87bf3cc5c7b525',
         "V2.28 must not redesign the proven V2.27 local bidirectional residual field")
-require('GPU_STILL_LOCAL_REGISTRATION' in gl
+require('GPU_STILL_RAW_LOCAL_REGISTRATION' in gl
         and 'uploadRgba8Texture(' in gl
         and 'localRegistration.rgba);' in gl
         and gl.count('localFlowTexture, width, height,') == 4
@@ -1310,10 +1338,10 @@ require('uniform sampler2D localFlowTex;' in hdr_shader
         and 'stillLongUvAt' not in hdr_shader
         and 'return texture(longTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;' in hdr_shader,
         "shader must flow only SHORT and sample LONG at immutable coordinates")
-require(gl.count('GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST') >= 2
-        and gl.count('GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST') >= 2,
+require('setTextureFilter(longTexture, GLES30.GL_NEAREST);' in gl
+        and 'setTextureFilter(presentationTexture, GLES30.GL_NEAREST);' in gl,
         "immutable LONG source and full-resolution mode-5 raster must both use nearest sampling")
-require('presentationTexture);\n                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);' in gl,
+require('setTextureFilter(presentationTexture, GLES30.GL_NEAREST);' in gl,
         "mode-6 must not bilinear-resample the selected-source fused raster")
 
 # V2.21 source-loss atlas separates strict seeds from the topology-complete physical
@@ -1499,24 +1527,21 @@ require('org.opencv' not in fusion and 'opencv' not in Path('app/build.gradle.kt
 
 # V2.26 changes live parity/stat production but must preserve the successful V2.25
 # saved-still registration/render orchestration and binary geodesic topology mechanics.
-saved_fusion_slice = gl[gl.index('        private byte[] fuseStillJpegs('):
-                        gl.index('        private int[] countAtlasMasks(')]
-# V2.28 changes only the compact registration telemetry inside this orchestration
-# block. Normalize that one logger call and require every other orchestration byte to
-# remain identical to successful V2.27/V2.25 mechanics.
-reg_log_start = saved_fusion_slice.index(
-        '            RuntimeLogger.event(\n                    "GPU_STILL_REGISTRATION",')
-reg_log_end = saved_fusion_slice.index(
-        '            RuntimeLogger.event(\n                    "GPU_STILL_LOCAL_REGISTRATION",',
-        reg_log_start)
-saved_fusion_without_reg_log = (saved_fusion_slice[:reg_log_start]
-        + '            /* GPU_STILL_REGISTRATION_TELEMETRY */\n'
-        + saved_fusion_slice[reg_log_end:])
-require(hashlib.sha256(saved_fusion_without_reg_log.encode()).hexdigest() ==
-        '11729d7cb53461032f1351da701e7403d2e660882c8e27dae725e3c5087dd315',
-        "V2.28 changed saved-still orchestration outside the intended registration telemetry")
-require('cycleFull=%.3f cycleAnalysis=%.3f coarseCycleAnalysis=%.3f refine=%.3f confidence=%.3f' in saved_fusion_slice,
-        "V2.28 registration telemetry must expose full/analysis/coarse cycle and refinement confidence")
+saved_fusion_slice = gl[gl.index('        private byte[] fuseStillRaws('):
+        gl.index('        private void uploadRaw16Texture', gl.index('        private byte[] fuseStillRaws('))]
+require('JpegFusion.estimateRegistration(shortProxy, longProxy)' in saved_fusion_slice
+        and 'JpegFusion.estimateLocalRegistration(alignedShortProxy, longProxy)' in saved_fusion_slice
+        and 'float scalarGain = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));' in saved_fusion_slice,
+        "V2.30 must preserve successful V2.28/V2.29 registration owners while replacing JPEG radiometry with physical RAW ratio")
+require('shortTexture, shortRawTexture, shortShadingTexture, shortRaw, longRaw);' in saved_fusion_slice
+        and 'longTexture, longRawTexture, longShadingTexture, longRaw, longRaw);' in saved_fusion_slice,
+        "V2.30 LONG matched color metadata must be the common SHORT/LONG reconstruction owner while each RAW keeps its own shading map")
+require('registration.sampleDx, registration.sampleDy' in saved_fusion_slice
+        and 'setTextureFilter(longTexture, GLES30.GL_NEAREST);' in saved_fusion_slice,
+        "V2.30 must align only SHORT while retaining immutable LONG output geometry")
+require(hashlib.sha256(fusion.encode()).hexdigest() ==
+        '569754e8043928cf86b1f1d34f2ad6b2885e3bf7948789725d4c2092129d4782',
+        "V2.30 must not reopen successful V2.29 JpegFusion registration math")
 v226_mode4 = hdr_shader[hdr_shader.index('    if (mode == 4) {'):
                           hdr_shader.index('    // IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_END')]
 v226_mode4_code = ' '.join(
@@ -1552,14 +1577,29 @@ require(hashlib.sha256(fusion_provenance_without_reg_log.encode()).hexdigest() =
         "V2.28 changed CPU fallback provenance outside intended registration telemetry")
 still_burst = camera[camera.index('    private void issueStillBurstLocked()'):
                      camera.index('    private final CameraCaptureSession.CaptureCallback stillCaptureCallback')]
-require(hashlib.sha256(still_burst.encode()).hexdigest() ==
+v230_short_shading_request = '''            // V2.30 RAW fusion requires the exact per-frame lens-shading map.
+            // Camera2 guarantees ON support on RAW-capable devices; the map is
+            // applied during RAW reconstruction and never inferred from JPEG.
+            shortBuilder.set(
+                    CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE,
+                    CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON);
+'''
+v230_long_shading_request = '''            longBuilder.set(
+                    CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE,
+                    CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON);
+'''
+require(v230_short_shading_request in still_burst and v230_long_shading_request in still_burst,
+        "V2.30 both RAW still requests must explicitly request the per-frame lens shading map")
+protected_still_burst = still_burst.replace(v230_short_shading_request, '').replace(
+        v230_long_shading_request, '')
+require(hashlib.sha256(protected_still_burst.encode()).hexdigest() ==
         'af1a49f21c4b660c4b8c79b10abb729daf57619a4b091bbcc0aa01000172378e',
-        "V2.24 changed the successful V2.23 SHORT/LONG still-burst request block")
-require('stillFusionView.fuseStillJpegs(' in saver
-        and 'shortJpeg, longJpeg, ratio, displayBrightnessEv, displayGamma,' in saver
-        and 'displayDehaze, displayMicroContrast,' in saver
+        "V2.30 still-burst request changed outside the intended lens-shading metadata request")
+require('stillFusionView.fuseStillRaws(' in saver
+        and 'shortRaw, longRaw, ratio, captureOrientationDegrees,' in saver.replace('\n', ' ')
+        and 'displayBrightnessEv, displayGamma, displayDehaze, displayMicroContrast,' in saver.replace('\n', ' ')
         and 'JpegFusion.fuse' not in saver,
-        "V2.24 must preserve the single V2.23 GPU still-fusion owner")
+        "V2.30 must preserve one GPU still-fusion owner while changing its source authority to RAW")
 
 # V2.17 permanent visual/source regressions include the exact V2.16 device failure:
 # valid SHORT highlight pieces may not be dropped by a per-pixel re-proof inside one
@@ -1749,9 +1789,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 46' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.29"' in build_gradle,
-        "V2.29 version/build marker must be exact")
+require('versionCode = 47' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.30"' in build_gradle,
+        "V2.30 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2132,15 +2172,37 @@ require('HdrGlView.java' not in '' or True, "internal")
 # Protected fusion/runtime SHA pins are enforced in the authoritative workflow; source-level ownership
 # additionally forbids the new service/NAFNet/touch path from calling a second fusion implementation.
 require('JpegFusion.fuse' not in saver
-        and 'fuseStillJpegs(' not in service
-        and 'fuseStillJpegs(' not in nafnet,
-        "V2.24 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.28_to_V1.4.11-V2.29.forward.patch' in workflow
-        and 'V1.4.11-V2.29_to_V1.4.11-V2.28.rollback.patch' in workflow,
-        "V2.29 final artifact must export correctly named V2.28<->V2.29 patches")
+        and 'fuseStillJpegs(' not in saver
+        and 'fuseStillJpegs(' not in gl
+        and 'fuseStillRaws(' not in service
+        and 'fuseStillRaws(' not in nafnet,
+        "V2.30 may not introduce a second HDR fusion owner")
+require('V1.4.11-V2.29_to_V1.4.11-V2.30.forward.patch' in workflow
+        and 'V1.4.11-V2.30_to_V1.4.11-V2.29.rollback.patch' in workflow,
+        "V2.30 final artifact must export correctly named V2.29<->V2.30 patches")
 require("if len(tracked) != 29:" in workflow
-        and "V1.4.11 V2.28 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "V1.4.11 V2.29 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "if len(tracked) != 31:" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.29 must preserve the 29-file V2.28 authority/candidate universe")
+        "V2.30 must prove the 29-file V2.29 authority and exact 31-file candidate universe")
 
-print("V1.4.11 V2.29 REGRESSION PASS: successful V2.28 registration remains protected; bathroom-class effective information loss is no longer near-white-gated, final SHORT ownership is full-resolution with global fallback for unsupported local panes, >1 scene energy reaches the HDR shoulder, AUTO LONG is not physically shorter than SHORT, and smooth chroma noise cannot disable NAFNet while coherent structure protection remains active")
+require('uniform vec2 stillGlobalShortOffsetPixels;' in hdr_shader
+        and 'sampleUv + stillGlobalShortOffsetPixels / imageSize' in hdr_shader
+        and 'stillLongUvAt' not in hdr_shader,
+        "V2.30 global registration must move SHORT sampling only; LONG geometry remains immutable")
+require('FUSED_HDR.jpg is generated from the timestamp-matched SHORT/LONG RAW_SENSOR mosaics' in saver
+        and 'HAL JPEGs are saved references only and never feed fusion' in saver,
+        "V2.30 metadata must state RAW fusion provenance precisely")
+require('CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP' in raw_fusion
+        and 'shading.copyGainFactors(shadingRgba, 0);' in raw_fusion
+        and 'value >= 1.0f' in raw_fusion,
+        "V2.30 RAW carrier must preserve the timestamp-matched physical lens shading map")
+require('uniform highp sampler2D shadingTex;' in raw_shader
+        and 'vec4 shadingMapAt(ivec2 p)' in raw_shader
+        and 'signal * shadingGainAt(q)' in raw_shader,
+        "V2.30 RAW reconstruction must apply lens shading in sensor/Bayer space before WB/demosaic")
+require('GLES30.GL_RGBA32F' in gl
+        and 'bindSampler2d(rawReconstructProgram, "shadingTex", shadingTexture, 1);' in gl,
+        "V2.30 RAW reconstruction must upload and sample the per-frame lens shading map")
+
+print("V1.4.11 V2.30 REGRESSION PASS: successful V2.29 HDR ownership/tone/registration behavior remains protected while saved fusion source authority is timestamp-matched SHORT/LONG RAW_SENSOR; HAL JPEG is reference/output only, physical RAW exposure ratio excludes post-RAW JPEG boost, LONG geometry/color authority remains fixed, and only registered SHORT may recover lost information")

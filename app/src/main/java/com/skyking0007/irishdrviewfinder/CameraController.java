@@ -1206,6 +1206,12 @@ final class CameraController {
             configureManualRequest(
                     shortBuilder, captureShortExposureNs, captureShortIso,
                     capturePostRawBoost, false);
+            // V2.30 RAW fusion requires the exact per-frame lens-shading map.
+            // Camera2 guarantees ON support on RAW-capable devices; the map is
+            // applied during RAW reconstruction and never inferred from JPEG.
+            shortBuilder.set(
+                    CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE,
+                    CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON);
             shortBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) 95);
             shortBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientationDegrees);
             shortBuilder.setTag(TAG_CAPTURE_SHORT);
@@ -1216,6 +1222,9 @@ final class CameraController {
             configureManualRequest(
                     longBuilder, captureLongExposureNs, captureLongIso,
                     capturePostRawBoost, false);
+            longBuilder.set(
+                    CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE,
+                    CaptureRequest.STATISTICS_LENS_SHADING_MAP_MODE_ON);
             longBuilder.set(CaptureRequest.JPEG_QUALITY, (byte) 95);
             longBuilder.set(CaptureRequest.JPEG_ORIENTATION, jpegOrientationDegrees);
             longBuilder.setTag(TAG_CAPTURE_LONG);

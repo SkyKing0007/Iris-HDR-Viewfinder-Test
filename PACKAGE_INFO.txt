@@ -1,4 +1,4 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.29 — FULL-RES SHORT OWNERSHIP / HDR ENERGY / LONG SNR / NAFNET CHROMA CORRECTION
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.30 — RAW_SENSOR SHORT/LONG SAVED HDR FUSION
 
 STATUS
 PREPARED / UPLOAD-READY only after packaged proof completes; NOT BUILD-PROVEN until GitHub Actions succeeds.
@@ -7,59 +7,60 @@ No backup requested or created. No source commit/push is performed by this hando
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 46
-Target versionName: 1.0-v1.4.11-v2.29
+Target versionCode: 47
+Target versionName: 1.0-v1.4.11-v2.30
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL COMPILED CANDIDATE
-Commit: 07d6259f1c2a5a0d9143b5c4dafd7d466090220c
-Tree: dfda60594a13abaa0bf943a9eeb71610d514c4a3
-GitHub Actions run: 34159490301 — SUCCESS
-Artifact ID: 10032144212
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.28
-Artifact ZIP digest: sha256:3af075d69d43a829fd87bb08140c042835d381f038a12f695015d0cddd183137
-V2.28 APK SHA-256: db878622ff63db1893452a6aa8cb97ea5a92a488a7228b39c87270d6ce500f7e
-V2.28 source-candidate TAR SHA-256: 2817dcad9bfc0634f55340574fda46f42365be4b2397115cd7e681a96f366d26
-V2.28 runtime manifest SHA-256: db6b501c1bc105bca36f4604ea35ced506fb87accb8131cd643f43db38f583a1
-V2.28 repository manifest SHA-256: 2393f2fea7ea3b7cbe6aaeb87bc27020e5a6a76e764cce61e7c995217afdbdcd
-V2.28 regressions SHA-256: 50099a5b2b544e4fe5b8215b9537ada3342b1463bed609fcdf419a70d232dc52
+Commit: ddcefd30a4f203f83c6b67d131f63b1533cc4d66
+Tree: ccbc7d5354373a383bc64870ec37dc733c835184
+GitHub Actions run: 34183494359 — SUCCESS
+Artifact ID: 10039754784
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.29
+Artifact ZIP digest: sha256:9459d870dee3c7597b7e954b2bb39b48f676fcee92040819daa51226a85b4ca0
+V2.29 APK SHA-256: cbc946b33a7df1fd17c172378aaa4b2172af962f38c81cbf14dc498f3141d2dd
+V2.29 source-candidate TAR SHA-256: eaf0f2b15d340edc38ead9068f6a9e2e56987aec67775e5bbc0d7a61f481a081
+V2.29 runtime manifest SHA-256: c45aee1460de8da5f9bfe9bbab92c576b9de618211623154e62daeee8103e79f
+V2.29 repository manifest SHA-256: 328ed2097149cca72d45d55004035497cc3680b7894d55f884006a836aca7fb5
+V2.29 regressions SHA-256: ba81f9e038033e259cc1fedb6112068879075a27248fe8449a6c696a2a68ecd1
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.28 procedure. The workflow remains exactly 15 substantive steps. Core authority reconstruction, deterministic patch proof, setup/compiler/build/post-build mechanics and ordering are unchanged. Only authority/version/hash/allowlist/regression/output payloads differ.
+Exact successful V2.29 procedure. The workflow remains exactly 15 substantive steps. Authority reconstruction, deterministic full-index forward/rollback proof, Java 17, Android 37, Gradle 9.6.0, pinned real glslang, reserved-identifier scan, real GLSL compile, real project Java compile, regression replay, full :app:assembleDebug, post-build invariance, exactly-one-APK proof and deterministic artifact export retain the successful V2.29 ordering and mechanics.
 
-INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 3
+INTENDED RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 6
 - app/src/main/assets/shaders/hdr_display.frag [MODIFY]
+- app/src/main/assets/shaders/raw_reconstruct.frag [ADD]
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java [MODIFY]
-- app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java [MODIFY]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java [MODIFY]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java [MODIFY]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java [ADD]
 
-PROTECTED V2.28 RUNTIME — BYTE-IDENTICAL
+PROTECTED V2.29 RUNTIME — BYTE-IDENTICAL
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/licenses/NAFNet_LICENSE.txt
 - app/src/main/assets/nafnet_sidd_width32_fp16.tflite
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/fullscreen.vert
 - app/src/main/assets/shaders/oes_to_rgb.frag
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java
 
-V2.29 RUNTIME CONTRACT
-- V2.28 global registration and local residual registration remain byte-identical.
-- 16x16 atlas is topology/connectivity authority only, not final pixel source authority.
-- final saved source selection is full-resolution and whole-RGB binary LONG/SHORT.
-- final SHORT sampling never consumes path-propagated atlas BA flow.
-- unsupported local panes fall back to stable globally aligned SHORT geometry.
-- effective LONG loss may be proven below near-white when registered SHORT retains materially more medium/broad information and radiometry is plausible.
-- recovered scene-linear values >1.0 are preserved into adaptiveHdrToneMap.
-- AUTO LONG integration is never shorter than AUTO SHORT; LONG product is preserved through ISO/shutter rebalance.
-- smooth chroma variance cannot disable NAFNet; coherent luminance/opponent structure protection remains active.
-
-BATHROOM ACCEPTANCE REGRESSION
-Prior affected LONG exterior values around encoded 0.17..0.26 are mathematically excluded by V2.28's old 0.55 bright-context gate. V2.29 observability is active there while retaining information-dominance/radiometric proof. The final source selector can produce LONG and SHORT pixels inside the same connected 16x16 atlas cell, eliminating whole-cell final ownership.
+V2.30 RUNTIME CONTRACT
+- Saved FUSED_HDR source authority is timestamp-matched SHORT/LONG RAW_SENSOR, not HAL JPEG.
+- HAL SHORT/LONG JPEGs remain independent saved references only and cannot feed alignment, radiometry or source selection.
+- Each RAW mosaic is copied before DNG writing can close its Image; the copied sensor plane is immutable fusion input.
+- RAW exposure ratio uses physical SENSOR_EXPOSURE_TIME * SENSOR_SENSITIVITY only; CONTROL_POST_RAW_SENSITIVITY_BOOST does not scale RAW fusion.
+- Per-frame RAW black/white levels remain per-observation owners; LONG matched WB + sensor-to-linear-sRGB transform is the common color owner for both reconstructions.
+- Camera2 ColorSpaceTransform extraction follows getElement(column,row), preventing transposed color matrices.
+- Each SHORT/LONG still request explicitly asks Camera2 for its lens-shading correction map; that timestamp-matched [R,G-even,G-odd,B] gain map is carried with the RAW and applied in Bayer space before WB/demosaic.
+- Registration evidence is generated from RAW-derived reconstructions; successful V2.29 JpegFusion registration math remains byte-identical.
+- LONG remains immutable output geometry. Global/local displacement is applied only while sampling SHORT.
+- Successful V2.29 connected-region source selection, full-resolution final ownership and HDR shoulder/tone topology remain inherited.
+- The new raw_reconstruct.frag is an active runtime shader and is included in the same pinned real glslang gate before Java compile and full assemble.
 
 BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - .github/workflows/build.yml
@@ -68,7 +69,7 @@ BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-Payload text necessarily changes for V2.29 authority/version/hash/allowlist/regressions/output names. Core successful V2.28 15-step compiler/build/post-build mechanics delta: ZERO.
+Payload identity necessarily changes for V2.30 authority/version/hash/allowlist/regressions/output names and the new active RAW shader compiler input. Core successful V2.29 15-step verification/compiler/build/post-build mechanics and ordering are otherwise unchanged.
 
 DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - PACKAGE_INFO.txt
@@ -76,15 +77,21 @@ DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-TOTAL EXPECTED V2.28 -> V2.29 TRACKED CHANGESET — EXACTLY 11 PATHS
+TOTAL EXPECTED V2.29 -> V2.30 TRACKED CHANGESET — EXACTLY 14 PATHS
+Runtime: 6 paths. Infrastructure: 4 paths. Delivery documents: 4 paths.
 
-V2.29 RUNTIME DIGEST
-c45aee1460de8da5f9bfe9bbab92c576b9de618211623154e62daeee8103e79f
-Runtime universe remains exactly 16 app/src files.
+V2.30 RUNTIME DIGEST
+9e09b637209eba35e9d45a9ea0f6406ac8ae6e841d45200d795f04e6fb4e6d40
+Runtime universe is exactly 18 app/src files.
+
+LOCAL REPLAY STATUS
+GLSL RESERVED IDENTIFIER SCAN: PASS on all 5 active shader files
+V2.30 SEMANTIC / OWNERSHIP / DOMAIN REGRESSION SUITE: PASS
+PACKAGE / PATCH PROOF: PASS; CLEAN-EXTRACT PROOF: REQUIRED AFTER DELIVERY ZIP SEAL (final handoff report is authoritative)
 
 COMPILER STATUS BEFORE ACTIONS
 REAL GLSL COMPILE: NOT RUN locally (pinned real compiler remains an Actions gate)
 REAL KOTLIN COMPILE: N/A
 REAL JAVA PROJECT COMPILE: NOT RUN locally
 FULL ANDROID :app:assembleDebug: NOT RUN locally
-FINAL ACTIONS AUTHORITY: V2.28 remains final until V2.29 succeeds
+FINAL ACTIONS AUTHORITY: successful V2.29 remains final until V2.30 succeeds

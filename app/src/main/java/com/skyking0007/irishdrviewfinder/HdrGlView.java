@@ -2,10 +2,10 @@ package com.skyking0007.irishdrviewfinder;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.opengl.GLES11Ext;
 import android.opengl.GLES30;
-import android.opengl.GLUtils;
 import android.opengl.GLSurfaceView;
 import android.util.AttributeSet;
 import android.view.Surface;
@@ -199,10 +199,11 @@ final class HdrGlView extends GLSurfaceView {
         requestRender();
     }
 
-    void fuseStillJpegs(
-            byte[] shortJpeg,
-            byte[] longJpeg,
+    void fuseStillRaws(
+            RawFusion.RawFrame shortRaw,
+            RawFusion.RawFrame longRaw,
             double exposureRatio,
+            int captureOrientationDegrees,
             float brightnessEv,
             float gamma,
             float dehaze,
@@ -211,9 +212,9 @@ final class HdrGlView extends GLSurfaceView {
         if (callback == null) return;
         queueEvent(() -> {
             try {
-                byte[] fused = renderer.fuseStillJpegs(
-                        shortJpeg, longJpeg, exposureRatio, brightnessEv, gamma,
-                        dehaze, microContrast);
+                byte[] fused = renderer.fuseStillRaws(
+                        shortRaw, longRaw, exposureRatio, captureOrientationDegrees,
+                        brightnessEv, gamma, dehaze, microContrast);
                 callback.onComplete(fused, null);
             } catch (Throwable t) {
                 callback.onComplete(null, t);
@@ -280,6 +281,7 @@ final class HdrGlView extends GLSurfaceView {
         private int oesProgram;
         private int copyProgram;
         private int displayProgram;
+        private int rawReconstructProgram;
         private int externalTexture;
         private int normalTexture;
         private int shortTexture;
@@ -340,9 +342,11 @@ final class HdrGlView extends GLSurfaceView {
             String oesShader = loadAsset(context, "shaders/oes_to_rgb.frag");
             String copyShader = loadAsset(context, "shaders/copy_2d.frag");
             String displayShader = loadAsset(context, "shaders/hdr_display.frag");
+            String rawReconstructShader = loadAsset(context, "shaders/raw_reconstruct.frag");
             oesProgram = buildProgram(vertexShader, oesShader);
             copyProgram = buildProgram(vertexShader, copyShader);
             displayProgram = buildProgram(vertexShader, displayShader);
+            rawReconstructProgram = buildProgram(vertexShader, rawReconstructShader);
 
             externalTexture = createExternalTexture();
             normalTexture = createTexture2d();
@@ -821,6 +825,9 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillShortScalarGain"),
                     ratio);
+            GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(displayProgram, "stillGlobalShortOffsetPixels"),
+                    0.0f, 0.0f);
             // Local residual flow remains saved-still-only. Live HDR uses a
             // conservative direct-coordinate information-loss selector and fails
             // closed to LONG whenever temporal mismatch makes SHORT uncertain.
@@ -834,80 +841,54 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
         }
 
-        private byte[] fuseStillJpegs(
-                byte[] shortJpeg,
-                byte[] longJpeg,
+        private byte[] fuseStillRaws(
+                RawFusion.RawFrame shortRaw,
+                RawFusion.RawFrame longRaw,
                 double exposureRatio,
+                int captureOrientationDegrees,
                 float brightnessEv,
                 float gamma,
                 float dehaze,
                 float microContrast) throws Exception {
             long startedNs = System.nanoTime();
-            Bitmap shortBitmap = JpegFusion.decodeUpright(shortJpeg);
-            Bitmap longBitmap = JpegFusion.decodeUpright(longJpeg);
-            if (shortBitmap == null || longBitmap == null) {
-                JpegFusion.recycleBitmap(shortBitmap);
-                JpegFusion.recycleBitmap(longBitmap);
-                throw new IllegalStateException("Unable to decode capture JPEGs for GPU fusion");
+            if (shortRaw == null || longRaw == null) {
+                throw new IllegalStateException("V2.30 RAW fusion requires both sensor frames");
             }
-            if (shortBitmap.getWidth() != longBitmap.getWidth()
-                    || shortBitmap.getHeight() != longBitmap.getHeight()) {
-                JpegFusion.recycleBitmap(shortBitmap);
-                JpegFusion.recycleBitmap(longBitmap);
-                throw new IllegalStateException("Short/long JPEG dimensions do not match for GPU fusion");
+            if (shortRaw.width != longRaw.width || shortRaw.height != longRaw.height) {
+                throw new IllegalStateException(
+                        "SHORT/LONG RAW dimensions differ: "
+                                + shortRaw.width + "x" + shortRaw.height + " vs "
+                                + longRaw.width + "x" + longRaw.height);
+            }
+            if (shortRaw.cfaArrangement != longRaw.cfaArrangement) {
+                throw new IllegalStateException("SHORT/LONG RAW CFA arrangement changed within pair");
+            }
+            if (!(exposureRatio >= 1.0) || !Double.isFinite(exposureRatio)) {
+                throw new IllegalStateException("Invalid physical RAW LONG/SHORT ratio " + exposureRatio);
             }
 
-            // V2.17 reverses V2.15 geometry ownership: LONG is the immutable clean
-            // output body and is never globally or locally moved. SHORT is the only
-            // source aligned into LONG coordinates, first by the proven bidirectional
-            // global registration and then by the same bounded residual field.
-            JpegFusion.Registration registration = JpegFusion.estimateRegistration(shortBitmap, longBitmap);
-            Bitmap alignedShort = JpegFusion.alignLongToShort(shortBitmap, registration);
-            JpegFusion.recycleBitmap(shortBitmap);
-            shortBitmap = alignedShort;
-            JpegFusion.LocalRegistrationField localRegistration =
-                    JpegFusion.estimateLocalRegistration(shortBitmap, longBitmap);
-            JpegFusion.AppearanceGain appearanceGain =
-                    JpegFusion.estimateAppearanceGain(shortBitmap, longBitmap, exposureRatio);
-            float scalarGain = median3(appearanceGain.r, appearanceGain.g, appearanceGain.b);
-            scalarGain = Math.max(1.0f, Math.min(65_536.0f, scalarGain));
-            RuntimeLogger.event(
-                    "GPU_STILL_REGISTRATION",
-                    String.format(java.util.Locale.US,
-                            "sampleDx=%+.3f sampleDy=%+.3f score=%.4f margin=%.4f cycleFull=%.3f cycleAnalysis=%.3f coarseCycleAnalysis=%.3f refine=%.3f confidence=%.3f gain=%.3f/%.3f/%.3f scalar=%.3f",
-                            registration.sampleDx, registration.sampleDy, registration.score,
-                            registration.margin, registration.cycleError, registration.analysisCycleError,
-                            registration.coarseCycleErrorAnalysis, registration.refinementConfidence,
-                            registration.confidence, appearanceGain.r, appearanceGain.g,
-                            appearanceGain.b, scalarGain));
-            RuntimeLogger.event(
-                    "GPU_STILL_LOCAL_REGISTRATION",
-                    String.format(java.util.Locale.US,
-                            "grid=%dx%d meanConfidence=%.3f supported=%.3f observedResidual=%.2fpx bound=%.2fpx",
-                            localRegistration.gridWidth, localRegistration.gridHeight,
-                            localRegistration.meanConfidence, localRegistration.supportedFraction,
-                            localRegistration.observedResidualPixels,
-                            localRegistration.maxResidualPixels));
-
-            int width = shortBitmap.getWidth();
-            int height = shortBitmap.getHeight();
+            int width = longRaw.width;
+            int height = longRaw.height;
             int[] maxTexture = new int[1];
             GLES30.glGetIntegerv(GLES30.GL_MAX_TEXTURE_SIZE, maxTexture, 0);
             if (width > maxTexture[0] || height > maxTexture[0]) {
-                JpegFusion.recycleBitmap(shortBitmap);
-                JpegFusion.recycleBitmap(longBitmap);
                 throw new IllegalStateException(
-                        "Still dimensions exceed GL_MAX_TEXTURE_SIZE " + width + "x" + height
+                        "RAW dimensions exceed GL_MAX_TEXTURE_SIZE " + width + "x" + height
                                 + " max=" + maxTexture[0]);
             }
 
             RuntimeLogger.event(
-                    "GPU_STILL_FUSION",
+                    "GPU_STILL_RAW_FUSION",
                     String.format(java.util.Locale.US,
-                            "V2.20 ratio-invariant connected-region GPU fusion start %dx%d ratio=%.3f scalar=%.3f brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
-                            width, height, exposureRatio, scalarGain, brightnessEv, gamma,
-                            dehaze, microContrast));
+                            "V2.30 RAW_SENSOR fusion start %dx%d ratio=%.3f shortTs=%d longTs=%d brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
+                            width, height, exposureRatio,
+                            shortRaw.sensorTimestampNs, longRaw.sensorTimestampNs,
+                            brightnessEv, gamma, dehaze, microContrast));
 
+            int shortRawTexture = 0;
+            int longRawTexture = 0;
+            int shortShadingTexture = 0;
+            int longShadingTexture = 0;
             int shortTexture = 0;
             int longTexture = 0;
             int localFlowTexture = 0;
@@ -915,8 +896,16 @@ final class HdrGlView extends GLSurfaceView {
             int supportTexture = 0;
             int presentationTexture = 0;
             int outputTexture = 0;
+            Bitmap shortProxy = null;
+            Bitmap longProxy = null;
+            Bitmap alignedShortProxy = null;
             Bitmap output = null;
+            Bitmap orientedOutput = null;
             try {
+                shortRawTexture = createTexture2d();
+                longRawTexture = createTexture2d();
+                shortShadingTexture = createTexture2d();
+                longShadingTexture = createTexture2d();
                 shortTexture = createTexture2d();
                 longTexture = createTexture2d();
                 localFlowTexture = createTexture2d();
@@ -925,53 +914,93 @@ final class HdrGlView extends GLSurfaceView {
                 presentationTexture = createTexture2d();
                 outputTexture = createTexture2d();
 
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, shortTexture);
-                GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, shortBitmap, 0);
-                // SHORT is the aligned auxiliary, so retain the texture's proven LINEAR
-                // filtering for bounded subpixel residual sampling. LONG is immutable
-                // output detail and therefore remains exact/nearest-sampled.
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, longTexture);
-                GLUtils.texImage2D(GLES30.GL_TEXTURE_2D, 0, longBitmap, 0);
-                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);
-                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST);
+                uploadRaw16Texture(shortRawTexture, shortRaw);
+                uploadRaw16Texture(longRawTexture, longRaw);
+                uploadShadingTexture(shortShadingTexture, shortRaw);
+                uploadShadingTexture(longShadingTexture, longRaw);
+                allocateRgbTexture(shortTexture, width, height);
+                allocateRgbTexture(longTexture, width, height);
+
+                // One common color owner prevents a source boundary from acquiring a
+                // different WB/matrix. Per-frame black/white levels remain physical RAW
+                // owners, while LONG's matched WB + sensor->linear-sRGB transform owns
+                // both reconstructed observations.
+                renderRawReconstruction(
+                        shortTexture, shortRawTexture, shortShadingTexture, shortRaw, longRaw);
+                renderRawReconstruction(
+                        longTexture, longRawTexture, longShadingTexture, longRaw, longRaw);
+                deleteTexture(shortRawTexture);
+                shortRawTexture = 0;
+                deleteTexture(longRawTexture);
+                longRawTexture = 0;
+                deleteTexture(shortShadingTexture);
+                shortShadingTexture = 0;
+                deleteTexture(longShadingTexture);
+                longShadingTexture = 0;
+
+                // Registration evidence is read from the RAW-derived reconstructions.
+                // It never decodes or samples the saved HAL JPEGs.
+                shortProxy = readTextureBitmap(shortTexture, width, height);
+                longProxy = readTextureBitmap(longTexture, width, height);
+                JpegFusion.Registration registration =
+                        JpegFusion.estimateRegistration(shortProxy, longProxy);
+                alignedShortProxy = JpegFusion.alignLongToShort(shortProxy, registration);
+                JpegFusion.LocalRegistrationField localRegistration =
+                        JpegFusion.estimateLocalRegistration(alignedShortProxy, longProxy);
+                float scalarGain = (float) Math.max(1.0, Math.min(65_536.0, exposureRatio));
+                RuntimeLogger.event(
+                        "GPU_STILL_RAW_REGISTRATION",
+                        String.format(java.util.Locale.US,
+                                "sampleDx=%+.3f sampleDy=%+.3f score=%.4f margin=%.4f cycleFull=%.3f cycleAnalysis=%.3f coarseCycleAnalysis=%.3f refine=%.3f confidence=%.3f physicalScalar=%.3f",
+                                registration.sampleDx, registration.sampleDy, registration.score,
+                                registration.margin, registration.cycleError,
+                                registration.analysisCycleError,
+                                registration.coarseCycleErrorAnalysis,
+                                registration.refinementConfidence,
+                                registration.confidence, scalarGain));
+                RuntimeLogger.event(
+                        "GPU_STILL_RAW_LOCAL_REGISTRATION",
+                        String.format(java.util.Locale.US,
+                                "grid=%dx%d meanConfidence=%.3f supported=%.3f observedResidual=%.2fpx bound=%.2fpx",
+                                localRegistration.gridWidth, localRegistration.gridHeight,
+                                localRegistration.meanConfidence,
+                                localRegistration.supportedFraction,
+                                localRegistration.observedResidualPixels,
+                                localRegistration.maxResidualPixels));
+                JpegFusion.recycleBitmap(shortProxy);
+                shortProxy = null;
+                JpegFusion.recycleBitmap(longProxy);
+                longProxy = null;
+                JpegFusion.recycleBitmap(alignedShortProxy);
+                alignedShortProxy = null;
+
+                // SHORT is the only aligned auxiliary. The raw-derived SHORT texture is
+                // left in native sensor geometry; global + bounded local displacement is
+                // applied only while sampling it. LONG remains exact output geometry.
+                setTextureFilter(shortTexture, GLES30.GL_LINEAR);
+                setTextureFilter(longTexture, GLES30.GL_NEAREST);
                 uploadRgba8Texture(
                         localFlowTexture,
                         localRegistration.gridWidth,
                         localRegistration.gridHeight,
                         localRegistration.rgba);
-                // V2.17 keeps the same 1/16 analysis allocation. The atlas owns only
-                // recovery topology; it never contains source RGB/detail.
+
                 int analysisWidth = Math.max(1, (width + 15) / 16);
                 int analysisHeight = Math.max(1, (height + 15) / 16);
                 allocateRgbTexture(evidenceTexture, analysisWidth, analysisHeight);
                 allocateRgbTexture(supportTexture, analysisWidth, analysisHeight);
-                // V2.20 topology passes are discrete mask reconstruction. Sampling must
-                // remain exact during ping-pong propagation so bilinear filtering cannot
-                // jump a LONG-valid barrier or create a synthetic half-owned atlas cell.
                 setTextureFilter(evidenceTexture, GLES30.GL_NEAREST);
                 setTextureFilter(supportTexture, GLES30.GL_NEAREST);
                 allocateRgbTexture(presentationTexture, width, height);
-                // Mode 6 is full-resolution pointwise presentation. Keep the
-                // mode-5 fused raster nearest-sampled so no post-fusion texture
-                // interpolation can create a third source boundary.
-                GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, presentationTexture);
-                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);
-                GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST);
+                setTextureFilter(presentationTexture, GLES30.GL_NEAREST);
                 allocateRgbTexture(outputTexture, width, height);
-                JpegFusion.recycleBitmap(shortBitmap);
-                shortBitmap = null;
-                JpegFusion.recycleBitmap(longBitmap);
-                longBitmap = null;
 
-                // V2.20 keeps the existing GPU-only saved-still source ownership but
-                // replaces finite-radius closure with true mask-constrained geodesic
-                // reconstruction. Mode 3 creates a strict seed + allowed LONG-loss
-                // domain; mode 4 ping-pongs until ownership occupancy stops growing.
                 renderStillPass(
                         evidenceTexture, analysisWidth, analysisHeight,
                         3, longTexture, shortTexture, longTexture,
                         exposureRatio, brightnessEv, gamma, dehaze, microContrast,
                         registration.confidence, scalarGain,
+                        registration.sampleDx, registration.sampleDy,
                         localFlowTexture, width, height,
                         localRegistration.maxResidualPixels);
                 int[] initialCounts = countAtlasMasks(evidenceTexture, analysisWidth, analysisHeight);
@@ -984,14 +1013,14 @@ final class HdrGlView extends GLSurfaceView {
                 int maxPropagationPasses = Math.min(1024, Math.max(64, analysisWidth * analysisHeight));
                 final int convergenceBatch = 8;
                 while (propagationPasses < maxPropagationPasses) {
-                    int batchEnd = Math.min(
-                            maxPropagationPasses, propagationPasses + convergenceBatch);
+                    int batchEnd = Math.min(maxPropagationPasses, propagationPasses + convergenceBatch);
                     while (propagationPasses < batchEnd) {
                         renderStillPass(
                                 writeTopologyTexture, analysisWidth, analysisHeight,
                                 4, readTopologyTexture, shortTexture, longTexture,
                                 exposureRatio, brightnessEv, gamma, dehaze, microContrast,
                                 registration.confidence, scalarGain,
+                                registration.sampleDx, registration.sampleDy,
                                 localFlowTexture, width, height,
                                 localRegistration.maxResidualPixels);
                         int swap = readTopologyTexture;
@@ -999,8 +1028,7 @@ final class HdrGlView extends GLSurfaceView {
                         writeTopologyTexture = swap;
                         propagationPasses++;
                     }
-                    int[] counts = countAtlasMasks(
-                            readTopologyTexture, analysisWidth, analysisHeight);
+                    int[] counts = countAtlasMasks(readTopologyTexture, analysisWidth, analysisHeight);
                     if (counts[0] == previousOwned) {
                         propagationConverged = true;
                         break;
@@ -1017,22 +1045,20 @@ final class HdrGlView extends GLSurfaceView {
                 }
                 RuntimeLogger.event(
                         "GPU_STILL_TOPOLOGY",
-                        "V2.20 seed=" + initialCounts[0]
+                        "V2.30 RAW seed=" + initialCounts[0]
                                 + " owned=" + previousOwned
                                 + " domain=" + domainCells
                                 + " passes=" + propagationPasses
                                 + " converged=" + propagationConverged
                                 + " atlas=" + analysisWidth + "x" + analysisHeight);
 
-                // Reconstruction sampling is exact while iterating. Restore LINEAR only
-                // for the final atlas lookup so the binary 0.5 source boundary retains
-                // the proven sub-cell placement without ever mixing source RGB.
                 setTextureFilter(readTopologyTexture, GLES30.GL_LINEAR);
                 renderStillPass(
                         presentationTexture, width, height,
                         5, readTopologyTexture, shortTexture, longTexture,
                         exposureRatio, brightnessEv, gamma, dehaze, microContrast,
                         registration.confidence, scalarGain,
+                        registration.sampleDx, registration.sampleDy,
                         localFlowTexture, width, height,
                         localRegistration.maxResidualPixels);
                 renderStillPass(
@@ -1040,51 +1066,206 @@ final class HdrGlView extends GLSurfaceView {
                         6, presentationTexture, shortTexture, longTexture,
                         exposureRatio, brightnessEv, gamma, dehaze, microContrast,
                         registration.confidence, scalarGain,
+                        registration.sampleDx, registration.sampleDy,
                         localFlowTexture, width, height,
                         localRegistration.maxResidualPixels);
 
-                ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4)
-                        .order(ByteOrder.nativeOrder());
-                GLES30.glReadPixels(
-                        0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, rgba);
-                rgba.rewind();
-                int[] pixels = new int[width * height];
-                for (int i = 0; i < pixels.length; i++) {
-                    int r = rgba.get() & 0xFF;
-                    int g = rgba.get() & 0xFF;
-                    int b = rgba.get() & 0xFF;
-                    rgba.get();
-                    pixels[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
-                }
-                output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                // GL texture upload and glReadPixels have opposite vertical origins,
-                // so the two inversions cancel and the sequential rows are upright.
-                output.setPixels(pixels, 0, width, 0, 0, width, height);
-                byte[] encoded = JpegFusion.encodeJpeg(output);
+                output = readTextureBitmap(outputTexture, width, height);
+                orientedOutput = rotateBitmap(output, captureOrientationDegrees);
+                byte[] encoded = JpegFusion.encodeJpeg(orientedOutput);
                 long elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L;
                 RuntimeLogger.event(
-                        "GPU_STILL_FUSION",
-                        "V2.20 GPU-only connected-region complete ms=" + elapsedMs
-                                + " outputBytes=" + encoded.length);
+                        "GPU_STILL_RAW_FUSION",
+                        "V2.30 RAW_SENSOR fusion complete ms=" + elapsedMs
+                                + " outputBytes=" + encoded.length
+                                + " orientation=" + captureOrientationDegrees);
                 return encoded;
             } finally {
-                JpegFusion.recycleBitmap(shortBitmap);
-                JpegFusion.recycleBitmap(longBitmap);
+                JpegFusion.recycleBitmap(shortProxy);
+                JpegFusion.recycleBitmap(longProxy);
+                JpegFusion.recycleBitmap(alignedShortProxy);
+                if (orientedOutput != output) JpegFusion.recycleBitmap(orientedOutput);
                 JpegFusion.recycleBitmap(output);
                 int[] textures = {
+                        shortRawTexture, longRawTexture, shortShadingTexture, longShadingTexture,
                         shortTexture, longTexture, localFlowTexture, evidenceTexture,
                         supportTexture, presentationTexture, outputTexture};
-                for (int texture : textures) {
-                    if (texture != 0) {
-                        int[] one = {texture};
-                        GLES30.glDeleteTextures(1, one, 0);
-                    }
-                }
+                for (int texture : textures) deleteTexture(texture);
                 GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0);
                 if (surfaceWidth > 0 && surfaceHeight > 0) {
                     GLES30.glViewport(0, 0, surfaceWidth, surfaceHeight);
                 }
             }
+        }
+
+        private void uploadRaw16Texture(int texture, RawFusion.RawFrame frame) {
+            if (texture == 0 || frame == null || frame.width <= 0 || frame.height <= 0
+                    || frame.pixels == null || frame.pixels.length != frame.width * frame.height) {
+                throw new IllegalArgumentException("Invalid V2.30 RAW texture payload");
+            }
+            ByteBuffer pixels = frame.directUnsigned16Buffer();
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
+            GLES30.glTexParameteri(
+                    GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);
+            GLES30.glTexParameteri(
+                    GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST);
+            GLES30.glTexImage2D(
+                    GLES30.GL_TEXTURE_2D,
+                    0,
+                    GLES30.GL_R16,
+                    frame.width,
+                    frame.height,
+                    0,
+                    GLES30.GL_RED,
+                    GLES30.GL_UNSIGNED_SHORT,
+                    pixels);
+            int error = GLES30.glGetError();
+            if (error != GLES30.GL_NO_ERROR) {
+                throw new IllegalStateException(
+                        "V2.30 RAW GL_R16 upload failed: 0x" + Integer.toHexString(error));
+            }
+        }
+
+        private void uploadShadingTexture(int texture, RawFusion.RawFrame frame) {
+            if (texture == 0 || frame == null || frame.shadingMapWidth <= 0
+                    || frame.shadingMapHeight <= 0 || frame.shadingMapRgba == null
+                    || frame.shadingMapRgba.length
+                            != frame.shadingMapWidth * frame.shadingMapHeight * 4) {
+                throw new IllegalArgumentException("Invalid V2.30 RAW lens shading map");
+            }
+            ByteBuffer bytes = ByteBuffer.allocateDirect(frame.shadingMapRgba.length * 4)
+                    .order(ByteOrder.nativeOrder());
+            bytes.asFloatBuffer().put(frame.shadingMapRgba);
+            bytes.position(0);
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
+            GLES30.glTexParameteri(
+                    GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_NEAREST);
+            GLES30.glTexParameteri(
+                    GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_NEAREST);
+            GLES30.glTexImage2D(
+                    GLES30.GL_TEXTURE_2D,
+                    0,
+                    GLES30.GL_RGBA32F,
+                    frame.shadingMapWidth,
+                    frame.shadingMapHeight,
+                    0,
+                    GLES30.GL_RGBA,
+                    GLES30.GL_FLOAT,
+                    bytes);
+            int error = GLES30.glGetError();
+            if (error != GLES30.GL_NO_ERROR) {
+                throw new IllegalStateException(
+                        "V2.30 RAW lens shading upload failed: 0x"
+                                + Integer.toHexString(error));
+            }
+        }
+
+        private void renderRawReconstruction(
+                int targetTexture,
+                int rawTexture,
+                int shadingTexture,
+                RawFusion.RawFrame sourceFrame,
+                RawFusion.RawFrame colorOwner) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+            GLES30.glFramebufferTexture2D(
+                    GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                    GLES30.GL_TEXTURE_2D, targetTexture, 0);
+            int status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
+            if (status != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                throw new IllegalStateException(
+                        "V2.30 RAW reconstruction framebuffer incomplete: 0x"
+                                + Integer.toHexString(status));
+            }
+            GLES30.glViewport(0, 0, sourceFrame.width, sourceFrame.height);
+            GLES30.glUseProgram(rawReconstructProgram);
+            bindQuad();
+            bindSampler2d(rawReconstructProgram, "rawTex", rawTexture, 0);
+            bindSampler2d(rawReconstructProgram, "shadingTex", shadingTexture, 1);
+
+            float codeScale = 1.0f / 65535.0f;
+            float[] black = sourceFrame.blackPattern;
+            GLES30.glUniform4f(
+                    GLES30.glGetUniformLocation(rawReconstructProgram, "blackPatternCode"),
+                    black[0] * codeScale,
+                    black[1] * codeScale,
+                    black[2] * codeScale,
+                    black[3] * codeScale);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(rawReconstructProgram, "whiteLevelCode"),
+                    sourceFrame.whiteLevel * codeScale);
+            GLES30.glUniform1i(
+                    GLES30.glGetUniformLocation(rawReconstructProgram, "cfaArrangement"),
+                    sourceFrame.cfaArrangement);
+            float[] wb = colorOwner.wbGains;
+            GLES30.glUniform4f(
+                    GLES30.glGetUniformLocation(rawReconstructProgram, "wbGains"),
+                    wb[0], wb[1], wb[2], wb[3]);
+            float[] m = colorOwner.colorTransformRows;
+            GLES30.glUniform3f(
+                    GLES30.glGetUniformLocation(rawReconstructProgram, "colorRow0"),
+                    m[0], m[1], m[2]);
+            GLES30.glUniform3f(
+                    GLES30.glGetUniformLocation(rawReconstructProgram, "colorRow1"),
+                    m[3], m[4], m[5]);
+            GLES30.glUniform3f(
+                    GLES30.glGetUniformLocation(rawReconstructProgram, "colorRow2"),
+                    m[6], m[7], m[8]);
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+            int error = GLES30.glGetError();
+            if (error != GLES30.GL_NO_ERROR) {
+                throw new IllegalStateException(
+                        "V2.30 RAW reconstruction GL failure: 0x"
+                                + Integer.toHexString(error));
+            }
+        }
+
+        private Bitmap readTextureBitmap(int texture, int width, int height) {
+            ByteBuffer rgba = ByteBuffer.allocateDirect(width * height * 4)
+                    .order(ByteOrder.nativeOrder());
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+            GLES30.glFramebufferTexture2D(
+                    GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                    GLES30.GL_TEXTURE_2D, texture, 0);
+            int status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
+            if (status != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                throw new IllegalStateException(
+                        "V2.30 readback framebuffer incomplete: 0x"
+                                + Integer.toHexString(status));
+            }
+            GLES30.glViewport(0, 0, width, height);
+            GLES30.glReadPixels(
+                    0, 0, width, height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, rgba);
+            rgba.rewind();
+            int[] pixels = new int[width * height];
+            for (int i = 0; i < pixels.length; i++) {
+                int r = rgba.get() & 0xFF;
+                int g = rgba.get() & 0xFF;
+                int b = rgba.get() & 0xFF;
+                rgba.get();
+                pixels[i] = 0xFF000000 | (r << 16) | (g << 8) | b;
+            }
+            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
+            return bitmap;
+        }
+
+        private static Bitmap rotateBitmap(Bitmap source, int degrees) {
+            if (source == null) return null;
+            int normalized = ((degrees % 360) + 360) % 360;
+            if (normalized == 0) return source;
+            if (normalized != 90 && normalized != 180 && normalized != 270) {
+                throw new IllegalArgumentException("RAW output orientation must be multiple of 90");
+            }
+            Matrix matrix = new Matrix();
+            matrix.postRotate(normalized);
+            return Bitmap.createBitmap(
+                    source, 0, 0, source.getWidth(), source.getHeight(), matrix, true);
+        }
+
+        private static void deleteTexture(int texture) {
+            if (texture == 0) return;
+            int[] one = {texture};
+            GLES30.glDeleteTextures(1, one, 0);
         }
 
         private void renderStillPass(
@@ -1102,6 +1283,8 @@ final class HdrGlView extends GLSurfaceView {
                 float microContrast,
                 float registrationConfidence,
                 float scalarGain,
+                float globalShortDx,
+                float globalShortDy,
                 int localFlowTexture,
                 int stillWidth,
                 int stillHeight,
@@ -1155,6 +1338,9 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1f(
                     GLES30.glGetUniformLocation(displayProgram, "stillShortScalarGain"),
                     scalarGain);
+            GLES30.glUniform2f(
+                    GLES30.glGetUniformLocation(displayProgram, "stillGlobalShortOffsetPixels"),
+                    globalShortDx, globalShortDy);
             GLES30.glUniform1i(
                     GLES30.glGetUniformLocation(displayProgram, "haveLocalFlow"),
                     localFlowTexture != 0 ? 1 : 0);
@@ -1200,10 +1386,6 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texture);
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, filter);
             GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, filter);
-        }
-
-        private static float median3(float a, float b, float c) {
-            return a + b + c - Math.max(a, Math.max(b, c)) - Math.min(a, Math.min(b, c));
         }
 
         private void bindQuad() {
