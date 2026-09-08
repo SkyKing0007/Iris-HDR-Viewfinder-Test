@@ -395,12 +395,14 @@ float longEffectiveLossAt(vec2 sampleUv) {
     float shortBroadRange = broadRanges.x;
     float longBroadRange = broadRanges.y;
 
-    // V2.26 information-loss authority: LONG need not be numerically clipped.
-    // A bright/upper-mid LONG region is effectively lost when exposure-normalized
-    // SHORT preserves materially more local scene variation at medium or broad
-    // scale. This is what admits shutters/clouds/frosted housings that V2.25 left
-    // flattened even though SHORT visibly retained them.
-    float brightContext = smoothstep(0.55, 0.86, max3(longRgb));
+    // IRIS_V229_INFORMATION_LOSS_NOT_WHITE_GATED_BEGIN
+    // V2.29: information loss is not a synonym for near-white LONG. A LONG sample
+    // that is safely above the encoded black/noise floor may still have lost real
+    // local variation that the exposure-normalized SHORT retains. Keep the existing
+    // multi-scale dominance + radiometric plausibility proof, but make source
+    // observability -- not highlight brightness -- the contextual gate.
+    float observableContext = smoothstep(0.08, 0.20, max3(longRgb));
+    // IRIS_V229_INFORMATION_LOSS_NOT_WHITE_GATED_END
     float mediumStructure = smoothstep(0.004, 0.022, shortMediumRange);
     float mediumDominance = smoothstep(
         0.0020, 0.020, shortMediumRange - 1.10 * longMediumRange);
@@ -419,7 +421,7 @@ float longEffectiveLossAt(vec2 sampleUv) {
     float informationDominance = max(
         mediumStructure * mediumDominance,
         broadStructure * broadDominance);
-    return brightContext * informationDominance * radiometricPlausibility;
+    return observableContext * informationDominance * radiometricPlausibility;
 }
 
 float shortRecoveryEvidenceAt(vec2 sampleUv) {
@@ -598,17 +600,21 @@ vec3 applyAdaptiveClarity(vec3 rgb, vec2 sampleUv) {
 // IRIS_V212_ADAPTIVE_CLARITY_END
 
 vec3 applyPhotographicBodyTone(vec3 rgb) {
-    // Global SDR photographic tone reproduction: anchor true blacks, lift the
-    // body/midtones modestly, and make that lift exactly disappear before the
-    // existing HDR shoulder starts at 0.70. No local contrast/pop operator.
+    // IRIS_V229_PRE_SHOULDER_HDR_ENERGY_PRESERVATION_BEGIN
+    // Body tone is upstream of adaptiveHdrToneMap and therefore must not project
+    // scene-linear HDR back into [0,1]. V2.28's gamutScale silently collapsed any
+    // >1.0 SHORT-derived energy before the HDR shoulder could order/compress it.
+    // Preserve the complete recovered-highlight interval exactly; below it, apply
+    // only the existing bounded luminance body lift and let the HDR shoulder own
+    // the first display-referred projection.
     float y = linearLuma(rgb);
-    if (y <= 0.000001) return rgb;
+    if (y <= 0.000001 || y >= 0.70 || max3(rgb) > 1.0) return rgb;
     float toe = smoothstep(0.015, 0.090, y);
     float highlightProtect = 1.0 - smoothstep(0.45, 0.68, y);
     float targetY = y + 0.45 * toe * highlightProtect * y * (1.0 - clamp(y, 0.0, 1.0));
     float requestedScale = targetY / y;
-    float gamutScale = 1.0 / max(max3(rgb), 0.000001);
-    return rgb * min(requestedScale, gamutScale);
+    return rgb * requestedScale;
+    // IRIS_V229_PRE_SHOULDER_HDR_ENERGY_PRESERVATION_END
 }
 
 void main() {
@@ -694,9 +700,10 @@ void main() {
         // Morphological reconstruction by dilation under a mask, not finite-radius
         // closing. Ownership can advance exactly one atlas cell per pass and only
         // through G==recoveryDomain. The operation is monotonic; already owned cells
-        // can never revert to LONG. The propagated BA residual lets a featureless
-        // clipped interior inherit coherent boundary geometry instead of reverting to
-        // a different global-only SHORT sample in the middle of a large plateau.
+        // can never revert to LONG. BA remains an internal coherence carrier for the
+        // topology walk only; V2.29 mode 5 never uses propagated BA to warp final
+        // pixels. Unsupported final panes therefore use the stable globally registered
+        // SHORT geometry rather than inheriting a path-propagated residual warp.
         vec2 atlasTexel = 1.0 / vec2(textureSize(normalTex, 0));
         vec4 centerState = texture(normalTex, uv);
         float currentOwned = step(0.5, centerState.r);
@@ -786,16 +793,25 @@ void main() {
         float ratio = clamp(exposureRatio, 1.0, 65536.0);
         float bracketStops = clamp(log2(max(ratio, 1.0001)), 0.0, 6.0);
         vec4 support = texture(normalTex, uv);
-        vec2 propagatedResidualPixels = (support.ba * 2.0 - vec2(1.0))
-            * localFlowMaxPixels;
-        vec2 shortOwnedUv = clamp(
-            uv + propagatedResidualPixels / max(stillImageSize, vec2(1.0)),
-            vec2(0.0), vec2(1.0));
-        vec3 shortRgb = texture(shortTex, shortOwnedUv).rgb;
+        // IRIS_V229_FULL_RES_FINAL_SHORT_OWNERSHIP_BEGIN
+        // The 16x16 atlas is connectivity authority only. It may prove that this
+        // full-resolution pixel belongs to a connected recoverable component, but
+        // it may not turn the entire atlas cell into SHORT. Re-evaluate the physical
+        // LONG-loss/usable-SHORT domain at the actual output pixel.
+        float connectedRecovery = step(0.50, support.r);
+        float fullResolutionLoss = max(
+            longLossRecoveryDomainAt(uv), shortRecoveryEvidenceAt(uv));
+        float shortOwns = connectedRecovery * step(0.16, fullResolutionLoss);
+
+        // The globally registered SHORT bitmap is already in immutable LONG geometry.
+        // Use the proven local residual field only where that field itself supplies it;
+        // unsupported panes therefore fall back to the stable global registration.
+        // Never warp a pane with a residual merely propagated along an atlas path.
+        vec3 shortRgb = stillShortRgbAt(uv);
+        // IRIS_V229_FULL_RES_FINAL_SHORT_OWNERSHIP_END
         vec3 longRgb = stillLongRgbAt(uv);
         vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;
         vec3 longScene = srgbToLinear(longRgb);
-        float shortOwns = step(0.50, support.r);
 
         // V2.27 low-DR body denoise is a separate owner from HDR replacement. Where
         // both exposures carry the same registered body information, use one scalar

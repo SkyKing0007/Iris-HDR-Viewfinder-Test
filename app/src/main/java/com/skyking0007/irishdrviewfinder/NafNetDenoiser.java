@@ -364,21 +364,27 @@ final class NafNetDenoiser {
         float broadChromaStd = Math.max(broadRgStd, broadBgStd);
 
         float lumaAuthority = 1.0f - smoothStep(LUMA_STD_SOFT, LUMA_STD_HARD, lumaStd);
-        float chromaAuthority = 1.0f - smoothStep(CHROMA_STD_SOFT, CHROMA_STD_HARD, chromaStd);
         float gradientAuthority = 1.0f - smoothStep(GRADIENT_SOFT, GRADIENT_HARD, gradient);
         float broadLumaAuthority = 1.0f - smoothStep(
                 BROAD_LUMA_STD_SOFT, BROAD_LUMA_STD_HARD, broadLumaStd);
-        float broadChromaAuthority = 1.0f - smoothStep(
-                BROAD_CHROMA_STD_SOFT, BROAD_CHROMA_STD_HARD, broadChromaStd);
         float coherentProtection = coherentStructureProtection(
                 tileIndex, integralTensorXx, integralTensorYy, integralTensorXy);
+
+        // IRIS_V229_CHROMA_NOISE_CANNOT_DISABLE_DENOISER_BEGIN
+        // Local/broad chroma variance is exactly the failure signal NAFNet is meant
+        // to clean on an otherwise smooth source. V2.28 used chromaStd itself as a
+        // veto, so sufficiently visible smooth-wall chroma noise could switch the
+        // denoiser off. Structural protection remains source-derived: luminance
+        // smoothness, local gradient, broad luminance consistency, and the RGB/opponent
+        // structure tensor still fail closed on coherent edges/microstructure.
+        // Keep the V2.28 chroma statistics available to this source-analysis path,
+        // but deliberately do not convert them into an authority veto: unstructured
+        // chroma variance is denoise evidence, not proof of real scene structure.
         float authority = Math.min(
-                Math.min(lumaAuthority, chromaAuthority),
-                Math.min(
-                        gradientAuthority,
-                        Math.min(
-                                Math.min(broadLumaAuthority, broadChromaAuthority),
-                                1.0f - coherentProtection)));
+                lumaAuthority,
+                Math.min(gradientAuthority,
+                        Math.min(broadLumaAuthority, 1.0f - coherentProtection)));
+        // IRIS_V229_CHROMA_NOISE_CANNOT_DISABLE_DENOISER_END
         // Positive proof only. Ambiguous texture/noise boundaries fail closed to source.
         return authority < 0.02f ? 0.0f : clamp01(authority);
     }

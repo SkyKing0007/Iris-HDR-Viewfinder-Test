@@ -26,7 +26,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.28 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.29 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -56,7 +56,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.28 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.29 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -728,13 +728,13 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# 038 / 042 / V2.28 - Exact successful V2.27 Actions artifact is runtime authority.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.27' in workflow
-        and 'run-id: 34143712210' in workflow
-        and "authority='6d19588bd1028c66d80609c9a9119de30df63f80'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.27 Actions authority")
-require("authority='555f06179f078f2a08453abbd032c67845b6e293'" not in workflow,
-        "V2.28 must not seed runtime from V2.26 after successful V2.27")
+# 038 / 042 / V2.29 - Exact successful V2.28 V1.1 Actions artifact is runtime authority.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.28' in workflow
+        and 'run-id: 34159490301' in workflow
+        and "authority='07d6259f1c2a5a0d9143b5c4dafd7d466090220c'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.28 Actions authority")
+require("authority='6d19588bd1028c66d80609c9a9119de30df63f80'" not in workflow,
+        "V2.29 must not seed runtime from V2.27 after successful V2.28")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -939,13 +939,13 @@ require('safeLong' not in short_call and 'manualIso' not in short_call
 flicker_solver_slice = camera[camera.index('    private ExposureSetting solveMinimumIsoFlickerSettingLocked('):
                               camera.index('    private static final class ExposureSetting')]
 manual_flicker_slice = camera[camera.index('    private boolean recomputeManualFlickerSafetyLocked()'):
-                              camera.index('    private int effectiveFlickerLocked()')]
+                              camera.index('    private void enforceAutoExposureOrderingLocked(String reason)')]
 require(hashlib.sha256(flicker_solver_slice.encode()).hexdigest() ==
         '70338617bf724bf03f96f2ab25c50e2b21bc06c920329df9561ac297dbc1c29f',
         "V2.17 physical minimum-ISO flicker solver changed")
 require(hashlib.sha256(manual_flicker_slice.encode()).hexdigest() ==
-        '735edbb4317c0cbf6b003b46e45247bd8d37a1b780c510eed6877e142c009214',
-        "V2.17 MANUAL flicker safety/order math changed")
+        'b7cd90754b4403529e5e3e7ac43115285aae66e1601887722296f50af2559108',
+        "V2.29 must preserve V2.28 MANUAL flicker/order math while changing AUTO only")
 require(camera.count('manualEffectiveShortExposureNs, manualEffectiveLongExposureNs') == 4
         and camera.count('manualEffectiveLongIso);') >= 4
         and 'listener.onManualSettings(shortExposureNs, longExposureNs, manualIso);' not in camera,
@@ -1335,11 +1335,11 @@ require('IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN' in hdr_shader
         "V2.21 seed/domain source-loss evidence chain is incomplete")
 require('localLinearRangeAtRadius(sampleUv, 4.0)' in hdr_shader
         and 'localLinearRangeAtRadius(sampleUv, 12.0)' in hdr_shader
-        and 'smoothstep(0.55, 0.86, max3(longRgb))' in hdr_shader
+        and 'smoothstep(0.08, 0.20, max3(longRgb))' in hdr_shader
         and 'shortMediumRange - 1.10 * longMediumRange' in hdr_shader
         and 'shortBroadRange - 1.08 * longBroadRange' in hdr_shader
         and '1.0 - smoothstep(1.25, 2.75, errorEv)' in hdr_shader,
-        "V2.26 effective LONG information-loss proof must admit preclip flattening while retaining medium/broad structure and plausibility guards")
+        "V2.29 effective LONG information-loss proof must admit observable preclip flattening while retaining medium/broad structure and plausibility guards")
 require('shortCoherentDetailAt' not in hdr_shader
         and 'float recoveryProof =' not in hdr_shader
         and 'step(0.58, recoveryProof)' not in hdr_shader,
@@ -1393,27 +1393,30 @@ require('meanFlowPixels' in v222_recon
         and 'registrationNeighborhoodFlowAt(uv)' in v222_recon,
         "wide clipped regions must inherit coherent residual geometry from proven seeds")
 
-# Saved mode 5 is reversed-V2.15 source truth: LONG by default, aligned SHORT as a
-# complete source only when the already-established ownership atlas selects it.
-require('IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN' in hdr_shader
-        and 'vec2 propagatedResidualPixels = (support.ba * 2.0 - vec2(1.0))' in hdr_shader
-        and 'vec2 shortOwnedUv = clamp(' in hdr_shader
-        and 'vec3 shortRgb = texture(shortTex, shortOwnedUv).rgb;' in hdr_shader
-        and 'vec3 longRgb = stillLongRgbAt(uv);' in hdr_shader
-        and 'vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;' in hdr_shader
-        and 'vec3 longScene = srgbToLinear(longRgb);' in hdr_shader,
-        "V2.21 mode 5 must use propagated SHORT residual geometry and immutable LONG candidates")
+# V2.29 final saved source ownership: the 16x16 atlas proves connected topology only.
+# Final source choice is re-evaluated at full resolution, and path-propagated BA flow
+# must never warp final SHORT. Unsupported local-flow panes fall back to the stable
+# globally registered SHORT bitmap through stillShortRgbAt().
+require('IRIS_V229_FULL_RES_FINAL_SHORT_OWNERSHIP_BEGIN' in hdr_shader
+        and 'float connectedRecovery = step(0.50, support.r);' in hdr_shader
+        and 'float fullResolutionLoss = max(' in hdr_shader
+        and 'longLossRecoveryDomainAt(uv), shortRecoveryEvidenceAt(uv)' in hdr_shader
+        and 'float shortOwns = connectedRecovery * step(0.16, fullResolutionLoss);' in hdr_shader
+        and 'vec3 shortRgb = stillShortRgbAt(uv);' in hdr_shader
+        and 'vec3 longRgb = stillLongRgbAt(uv);' in hdr_shader,
+        "V2.29 full-resolution LONG/SHORT source selector missing")
 v217_mode5 = hdr_shader[hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN'):
                          hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_END')]
-require('float shortOwns = step(0.50, support.r);' in v217_mode5
-        and 'vec3 temporalBody = mix(longScene, bodyShortScene, bodyShortWeight);' in v217_mode5
+require('support.ba' not in v217_mode5
+        and 'propagatedResidualPixels' not in v217_mode5
+        and 'shortOwnedUv' not in v217_mode5,
+        "V2.29 final raster must not consume path-propagated atlas flow")
+require('longLossRecoveryDomainAt(uv)' in v217_mode5
+        and 'shortRecoveryEvidenceAt(uv)' in v217_mode5,
+        "V2.29 final raster must prove source ownership at the actual output pixel")
+require('vec3 temporalBody = mix(longScene, bodyShortScene, bodyShortWeight);' in v217_mode5
         and 'vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;' in v217_mode5,
-        "V2.27 must retain coherent atlas SHORT highlight ownership over a LONG-default temporal body")
-require('shortRecoveryValidityAt(uv)' not in v217_mode5
-        and 'registrationNeighborhoodConfidenceAt(uv)' not in v217_mode5
-        and 'longHardLossBaseAt(uv)' not in v217_mode5
-        and 'longEffectiveLossAt(uv)' not in v217_mode5,
-        "mode 5 must not re-prove ownership per pixel and recreate V2.16 holes")
+        "V2.29 must preserve binary SHORT highlight ownership over LONG-default temporal body")
 require('mix(longScene, shortScene' not in v217_mode5
         and 'mix(shortScene, longScene' not in v217_mode5,
         "mode 5 must never create a fractional LONG/SHORT RGB sample")
@@ -1516,21 +1519,25 @@ require('cycleFull=%.3f cycleAnalysis=%.3f coarseCycleAnalysis=%.3f refine=%.3f 
         "V2.28 registration telemetry must expose full/analysis/coarse cycle and refinement confidence")
 v226_mode4 = hdr_shader[hdr_shader.index('    if (mode == 4) {'):
                           hdr_shader.index('    // IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_END')]
-require(hashlib.sha256(v226_mode4.encode()).hexdigest() ==
-        '4d3e3d756cfd365e8a161d8e42791f8a1647b1d7310b448051c79517b5848b0b',
-        "successful V2.25 geodesic topology propagation mechanics changed")
-v227_mode5_select = hdr_shader[hdr_shader.index('    if (mode == 5) {'):
+v226_mode4_code = ' '.join(
+        re.sub(r'//.*', '', line).strip()
+        for line in v226_mode4.splitlines()
+        if re.sub(r'//.*', '', line).strip())
+require(hashlib.sha256(v226_mode4_code.encode()).hexdigest() ==
+        '3dc1958d0eedeed47405a386e319b24a78cb3ca3427ca46e9d5a0c4f96b1198b',
+        "successful V2.25 geodesic topology propagation code changed")
+v229_mode5_select = hdr_shader[hdr_shader.index('    if (mode == 5) {'):
                                 hdr_shader.index('        float brightnessGain =', hdr_shader.index('    if (mode == 5) {'))]
-require('vec4 support = texture(normalTex, uv);' in v227_mode5_select
-        and 'vec2 propagatedResidualPixels = (support.ba * 2.0 - vec2(1.0))' in v227_mode5_select
-        and 'vec2 shortOwnedUv = clamp(' in v227_mode5_select
-        and 'float shortOwns = step(0.50, support.r);' in v227_mode5_select
-        and 'vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;' in v227_mode5_select,
-        "V2.27 must preserve V2.25 propagated binary SHORT highlight ownership while adding only temporal body SNR")
-require('shortRecoveryValidityAt(uv)' not in v227_mode5_select
-        and 'longHardLossBaseAt(uv)' not in v227_mode5_select
-        and 'longEffectiveLossAt(uv)' not in v227_mode5_select,
-        "mode-5 final raster must not re-prove highlight ownership and recreate gray islands")
+require('vec4 support = texture(normalTex, uv);' in v229_mode5_select
+        and 'float connectedRecovery = step(0.50, support.r);' in v229_mode5_select
+        and 'float shortOwns = connectedRecovery * step(0.16, fullResolutionLoss);' in v229_mode5_select
+        and 'vec3 shortRgb = stillShortRgbAt(uv);' in v229_mode5_select
+        and 'vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;' in v229_mode5_select,
+        "V2.29 must preserve geodesic connectivity while moving final ownership to full resolution")
+require('support.ba' not in v229_mode5_select
+        and 'propagatedResidualPixels' not in v229_mode5_select
+        and 'shortOwnedUv' not in v229_mode5_select,
+        "V2.29 path-propagated residual flow returned to final source sampling")
 fusion_provenance_prefix = fusion[
         fusion.index('    static byte[] fuse('):
         fusion.index('        float clampedBrightnessEv', fusion.index('    static byte[] fuse('))]
@@ -1635,6 +1642,67 @@ bad_coarse_confidence, _, _ = global_registration_confidence_v228(
 require(bad_coarse_confidence < 0.01,
         "V2.28 must still fail closed on genuinely inconsistent coarse bidirectional registration")
 
+# V2.29 bathroom-class source-ownership regression. The prior visual audit measured
+# useful exterior LONG levels around encoded 0.17..0.26; V2.28's 0.55 high-white gate
+# was identically zero there. V2.29 uses source observability while retaining the same
+# multi-scale information-dominance and radiometric plausibility proof.
+require('IRIS_V229_INFORMATION_LOSS_NOT_WHITE_GATED_BEGIN' in hdr_shader
+        and 'float observableContext = smoothstep(0.08, 0.20, max3(longRgb));' in hdr_shader
+        and 'float brightContext = smoothstep(0.55, 0.86, max3(longRgb));' not in hdr_shader
+        and 'informationDominance * radiometricPlausibility' in hdr_shader,
+        "V2.29 effective information loss must not be synonymous with near-white LONG")
+for encoded_long in (0.17, 0.20, 0.26):
+    old_context = smoothstep_math(0.55, 0.86, encoded_long)
+    new_context = smoothstep_math(0.08, 0.20, encoded_long)
+    require(old_context == 0.0 and new_context >= 0.84,
+            f"V2.29 bathroom observability regression failed at LONG={encoded_long}: old={old_context} new={new_context}")
+
+# The same connected 16x16 topology cell must be able to contain both final source
+# owners. Connectivity is necessary, but full-resolution information loss is decisive.
+def v229_final_short_owns(connected, full_loss):
+    return connected >= 0.5 and full_loss >= 0.16
+require(not v229_final_short_owns(1.0, 0.0) and v229_final_short_owns(1.0, 0.25),
+        "V2.29 final ownership collapsed back to whole-cell SHORT blocks")
+
+# V2.29 pre-shoulder HDR-energy regression: recovered scene values above 1.0 must
+# remain distinct until adaptiveHdrToneMap, whose stop-domain mapping stays monotonic.
+body_tone_slice = hdr_shader[hdr_shader.index('vec3 applyPhotographicBodyTone'):
+                             hdr_shader.index('void main()')]
+require('max3(rgb) > 1.0' in body_tone_slice
+        and 'float gamutScale =' not in body_tone_slice,
+        "V2.29 body tone still clips >1 scene energy before the HDR shoulder")
+for ratio in (1.0, 2.0, 4.0, 8.0, 16.0):
+    peaks = [1.05, 1.25, 1.60, 2.20]
+    mapped = [map_peak_math(p, ratio, 0.0) for p in peaks]
+    require(all(b > a for a, b in zip(mapped, mapped[1:])),
+            f"V2.29 HDR shoulder lost >1 scene ordering at ratio={ratio}: {mapped}")
+
+# V2.29 AUTO low-bracket physical-SNR owner. Preserve independently solved product,
+# but LONG may never integrate for less time than SHORT.
+auto_order_v229 = camera[camera.index('    private void enforceAutoExposureOrderingLocked(String reason)'):
+                         camera.index('    private boolean enforceFrozenExposureOrderingLocked()')]
+require('IRIS_V229_LONG_PHYSICAL_SNR_BODY_BEGIN' in auto_order_v229
+        and 'if (autoLongExposureNs < autoShortExposureNs)' in auto_order_v229
+        and 'autoLongExposureNs = autoShortExposureNs;' in auto_order_v229
+        and 'autoLongIso = solveIsoForProduct(longProduct, autoLongExposureNs);' in auto_order_v229,
+        "V2.29 AUTO LONG physical-SNR shutter owner missing")
+
+# V2.29 NAFNet: smooth chroma variance is a denoise symptom, not a veto. Universal
+# structural protection still uses luma plus R-G/B-G opponent gradients.
+naf_smooth = nafnet[nafnet.index('    private static float smoothSourceAuthority('):
+                       nafnet.index('    private static float coherentStructureProtection(')]
+naf_prepare = nafnet[nafnet.index('    private static void prepareTileAnalysis('):
+                        nafnet.index('    private static float smoothSourceAuthority(')]
+require('IRIS_V229_CHROMA_NOISE_CANNOT_DISABLE_DENOISER_BEGIN' in naf_smooth
+        and 'chromaAuthority' not in naf_smooth
+        and 'broadChromaAuthority' not in naf_smooth
+        and '1.0f - coherentProtection' in naf_smooth,
+        "V2.29 chroma-noise self-disable correction/structure fail-closed contract missing")
+require('gxRg' in naf_prepare and 'gyRg' in naf_prepare
+        and 'gxBg' in naf_prepare and 'gyBg' in naf_prepare
+        and 'tensorXx[i] = gxY * gxY + gxRg * gxRg + gxBg * gxBg;' in naf_prepare,
+        "V2.29 universal opponent-chroma structure tensor was weakened")
+
 
 # Global photographic body tone is tone reproduction only: black stays anchored,
 # body/midtones rise, and extra lift is zero before the 0.70 HDR shoulder.
@@ -1681,9 +1749,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 45' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.28"' in build_gradle,
-        "V2.28 version/build marker must be exact")
+require('versionCode = 46' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.29"' in build_gradle,
+        "V2.29 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2053,8 +2121,8 @@ require('RESIDUAL_MEAN_RADIUS = 12' in nafnet
 require('smoothSourceAuthority(' in nafnet
         and 'BROAD_SMOOTH_RADIUS = RESIDUAL_MEAN_RADIUS' in nafnet
         and 'broadLumaAuthority' in nafnet
-        and 'broadChromaAuthority' in nafnet,
-        "V2.24 neural authority must require a positively smooth broad source interior")
+        and 'broadChromaAuthority' not in nafnet[nafnet.index('    private static float smoothSourceAuthority('):nafnet.index('    private static float coherentStructureProtection(')],
+        "V2.29 NAFNet must keep broad luma smoothness while chroma noise cannot veto denoising")
 require('coherentStructureProtection(' in nafnet
         and 'integralTensorXx' in nafnet
         and '1.0f - coherentProtection' in nafnet
@@ -2067,12 +2135,12 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillJpegs(' not in service
         and 'fuseStillJpegs(' not in nafnet,
         "V2.24 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.27_to_V1.4.11-V2.28.forward.patch' in workflow
-        and 'V1.4.11-V2.28_to_V1.4.11-V2.27.rollback.patch' in workflow,
-        "V2.28 final artifact must export correctly named V2.27<->V2.28 patches")
+require('V1.4.11-V2.28_to_V1.4.11-V2.29.forward.patch' in workflow
+        and 'V1.4.11-V2.29_to_V1.4.11-V2.28.rollback.patch' in workflow,
+        "V2.29 final artifact must export correctly named V2.28<->V2.29 patches")
 require("if len(tracked) != 29:" in workflow
-        and "V1.4.11 V2.27 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "V1.4.11 V2.28 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.28 must preserve the 29-file V2.27 authority/candidate universe")
+        "V2.29 must preserve the 29-file V2.28 authority/candidate universe")
 
-print("V1.4.11 V2.28 REGRESSION PASS: successful V2.27 adaptive bracket/SNR/tone and local geodesic registration remain protected; global coarse registration now survives analysis-scale subpixel asymmetry without bypassing local motion barriers, and SHORT-owned recovery must retain real spatial detail rather than color alone")
+print("V1.4.11 V2.29 REGRESSION PASS: successful V2.28 registration remains protected; bathroom-class effective information loss is no longer near-white-gated, final SHORT ownership is full-resolution with global fallback for unsupported local panes, >1 scene energy reaches the HDR shoulder, AUTO LONG is not physically shorter than SHORT, and smooth chroma noise cannot disable NAFNet while coherent structure protection remains active")
