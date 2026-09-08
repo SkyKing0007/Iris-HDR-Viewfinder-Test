@@ -2539,10 +2539,31 @@ final class CameraController {
     }
 
     private void enforceAutoExposureOrderingLocked(String reason) {
+        // IRIS_V229_LONG_PHYSICAL_SNR_BODY_BEGIN
+        // Exposure-product ordering alone is insufficient at a low bracket: the
+        // SHORT solver deliberately prefers low ISO and can otherwise choose a longer
+        // integration than LONG. That makes the nominal highlight frame the better
+        // photon/SNR body observation. Preserve LONG's solved exposure product, but
+        // never let AUTO LONG integrate for less time than AUTO SHORT. Rebalancing
+        // the same product toward shutter and away from ISO changes no brightness
+        // target and leaves the independent SHORT headroom solve intact.
         double shortProduct = Math.max(1.0, (double) autoShortExposureNs * autoShortIso);
         double longProduct = Math.max(1.0, (double) autoLongExposureNs * autoLongIso);
-        if (longProduct >= shortProduct) return;
+        if (autoLongExposureNs < autoShortExposureNs) {
+            long oldLongExposure = autoLongExposureNs;
+            int oldLongIso = autoLongIso;
+            autoLongExposureNs = autoShortExposureNs;
+            autoLongIso = solveIsoForProduct(longProduct, autoLongExposureNs);
+            longProduct = Math.max(1.0, (double) autoLongExposureNs * autoLongIso);
+            RuntimeLogger.event(
+                    "AUTO_LONG_PHYSICAL_SNR_GUARD",
+                    "AUTO " + reason + " LONG shutter/SNR owner "
+                            + exposureText(oldLongExposure) + " ISO" + oldLongIso
+                            + " -> " + exposureText(autoLongExposureNs) + " ISO" + autoLongIso
+                            + " while preserving body product");
+        }
 
+        if (longProduct >= shortProduct) return;
         long oldLongExposure = autoLongExposureNs;
         int oldLongIso = autoLongIso;
         autoLongExposureNs = Math.max(autoLongExposureNs, autoShortExposureNs);
@@ -2554,6 +2575,7 @@ final class CameraController {
                 "AUTO " + reason + " LONG raised only " + exposureText(oldLongExposure) + " ISO"
                         + oldLongIso + " -> " + exposureText(autoLongExposureNs) + " ISO"
                         + autoLongIso + " to keep SHORT<=LONG");
+        // IRIS_V229_LONG_PHYSICAL_SNR_BODY_END
     }
 
     private boolean enforceFrozenExposureOrderingLocked() {
