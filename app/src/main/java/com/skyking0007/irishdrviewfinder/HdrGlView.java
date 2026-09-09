@@ -949,7 +949,8 @@ final class HdrGlView extends GLSurfaceView {
                 uploadShadingTexture(shadingTexture, shortRaw);
                 renderRawPreprocess(
                         presentationTexture, rawInputTexture, shadingTexture, shortRaw);
-                renderRawGreen(outputTexture, presentationTexture, shortRaw);
+                renderRawGreen(
+                        outputTexture, presentationTexture, rawInputTexture, shortRaw, longRaw);
                 renderRawReconstruction(
                         shortTexture, presentationTexture, outputTexture, shortRaw, longRaw);
                 renderRawChromaDealias(presentationTexture, shortTexture, width, height);
@@ -961,7 +962,8 @@ final class HdrGlView extends GLSurfaceView {
                 uploadShadingTexture(shadingTexture, longRaw);
                 renderRawPreprocess(
                         presentationTexture, rawInputTexture, shadingTexture, longRaw);
-                renderRawGreen(outputTexture, presentationTexture, longRaw);
+                renderRawGreen(
+                        outputTexture, presentationTexture, rawInputTexture, longRaw, longRaw);
                 renderRawReconstruction(
                         longTexture, presentationTexture, outputTexture, longRaw, longRaw);
                 renderRawChromaDealias(presentationTexture, longTexture, width, height);
@@ -1260,7 +1262,11 @@ final class HdrGlView extends GLSurfaceView {
         }
 
         private void renderRawGreen(
-                int targetTexture, int packedRawTexture, RawFusion.RawFrame sourceFrame) {
+                int targetTexture,
+                int packedRawTexture,
+                int rawTexture,
+                RawFusion.RawFrame sourceFrame,
+                RawFusion.RawFrame colorOwner) {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
             GLES30.glFramebufferTexture2D(
                     GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
@@ -1275,9 +1281,27 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUseProgram(rawGreenProgram);
             bindQuad();
             bindSampler2d(rawGreenProgram, "packedRawTex", packedRawTexture, 0);
+            bindSampler2d(rawGreenProgram, "rawTex", rawTexture, 1);
             GLES30.glUniform1i(
                     GLES30.glGetUniformLocation(rawGreenProgram, "cfaArrangement"),
                     sourceFrame.cfaArrangement);
+            float[] black = sourceFrame.blackPattern;
+            GLES30.glUniform4f(
+                    GLES30.glGetUniformLocation(rawGreenProgram, "blackPatternCode"),
+                    black[0], black[1], black[2], black[3]);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(rawGreenProgram, "whiteLevelCode"),
+                    sourceFrame.whiteLevel);
+            float[] wb = colorOwner.wbGains;
+            GLES30.glUniform4f(
+                    GLES30.glGetUniformLocation(rawGreenProgram, "wbGains"),
+                    wb[0], wb[1], wb[2], wb[3]);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(rawGreenProgram, "highlightClipThreshold"),
+                    0.985f);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(rawGreenProgram, "highlightCeiling"),
+                    8.0f);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
             int error = GLES30.glGetError();
             if (error != GLES30.GL_NO_ERROR) {

@@ -1,10 +1,17 @@
 #version 300 es
 precision highp float;
 precision highp int;
+precision highp usampler2D;
 in vec2 vUv;
 layout(location=0) out vec4 outColor;
 uniform sampler2D packedRawTex;
+uniform highp usampler2D rawTex;
 uniform int cfaArrangement;
+uniform vec4 blackPatternCode;
+uniform float whiteLevelCode;
+uniform vec4 wbGains;
+uniform float highlightClipThreshold;
+uniform float highlightCeiling;
 
 const float SIGNAL_COMPAND_K = 1.0;
 const float SIGMA_COMPAND_K = 0.01;
@@ -43,6 +50,20 @@ ivec2 clampPixel(ivec2 p) {
     return clamp(p, ivec2(0), size - ivec2(1));
 }
 
+int clampPhaseCoordinate(int value, int extent) {
+    int phase = value & 1;
+    if (phase >= extent) return extent - 1;
+    int last = phase + 2 * ((extent - 1 - phase) / 2);
+    return clamp(value, phase, last);
+}
+
+ivec2 phaseClamp(ivec2 p) {
+    ivec2 size = textureSize(rawTex, 0);
+    return ivec2(
+        clampPhaseCoordinate(p.x, size.x),
+        clampPhaseCoordinate(p.y, size.y));
+}
+
 float expandPositive(float encoded, float k) {
     float e = min(max(encoded, 0.0), 0.9999847);
     float e2 = e * e;
@@ -60,7 +81,8 @@ float unpack16Code(vec2 packed) {
     return highByte * 256.0 + lowByte;
 }
 
-// x=signal, y=sigma, z=literal physical-saturation flag.
+// x=the existing V2.34 lens-shaded linear CFA signal, y=physical sigma,
+// z=the literal pre-lens-shading sensor saturation bit produced by raw_preprocess.
 vec3 rawMeasurementAt(ivec2 p) {
     vec4 packed = texelFetch(packedRawTex, clampPixel(p), 0);
     float sigmaAndSat = unpack16Code(packed.ba);
@@ -70,6 +92,147 @@ vec3 rawMeasurementAt(ivec2 p) {
         expandPositive(unpack16Code(packed.rg) / 65535.0, SIGNAL_COMPAND_K),
         expandPositive(sigmaCode / 32767.0, SIGMA_COMPAND_K),
         saturation);
+}
+
+float blackAt(ivec2 p) {
+    int i = patternIndex(p);
+    if (i == 0) return blackPatternCode.x;
+    if (i == 1) return blackPatternCode.y;
+    if (i == 2) return blackPatternCode.z;
+    return blackPatternCode.w;
+}
+
+// The Claude diagnostic's clipping authority is the physical sensor domain before
+// calculation WB.  Read that domain directly from the still-live R16UI RAW texture;
+// do not infer clipping from the lens-shaded packed signal.
+float physicalSensorAt(ivec2 p) {
+    ivec2 q = phaseClamp(p);
+    float code = float(texelFetch(rawTex, q, 0).r);
+    float black = blackAt(q);
+    return max(code - black, 0.0) / max(whiteLevelCode - black, 0.000001);
+}
+
+float greenGain() {
+    return max(0.5 * (wbGains.y + wbGains.z), 0.000001);
+}
+
+float calculationWbForColor(int color) {
+    float g = greenGain();
+    if (color == 0) return wbGains.x / g;
+    if (color == 2) return wbGains.w / g;
+    return 1.0;
+}
+
+float nativeCalculationSample(ivec2 p) {
+    ivec2 q = phaseClamp(p);
+    return rawMeasurementAt(q).x * calculationWbForColor(colorAt(q));
+}
+
+// IRIS_V235_CLAUDE_EXACT_HIGHLIGHT_CALCULATION_SAMPLE_BEGIN
+// Literal semantic port of the old-Iris Claude prescription.  The reconstruction
+// itself is the original 3x3 opposed-channel power-3 mean, bounded below by the
+// clipped physical observation and above by highlightCeiling.  Only the carrier
+// plumbing is Viewfinder-native: values come from V2.34's already lens-shaded linear
+// CFA carrier, while clipMask comes from the exact pre-LSC sensor-normalized RAW.
+float highlightCalculationSample(ivec2 p) {
+    ivec2 q = phaseClamp(p);
+    int targetColor = colorAt(q);
+    float targetWb = max(calculationWbForColor(targetColor), 0.000001);
+    float sensor = physicalSensorAt(q);
+    float cameraFallback = rawMeasurementAt(q).x;
+    float clipMask = smoothstep(highlightClipThreshold, 1.0, sensor);
+    if (clipMask <= 0.0) return cameraFallback * targetWb;
+
+    float sumR = 0.0;
+    float sumG = 0.0;
+    float sumB = 0.0;
+    float countR = 0.0;
+    float countG = 0.0;
+    float countB = 0.0;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            ivec2 sampleP = phaseClamp(q + ivec2(dx, dy));
+            int sampleColor = colorAt(sampleP);
+            float value = nativeCalculationSample(sampleP);
+            if (sampleColor == 0) {
+                sumR += value;
+                countR += 1.0;
+            } else if (sampleColor == 1) {
+                sumG += value;
+                countG += 1.0;
+            } else {
+                sumB += value;
+                countB += 1.0;
+            }
+        }
+    }
+
+    const float power = 3.0;
+    float rootR = pow(max(sumR / max(countR, 1.0), 0.0), 1.0 / power);
+    float rootG = pow(max(sumG / max(countG, 1.0), 0.0), 1.0 / power);
+    float rootB = pow(max(sumB / max(countB, 1.0), 0.0), 1.0 / power);
+    float opposed = targetColor == 0
+        ? 0.5 * (rootG + rootB)
+        : (targetColor == 1
+            ? 0.5 * (rootR + rootB)
+            : 0.5 * (rootR + rootG));
+    float calculationFallback = cameraFallback * targetWb;
+    float reconstructed = pow(max(opposed, 0.0), power);
+    reconstructed = min(max(reconstructed, calculationFallback), highlightCeiling);
+    return mix(calculationFallback, reconstructed, clipMask);
+}
+// IRIS_V235_CLAUDE_EXACT_HIGHLIGHT_CALCULATION_SAMPLE_END
+
+// Keep the successful pre-hybrid Viewfinder edge weighting outside clipped regions.
+// Claude explicitly allowed porting highlightCalculationSample into the existing guide;
+// this avoids changing ordinary unsaturated CFA geometry while making clipped green
+// use the exact opposed-channel reconstruction instead of V2.34's wide donor search.
+vec2 greenAt(ivec2 p) {
+    ivec2 q = clampPixel(p);
+    if (colorAt(q) == 1) {
+        vec3 directValue = rawMeasurementAt(q);
+        return vec2(highlightCalculationSample(q), max(directValue.y, 0.000001));
+    }
+
+    ivec2 pL = phaseClamp(q + ivec2(-1, 0));
+    ivec2 pR = phaseClamp(q + ivec2(1, 0));
+    ivec2 pU = phaseClamp(q + ivec2(0, -1));
+    ivec2 pD = phaseClamp(q + ivec2(0, 1));
+    vec3 leftRaw = rawMeasurementAt(pL);
+    vec3 rightRaw = rawMeasurementAt(pR);
+    vec3 upRaw = rawMeasurementAt(pU);
+    vec3 downRaw = rawMeasurementAt(pD);
+    float leftValue = highlightCalculationSample(pL);
+    float rightValue = highlightCalculationSample(pR);
+    float upValue = highlightCalculationSample(pU);
+    float downValue = highlightCalculationSample(pD);
+
+    float horizontal = 0.5 * (leftValue + rightValue);
+    float vertical = 0.5 * (upValue + downValue);
+    float horizontalSigma = 0.5 * sqrt(
+        leftRaw.y * leftRaw.y + rightRaw.y * rightRaw.y);
+    float verticalSigma = 0.5 * sqrt(
+        upRaw.y * upRaw.y + downRaw.y * downRaw.y);
+
+    float horizontalNoise = sqrt(
+        leftRaw.y * leftRaw.y + rightRaw.y * rightRaw.y + 0.00000001);
+    float verticalNoise = sqrt(
+        upRaw.y * upRaw.y + downRaw.y * downRaw.y + 0.00000001);
+    float horizontalGradient = abs(leftValue - rightValue)
+        / max(horizontalNoise, 0.00010);
+    float verticalGradient = abs(upValue - downValue)
+        / max(verticalNoise, 0.00010);
+
+    float horizontalWeight = 1.0 / (1.0 + horizontalGradient * horizontalGradient);
+    float verticalWeight = 1.0 / (1.0 + verticalGradient * verticalGradient);
+    float weightSum = horizontalWeight + verticalWeight;
+    float green = (horizontal * horizontalWeight + vertical * verticalWeight)
+        / max(weightSum, 0.000001);
+    float greenSigma = sqrt(
+        horizontalWeight * horizontalWeight * horizontalSigma * horizontalSigma
+        + verticalWeight * verticalWeight * verticalSigma * verticalSigma)
+        / max(weightSum, 0.000001);
+    return vec2(max(green, 0.0), max(greenSigma, 0.000001));
 }
 
 vec2 pack16(float encoded) {
@@ -89,120 +252,11 @@ vec2 packSigmaAndCensor(float sigma, float censored) {
     return vec2(highByte, lowByte) / 255.0;
 }
 
-// IRIS_V234_CENSORED_GREEN_OWNER_BEGIN
-// A saturated green photosite is a lower bound, not a valid green measurement.
-// Reconstruct the guide only from uncensored green support.  The output censor bit
-// remains asserted whenever the center/direct green is clipped or local two-sided
-// support is incomplete; raw_reconstruct then refuses to form ordinary R-G/B-G
-// opponent differences against that estimate and uses highlight-aware color recovery.
-vec3 pairEstimate(vec3 negativeValue, vec3 positiveValue) {
-    float negativeValid = 1.0 - negativeValue.z;
-    float positiveValid = 1.0 - positiveValue.z;
-    float support = negativeValid + positiveValid;
-    float meanValue = (negativeValue.x * negativeValid + positiveValue.x * positiveValid)
-        / max(support, 0.000001);
-    float sigmaValue = sqrt(
-        negativeValue.y * negativeValue.y * negativeValid
-        + positiveValue.y * positiveValue.y * positiveValid)
-        / max(support, 0.000001);
-    float noiseScale = sqrt(
-        negativeValue.y * negativeValue.y + positiveValue.y * positiveValue.y
-        + 0.00000001);
-    float gradient = support > 1.5
-        ? abs(negativeValue.x - positiveValue.x) / max(noiseScale, 0.00010)
-        : 8.0;
-    float reliability = support * (1.0 / (1.0 + gradient * gradient));
-    return vec3(meanValue, max(sigmaValue, 0.000001), reliability);
-}
-
-vec3 wideGreenEstimate(ivec2 p, bool sameGreenPhase) {
-    ivec2 offsets[12] = ivec2[12](
-        ivec2(-2, 0), ivec2(2, 0), ivec2(0, -2), ivec2(0, 2),
-        ivec2(-4, 0), ivec2(4, 0), ivec2(0, -4), ivec2(0, 4),
-        ivec2(-6, 0), ivec2(6, 0), ivec2(0, -6), ivec2(0, 6));
-    float valueSum = 0.0;
-    float varianceSum = 0.0;
-    float weightSum = 0.0;
-    for (int i = 0; i < 12; ++i) {
-        ivec2 q = p + offsets[i];
-        if (!sameGreenPhase) {
-            // At a red/blue center, odd cardinal offsets are green; map the even
-            // template above onto distances 3/5/7 without dynamic array construction.
-            ivec2 direction = ivec2(sign(float(offsets[i].x)), sign(float(offsets[i].y)));
-            int radius = 3 + 2 * (i / 4);
-            q = p + direction * radius;
-        }
-        ivec2 qc = clampPixel(q);
-        if (colorAt(qc) != 1) continue;
-        vec3 value = rawMeasurementAt(qc);
-        float valid = 1.0 - value.z;
-        float radiusPixels = length(vec2(q - p));
-        float distanceWeight = 1.0 / max(radiusPixels, 1.0);
-        float weightValue = valid * distanceWeight
-            / (value.y * value.y + 0.00000002);
-        valueSum += value.x * weightValue;
-        varianceSum += value.y * value.y * weightValue * weightValue;
-        weightSum += weightValue;
-    }
-    if (weightSum <= 0.000001) return vec3(0.0, 1.0, 0.0);
-    return vec3(
-        valueSum / weightSum,
-        max(sqrt(varianceSum) / weightSum, 0.000001),
-        weightSum);
-}
-
-vec3 greenAt(ivec2 p) {
-    ivec2 q = clampPixel(p);
-    if (colorAt(q) == 1) {
-        vec3 directValue = rawMeasurementAt(q);
-        if (directValue.z < 0.5) {
-            return vec3(directValue.xy, 0.0);
-        }
-        vec3 wideValue = wideGreenEstimate(q, true);
-        float estimate = wideValue.z > 0.0 ? wideValue.x : directValue.x;
-        float sigmaValue = wideValue.z > 0.0
-            ? max(wideValue.y, directValue.y) : directValue.y;
-        return vec3(max(estimate, 0.0), max(sigmaValue, 0.000001), 1.0);
-    }
-
-    vec3 leftValue = rawMeasurementAt(q + ivec2(-1, 0));
-    vec3 rightValue = rawMeasurementAt(q + ivec2(1, 0));
-    vec3 upValue = rawMeasurementAt(q + ivec2(0, -1));
-    vec3 downValue = rawMeasurementAt(q + ivec2(0, 1));
-    vec3 horizontal = pairEstimate(leftValue, rightValue);
-    vec3 vertical = pairEstimate(upValue, downValue);
-    float weightSum = horizontal.z + vertical.z;
-
-    float green = weightSum > 0.000001
-        ? (horizontal.x * horizontal.z + vertical.x * vertical.z) / weightSum
-        : 0.0;
-    float greenSigma = weightSum > 0.000001
-        ? sqrt(horizontal.z * horizontal.z * horizontal.y * horizontal.y
-            + vertical.z * vertical.z * vertical.y * vertical.y) / weightSum
-        : 1.0;
-
-    float horizontalComplete = (1.0 - leftValue.z) * (1.0 - rightValue.z);
-    float verticalComplete = (1.0 - upValue.z) * (1.0 - downValue.z);
-    float reliableLocal = max(horizontalComplete, verticalComplete);
-    if (weightSum <= 0.000001) {
-        vec3 wideValue = wideGreenEstimate(q, false);
-        if (wideValue.z > 0.0) {
-            green = wideValue.x;
-            greenSigma = wideValue.y;
-        }
-    }
-
-    // Only a complete uncensored directional pair is valid opponent authority.
-    // A wide/one-sided estimate still helps spatial luminance continuity but remains
-    // censored so raw_reconstruct cannot mistake it for measured color evidence.
-    float censored = 1.0 - step(0.5, reliableLocal);
-    return vec3(max(green, 0.0), max(greenSigma, 0.000001), censored);
-}
-// IRIS_V234_CENSORED_GREEN_OWNER_END
-
 void main() {
-    vec3 greenValue = greenAt(ivec2(gl_FragCoord.xy));
+    vec2 greenValue = greenAt(ivec2(gl_FragCoord.xy));
     vec2 greenPacked = pack16(compandPositive(greenValue.x, SIGNAL_COMPAND_K));
-    vec2 sigmaAndCensorPacked = packSigmaAndCensor(greenValue.y, greenValue.z);
+    // The highlight guide is now the active owner.  Opponent permission is decided
+    // independently by the common 2x2 physical clip gate in raw_reconstruct.
+    vec2 sigmaAndCensorPacked = packSigmaAndCensor(greenValue.y, 0.0);
     outColor = vec4(greenPacked, sigmaAndCensorPacked);
 }

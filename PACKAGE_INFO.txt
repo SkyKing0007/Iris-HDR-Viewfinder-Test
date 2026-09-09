@@ -1,4 +1,4 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.34 — CENSORED-CFA HIGHLIGHT COLOR + CONTINUOUS CEILING RENDERING
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.35 — EXACT CLAUDE CFA ROOT-CORRECTION PORT
 
 STATUS
 PREPARED / UPLOAD-READY only after final clean-extract replay passes.
@@ -8,57 +8,66 @@ No backup requested or created. No source commit or push is performed by this ha
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 52
-Target versionName: 1.0-v1.4.11-v2.34
+Target versionCode: 53
+Target versionName: 1.0-v1.4.11-v2.35
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL ACTIONS COMPILED CANDIDATE
-Commit: 68cbefcd7c42bf138258309c3d063743e4767ca8
-Compiled candidate tree: 226d9eddd057c2fab584ed243d21214c086aff29
-GitHub Actions run: 34303285781 — SUCCESS
-Artifact ID: 10085756068
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.33
-Artifact ZIP digest: sha256:aab4449d79532e479e24748e29d1e0994c3b3ce09c730a51693df76cff37a9e1
-APK SHA-256: dfeb9182ca960bfe8817979645b11e1dd21c0eaf7243aae47d2d0416a249278d
-Source-candidate TAR SHA-256: 482b6587b972ee0a5c9248688d31db2d8e50b5aa7f234383d7d39d87521a4fc7
-Runtime manifest SHA-256: c454693fbef4805895328fca8f5103ef0c6b310df36beb1455e6ee0ef1bbbcc5
-Repository manifest SHA-256: fac88ca9bb448acae63a954fbc2adc83cdd2a5470d94ec17ef6a2d555d8093d6
-Regressions SHA-256: 32c159254f6f99f255ce9c75247be6e54fe596e38b546bd7fd781197e27bbb13
+Commit: 3ff48aa5ed36d2a758d1d812fd616d9dc2af72e5
+Compiled candidate tree: 36238f6c4b4ec1f00757fefa1081d6d26c30dcd8
+GitHub Actions run: 34312591458 — SUCCESS
+Artifact ID: 10088941635
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.34
+Artifact ZIP digest: sha256:17d486c575154d1e7877f393a4245664fc107a570ee05fbe2b48afb873a52530
+APK SHA-256: bc1edce9cb8c4b6afefe37b0885e09cc64a4b92590616d2a2b161fec3d68b993
+Source-candidate TAR SHA-256: 4f3a67121d9f8cf3ef0129987d6de13578f2f4861463651b1953e692862344df
+Runtime manifest SHA-256: dc0e9ec89be61a58f5ed0fa55147e1538e3364805a53c101131b8c8b728032e2
+Repository manifest SHA-256: 4f8e21a89c40fe6637ab43b3039631c48d1d6922c876d33d23cfb82a81ddf38f
+Regressions SHA-256: e4bac8540aed5eb27bc82a8af4ce9ed8f46c82017ac182546db1f022542515b2
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.33 procedure from Actions run 34303285781. Authority reconstruction, exact changed-file allowlist, deterministic full-index forward/rollback proof, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, complete reserved-identifier scan, real runtime GLSL compile, real project Java compile, regression replay, full :app:assembleDebug, post-build invariance, exactly-one-APK/model proof and artifact export retain the successful ordering. V2.34 does not redesign, simplify or reorder these mechanics.
+Exact successful V2.34 procedure from Actions run 34312591458. Authority reconstruction, exact changed-file allowlist, deterministic full-index forward/rollback proof, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, complete reserved-identifier scan, real runtime GLSL compile, real project Java compile, regression replay, full :app:assembleDebug, post-build invariance, exactly-one-APK/model proof and artifact export retain the successful ordering. V2.35 does not redesign, simplify or reorder these mechanics.
 
-REFERENCE / VISUAL AUTHORITY BOUNDARY
-The older Photon/Claude magenta-highlight analysis is reference-only. Iris HDR Viewfinder successful artifacts, source candidates, Iris DNG/JPEG device samples and Iris regressions are implementation authority. The V2.33 device samples prove the fusion owner remains correct but also prove two independent residual failures: clipped/censored CFA values can still create false broad magenta/green/yellow color before RGB, and the saved ceiling presentation can still produce an over-bright island/rings rather than the supplied top-reference gradual radial falloff and clean neutral X/star reflection.
+REFERENCE / IMPLEMENTATION AUTHORITY BOUNDARY
+Claude analyzed the older Iris Camera / Photon MotionV2 implementation, not this Iris HDR Viewfinder Camera application. That verdict is reference evidence for the physical CFA failure and correction only. V2.35 independently ports that exact causal contract into the current Viewfinder active owners. Old-app class names, accumulator topology, provenance carriers and dormant implementations are not imported or treated as Viewfinder runtime authority.
 
-V2.34 RUNTIME CONTRACT
-1. Successful V2.33 fusion is protected at all costs. Registration/evidence/physical-loss math, mode-3 seed/domain, mode-4 topology propagation, mode-5 SHORT/LONG source-selection prefix through mergedScene, LONG immutable geometry, SHORT-only displacement, noise normalization, bathroom connected recovery and high-DR acquisition remain unchanged.
-2. CFA saturation is censorship, not color truth. raw_green.frag carries a censored bit with green signal/sigma; ordinary R-G/B-G authority requires uncensored color and uncensored green evidence.
-3. Censored highlight reconstruction occurs before WB/CCM in balanced sensor space. Broad same-phase boundary chromaticity may infer only invalid channels; already-valid center channels are immutable. Genuine colored saturated lights retain coherent boundary-derived hue rather than being generically neutralized.
-4. V2.33 raw_chroma_dealias.frag saturation/periodic-alias cleanup remains as a luminance-preserving RGB safety net only. It is no longer expected to repair a broad false color after invalid CFA opponent reconstruction has already created it.
-5. The full-resolution texture count, RGBA8 formats and GPU lifetime remain V2.33-identical. V2.34 redistributes the RGB carrier code space rather than allocating RGBA16F: the 1x..8x recovered-highlight interval has 128 distinct 8-bit codes versus 61 in V2.33, with a bounded monotonic tail through 32x.
-6. Saved-still highlight presentation is pointwise, whole-RGB, monotonic and independent of binary shortOwns after mergedScene has already been selected. The shared/live V2.33 adaptiveHdrToneMap remains hash-frozen.
-7. Ceiling visual authority is the supplied top comparison: a gradual radial illumination falloff, clean low-contrast neutral X/star reflection, no detached white island and no ownership-boundary rings. The saved transfer compresses the central extreme while retaining slope through the lower/middle recovered highlight range. No histogram, quantile, global knots, per-channel rolloff or spatial local tone map is introduced.
+V2.35 CLAUDE CORRECTION CONTRACT
+1. Symmetric clipping authority: the parent physical 2x2 Bayer quad is one opponent-color permission domain. If ANY phase has the inherited pre-WB physical saturation bit (0.985 sensor-normalized threshold), no phase in that quad may form an ordinary R-G/B-G observation.
+2. Absolute opponent support: Viewfinder already uses an absolute valid-observation count. At least two independently valid opponent samples are required. No old opponentWeight/greenWeight ratio, collapsing-denominator confidence, or equivalent inverted confidence is introduced.
+3. Exact old-Iris highlight guide mechanism: raw_green.frag ports highlightCalculationSample with phase-preserving sampling, the 3x3 opposed-channel mean, power=3.0, the measured calculation fallback as lower bound and highlightCeiling=8.0 as upper bound. The active Viewfinder guide uses this function instead of V2.34 wideGreenEstimate/boundary-hue recovery.
+4. One physical clipping domain: raw_preprocess and the highlight guide both derive clipping from the physical pre-WB RAW sensor value at threshold 0.985. WB/CCM/display RGB cannot become clipping authority.
+5. Lens-shading order: Viewfinder already applies timestamp-matched lens shading in raw_preprocess before CFA reconstruction and any missing-support neutral terminal handling. This satisfies Claude's requirement that LSC not recolor a downstream neutralized highlight; the established Viewfinder ordering remains unchanged.
+6. Missing-support terminal state is neutral brightness only. No hue donor, no fixed-distance boundary chromaticity, no histogram, no local tone map and no downstream desaturation are used to mask an upstream CFA error.
 
-INTENDED V2.33 -> V2.34 RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 5
-- app/src/main/assets/shaders/hdr_display.frag [MODIFY]
-- app/src/main/assets/shaders/raw_chroma_dealias.frag [MODIFY]
+EXACT CAUSAL REGRESSION
+Claude's old-Iris failure fixture is permanent:
+- green_acc = 0.962
+- rg = bg = +0.519
+- faulty output R = B = 1.481, G = 0.962, R/G > 1.5
+V2.35 common-quad clipping must make that ordinary opponent contribution impossible. The power-3 guide fixture with neutral calculation evidence L=1.519 reconstructs clipped green to the same L without a hue donor.
+
+INTENDED V2.34 -> V2.35 RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 3
 - app/src/main/assets/shaders/raw_green.frag [MODIFY]
-- app/src/main/assets/shaders/raw_proxy.frag [MODIFY]
 - app/src/main/assets/shaders/raw_reconstruct.frag [MODIFY]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java [MODIFY]
 
-PROTECTED V2.33 RUNTIME — EXACTLY 17 BYTE-IDENTICAL FILES
+WHY HdrGlView.java CHANGES
+Only renderRawGreen call/signature/bindings change. It exposes the already-live R16UI physical RAW plus timestamp-matched black/white metadata and the existing common LONG color owner to the Claude guide. A normalized-hash verifier freezes the rest of HdrGlView allocation, registration, fusion, texture lifetime and presentation orchestration.
+
+PROTECTED V2.34 RUNTIME — EXACTLY 19 BYTE-IDENTICAL FILES
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/licenses/NAFNet_LICENSE.txt
 - app/src/main/assets/nafnet_sidd_width32_fp16.tflite
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/fullscreen.vert
+- app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/assets/shaders/oes_to_rgb.frag
+- app/src/main/assets/shaders/raw_chroma_dealias.frag
 - app/src/main/assets/shaders/raw_preprocess.frag
+- app/src/main/assets/shaders/raw_proxy.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
@@ -66,23 +75,13 @@ PROTECTED V2.33 RUNTIME — EXACTLY 17 BYTE-IDENTICAL FILES
 - app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java
 
-FUSION-FREEZE HASH CONTRACT INSIDE hdr_display.frag
-- V2.33 registration/evidence/physical-loss section SHA-256: 4e0741c2882ae3c326ee113387bff056eed06f3ebf463866dfc585173f75dcd7
-- V2.33 mode-3/mode-4 topology section SHA-256: 583c1a512bce64bc6573a586d44a4536813766d4256caa62ed96f49bfc0cf633
-- V2.33 mode-5 source-selection prefix through mergedScene SHA-256: b212d64c45a9cafd70b3da2dd4c2d6e6a18d33b028a4ad9fe54ce9e69a6931cf
-- V2.33 shared/live adaptiveHdrToneMap SHA-256: 41a5a793e7b7d55e86711669670cca2a0de76925f76651de4a5ba1e57e95def5
-
-VISUAL / NUMERICAL V2.34 REGRESSIONS
-- a clipped/censored green or color sample may not form ordinary R-G/B-G authority;
-- broad white chandelier/grow-light highlights may not become magenta from censored-green opponent bias;
-- valid center channels remain exactly measured while only invalid channels are reconstructed;
-- truly colored saturated highlights retain coherent boundary-derived color;
-- green/yellow/cyan dotted bright-edge CFA color is suppressed without moving luminance/geometry;
-- V2.33 RGB safety-net luminance preservation remains;
-- 1x..8x carrier exposes at least 120 distinct 8-bit codes and more than V2.33's 61, without new full-resolution allocation;
-- saved highlight presentation is independent of shortOwns and strictly monotonic;
-- ceiling preserves gradual radial falloff and clean neutral X while compressing the central bright island;
-- live HDR transfer and all fusion/topology hashes above remain exact.
+PROTECTED SUCCESSFUL V2.34 IMAGE/PIPELINE MECHANICS
+- hdr_display.frag remains byte-identical: no ceiling/presentation tuning in this build.
+- raw_chroma_dealias.frag remains byte-identical as the inherited luminance-preserving RGB backstop, not the root fix.
+- raw_preprocess.frag remains byte-identical: physical saturation bit, lens shading, noise and hot/CFA outlier ownership stay V2.34.
+- raw_proxy.frag remains byte-identical.
+- JpegFusion registration, global/local SHORT alignment, LONG immutable geometry, mode-3/4 topology, mode-5 source selection, 3-EV acquisition, SHORT/LONG ownership and saved/live tone presentation remain unchanged.
+- No new persistent full-resolution image allocation is introduced.
 
 BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - .github/workflows/build.yml
@@ -91,7 +90,7 @@ BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-Yes, only for V2.34 authority/version/hash/allowlist/regression/output identities. Compiler/build/post-build mechanics and ordering are unchanged from successful V2.33.
+Yes, only for V2.35 authority/version/hash/allowlist/regression/output identities and for verifying the three-file Claude runtime interface. Compiler/build/post-build mechanics and ordering are unchanged from successful V2.34.
 
 DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - PACKAGE_INFO.txt
@@ -99,15 +98,15 @@ DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-TOTAL EXPECTED V2.33 -> V2.34 TRACKED CHANGESET — EXACTLY 13 PATHS
-Runtime: 5. Infrastructure: 4. Delivery documents: 4.
+TOTAL EXPECTED V2.34 -> V2.35 TRACKED CHANGESET — EXACTLY 11 PATHS
+Runtime: 3. Infrastructure: 4. Delivery documents: 4.
 Candidate tracked universe: exactly 35 files.
 Runtime universe: exactly 22 app/src files.
-V2.34 runtime manifest digest: dc0e9ec89be61a58f5ed0fa55147e1538e3364805a53c101131b8c8b728032e2
+V2.35 runtime manifest digest: f8ec47369e4172cf34f54ec40512444098000f80a2bc23a6846dcc82af7fcedc
 
 COMPILER STATUS BEFORE ACTIONS
-REAL PINNED GLSL COMPILE: NOT RUN locally; exact V2.33 pinned package installation timed out and the mandatory Actions gate remains authoritative.
+REAL PINNED GLSL COMPILE: NOT RUN locally; mandatory Actions gate.
 REAL KOTLIN COMPILE: N/A.
-REAL PROJECT JAVA COMPILE: NOT RUN locally; Java runtime is protected but the successful workflow retains this mandatory gate.
+REAL PROJECT JAVA COMPILE: NOT RUN locally; HdrGlView.java is modified and the mandatory Actions gate must compile it.
 FULL ANDROID :app:assembleDebug: NOT RUN locally; mandatory Actions gate.
-FINAL ACTIONS AUTHORITY: successful V2.33 run 34303285781 until V2.34 passes.
+FINAL ACTIONS AUTHORITY: successful V2.34 run 34312591458 until V2.35 passes.

@@ -1,15 +1,15 @@
-V1.4.11 V2.34 — SAFE EASY FLAT VSCODE.DEV HANDOFF
+V1.4.11 V2.35 — SAFE EASY FLAT VSCODE.DEV HANDOFF
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required parent: 68cbefcd7c42bf138258309c3d063743e4767ca8 (successful V2.33)
-Successful compiled authority: Actions 34303285781 / artifact 10085756068
+Required parent: 3ff48aa5ed36d2a758d1d812fd616d9dc2af72e5 (successful V2.34)
+Successful compiled authority: Actions 34312591458 / artifact 10088941635
 
 HANDOFF RULE
-This ZIP is FLAT, matching the V2.33 / V2.32 / V2.31 V1.1 delivery style that worked in vscode.dev.
+This ZIP is FLAT, matching the V2.34 / V2.33 / V2.32 delivery style that worked in vscode.dev.
 Do NOT drag app/, scripts/, .github/, or a complete candidate tree over the repository.
 Replace only these individual files in their exact destinations.
 
-UPLOAD THESE 13 FILES
+UPLOAD THESE 11 FILES
 
 1. build.yml
    -> .github/workflows/build.yml
@@ -25,30 +25,26 @@ UPLOAD THESE 13 FILES
    -> VSCODE_DEV_UPLOAD.txt (repository root)
 7. app_build.gradle.kts
    -> app/build.gradle.kts
-8. hdr_display.frag
-   -> app/src/main/assets/shaders/hdr_display.frag
-9. raw_chroma_dealias.frag
-   -> app/src/main/assets/shaders/raw_chroma_dealias.frag
-10. raw_green.frag
-    -> app/src/main/assets/shaders/raw_green.frag
-11. raw_proxy.frag
-    -> app/src/main/assets/shaders/raw_proxy.frag
-12. raw_reconstruct.frag
-    -> app/src/main/assets/shaders/raw_reconstruct.frag
-13. verify_orientation.py
+8. raw_green.frag
+   -> app/src/main/assets/shaders/raw_green.frag
+9. raw_reconstruct.frag
+   -> app/src/main/assets/shaders/raw_reconstruct.frag
+10. HdrGlView.java
+    -> app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+11. verify_orientation.py
     -> scripts/verify_orientation.py
 
 BEFORE COMMIT
-Source Control must show exactly 13 changes:
-- 13 [M]
+Source Control must show exactly 11 changes:
+- 11 [M]
 - 0 [A]
 - 0 [D]
 
-CameraController.java, HdrGlView.java, RawFusion.java, JpegFusion.java, CaptureSetSaver.java,
-raw_preprocess.frag, NafNetDenoiser.java, the NAFNet model/license, AndroidManifest.xml and all
-other protected runtime files must NOT appear.
+hdr_display.frag, raw_chroma_dealias.frag, raw_preprocess.frag, raw_proxy.frag,
+CameraController.java, JpegFusion.java, RawFusion.java, CaptureSetSaver.java, NafNetDenoiser.java,
+the NAFNet model/license, AndroidManifest.xml and all other protected runtime files must NOT appear.
 
 Suggested commit message:
-V1.4.11 V2.34 censored-CFA highlight color and continuous ceiling rendering
+V1.4.11 V2.35 exact Claude CFA root correction
 
 GitHub Actions remains authoritative for pinned real GLSL, real Java and full :app:assembleDebug.

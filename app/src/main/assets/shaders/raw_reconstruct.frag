@@ -130,17 +130,40 @@ float localRawSaturationAt(ivec2 p) {
     return saturation;
 }
 
-// x=opponent difference, y=sigma, z=validity.  A color difference is meaningful
-// only when BOTH the color photosite and its green reference are uncensored.
+// IRIS_V235_CLAUDE_COMMON_QUAD_CLIP_AUTHORITY_BEGIN
+// Claude correction item 1: the smallest opponent-color authority is the physical
+// 2x2 Bayer quad.  If ANY CFA member is at/near sensor saturation, no member of that
+// quad may form an ordinary R-G/B-G observation.  All four phases therefore make the
+// same permission decision instead of alternating by Bayer phase.
+float quadHighlightAt(ivec2 p) {
+    ivec2 q = clampPixel(p);
+    ivec2 base = ivec2(q.x & ~1, q.y & ~1);
+    float highlighted = 0.0;
+    for (int oy = 0; oy < 2; ++oy) {
+        for (int ox = 0; ox < 2; ++ox) {
+            highlighted = max(highlighted,
+                rawSaturationAt(base + ivec2(ox, oy)));
+        }
+    }
+    return highlighted;
+}
+
+// x=opponent difference, y=sigma, z=absolute validity.  There is deliberately no
+// support/green ratio here: Claude correction item 2 forbids confidence increasing
+// when green support collapses.  Later interpolation requires an absolute count of
+// at least two independently valid observations.
 vec3 colorDifferenceAt(ivec2 p) {
-    vec3 colorValue = rawMeasurementAt(p);
-    vec3 greenValue = greenAt(p);
-    float valid = (1.0 - colorValue.z) * (1.0 - greenValue.z);
+    ivec2 q = clampPixel(p);
+    vec3 colorValue = rawMeasurementAt(q);
+    vec3 greenValue = greenAt(q);
+    float commonQuadValid = 1.0 - quadHighlightAt(q);
+    float valid = (1.0 - colorValue.z) * commonQuadValid;
     return vec3(
         colorValue.x - greenValue.x,
         sqrt(colorValue.y * colorValue.y + greenValue.y * greenValue.y),
         valid);
 }
+// IRIS_V235_CLAUDE_COMMON_QUAD_CLIP_AUTHORITY_END
 
 vec3 robustFourDifferences(
         vec3 d0, vec3 d1, vec3 d2, vec3 d3,
@@ -202,7 +225,9 @@ void demosaicSensorBase(
     ivec2 q = clampPixel(p);
     int centerColor = colorAt(q);
     vec3 greenValue = greenAt(q);
-    float greenValid = 1.0 - greenValue.z;
+    // The exact highlight-aware guide is now an active reconstructed green owner.
+    // Physical opponent permission is handled separately by quadHighlightAt().
+    float greenValid = 1.0;
 
     if (centerColor == 0) {
         vec3 redValue = rawMeasurementAt(q);
@@ -283,102 +308,28 @@ float encodeSigmaAndSaturation(float sigma, float saturation) {
     return (sigmaCode + 128.0 * step(0.5, saturation)) / 255.0;
 }
 
-// IRIS_V234_CENSORED_OPPONENT_HIGHLIGHT_RECOVERY_BEGIN
-// Recover only channels whose CFA/opponent evidence is censored.  Valid measured
-// channels never move.  Boundary chromaticity is derived BEFORE WB/CCM from fully
-// valid same-phase neighborhoods, then applied in balanced-sensor space.  This is
-// the causal correction for the white chandelier/grow-light magenta shoulder: a
-// clipped green can no longer be subtracted as if it were a real green measurement.
-void recoverCensoredBalanced(
-        ivec2 p,
-        vec3 balanceGains,
-        vec3 baseSensorRgb,
-        vec3 baseSensorSigma,
-        vec3 baseValid,
-        out vec3 recoveredBalanced,
-        out vec3 recoveredBalancedSigma) {
-    vec3 centerBalanced = max(baseSensorRgb, vec3(0.0)) * balanceGains;
-    vec3 centerSigma = max(baseSensorSigma, vec3(0.000001)) * abs(balanceGains);
-    vec3 invalid = vec3(1.0) - clamp(baseValid, vec3(0.0), vec3(1.0));
-    if (max(invalid.r, max(invalid.g, invalid.b)) < 0.5) {
-        recoveredBalanced = centerBalanced;
-        recoveredBalancedSigma = centerSigma;
-        return;
+// IRIS_V235_CLAUDE_NEUTRAL_MISSING_SUPPORT_BEGIN
+// The old-Iris normalize path fell back to one phase-invariant brightness only when
+// opponent support was actually missing.  Reproduce that behavior without V2.34's
+// wide boundary-hue donor: take the maximum WB-balanced physical lower-bound signal
+// in this pixel's parent 2x2 Bayer quad.  No neighboring hue is invented.
+float neutralFallbackBalanced(ivec2 p, vec3 balanceGains) {
+    ivec2 q = clampPixel(p);
+    ivec2 base = ivec2(q.x & ~1, q.y & ~1);
+    float neutral = 0.0;
+    for (int oy = 0; oy < 2; ++oy) {
+        for (int ox = 0; ox < 2; ++ox) {
+            ivec2 sampleP = clampPixel(base + ivec2(ox, oy));
+            vec3 sampleValue = rawMeasurementAt(sampleP);
+            int sampleColor = colorAt(sampleP);
+            float gain = sampleColor == 0
+                ? balanceGains.r : (sampleColor == 2 ? balanceGains.b : balanceGains.g);
+            neutral = max(neutral, sampleValue.x * gain);
+        }
     }
-
-    ivec2 offsets[24] = ivec2[24](
-        ivec2(-6, 0), ivec2(6, 0), ivec2(0, -6), ivec2(0, 6),
-        ivec2(-6, -6), ivec2(6, -6), ivec2(-6, 6), ivec2(6, 6),
-        ivec2(-24, 0), ivec2(24, 0), ivec2(0, -24), ivec2(0, 24),
-        ivec2(-24, -24), ivec2(24, -24), ivec2(-24, 24), ivec2(24, 24),
-        ivec2(-72, 0), ivec2(72, 0), ivec2(0, -72), ivec2(0, 72),
-        ivec2(-72, -72), ivec2(72, -72), ivec2(-72, 72), ivec2(72, 72));
-
-    vec3 chromaSum = vec3(0.0);
-    vec3 chromaSecond = vec3(0.0);
-    float weightSum = 0.0;
-    float votes = 0.0;
-    for (int i = 0; i < 24; ++i) {
-        vec3 candidateRgb;
-        vec3 candidateSigma;
-        vec3 candidateValid;
-        demosaicSensorBase(p + offsets[i], candidateRgb, candidateSigma, candidateValid);
-        float fullyValid = min(candidateValid.r, min(candidateValid.g, candidateValid.b));
-        vec3 candidateBalanced = max(candidateRgb, vec3(0.0)) * balanceGains;
-        float candidateSum = candidateBalanced.r + candidateBalanced.g + candidateBalanced.b;
-        float signalGate = smoothstep(0.015, 0.080, candidateSum);
-        vec3 chroma = candidateBalanced / max(candidateSum, 0.000001);
-        float distanceWeight = i < 8 ? 1.0 : (i < 16 ? 0.50 : 0.20);
-        float weightValue = fullyValid * signalGate * distanceWeight;
-        chromaSum += chroma * weightValue;
-        chromaSecond += chroma * chroma * weightValue;
-        weightSum += weightValue;
-        votes += step(0.20, weightValue);
-    }
-
-    vec3 boundaryChroma = weightSum > 0.0001
-        ? chromaSum / weightSum : vec3(1.0 / 3.0);
-    vec3 varianceVector = weightSum > 0.0001
-        ? max(chromaSecond / weightSum - boundaryChroma * boundaryChroma, vec3(0.0))
-        : vec3(1.0);
-    float chromaVariance = varianceVector.r + varianceVector.g + varianceVector.b;
-    float boundaryConsensus = (1.0 - smoothstep(0.0008, 0.0120, chromaVariance))
-        * smoothstep(2.0, 5.0, votes);
-
-    float validScaleNumerator = dot(centerBalanced * boundaryChroma, baseValid);
-    float validScaleDenominator = dot(boundaryChroma * boundaryChroma, baseValid);
-    float inferredScale = validScaleNumerator / max(validScaleDenominator, 0.000001);
-    vec3 boundaryPrediction = boundaryChroma * max(inferredScale, 0.0);
-
-    // A neutral fallback is allowed only when at least two uncensored balanced channels
-    // already agree.  This fixes a fully surrounded white-light shoulder without
-    // erasing genuinely colored saturated lamps whose surviving channels disagree.
-    float validCount = baseValid.r + baseValid.g + baseValid.b;
-    float validMean = dot(centerBalanced, baseValid) / max(validCount, 1.0);
-    float validSpread = 0.0;
-    if (baseValid.r > 0.5) validSpread = max(validSpread, abs(centerBalanced.r - validMean));
-    if (baseValid.g > 0.5) validSpread = max(validSpread, abs(centerBalanced.g - validMean));
-    if (baseValid.b > 0.5) validSpread = max(validSpread, abs(centerBalanced.b - validMean));
-    float neutralEvidence = step(1.5, validCount)
-        * (1.0 - smoothstep(0.10, 0.32, validSpread / max(validMean, 0.001)));
-
-    float boundaryStrength = boundaryConsensus * step(0.5, validCount);
-    float neutralStrength = (1.0 - boundaryStrength) * neutralEvidence;
-    vec3 prediction = mix(vec3(validMean), boundaryPrediction, boundaryStrength);
-    float recoveryStrength = clamp(max(boundaryStrength, neutralStrength), 0.0, 1.0);
-    recoveredBalanced = mix(
-        centerBalanced,
-        prediction,
-        invalid * recoveryStrength);
-
-    float validSigmaMean = dot(centerSigma, baseValid) / max(validCount, 1.0);
-    vec3 inferredSigma = vec3(max(1.50 * validSigmaMean, 0.00020));
-    recoveredBalancedSigma = mix(
-        centerSigma,
-        inferredSigma,
-        invalid * recoveryStrength);
+    return neutral;
 }
-// IRIS_V234_CENSORED_OPPONENT_HIGHLIGHT_RECOVERY_END
+// IRIS_V235_CLAUDE_NEUTRAL_MISSING_SUPPORT_END
 
 void main() {
     ivec2 p = ivec2(gl_FragCoord.xy);
@@ -390,11 +341,23 @@ void main() {
 
     float greenGain = 0.5 * (wbGains.y + wbGains.z);
     vec3 balanceGains = vec3(wbGains.x, greenGain, wbGains.w);
-    vec3 balancedRgb;
-    vec3 balancedSigma;
-    recoverCensoredBalanced(
-        p, balanceGains, sensorRgb, sensorSigma, sensorValid,
-        balancedRgb, balancedSigma);
+    vec3 balancedRgb = sensorRgb * balanceGains;
+    vec3 balancedSigma = sensorSigma * abs(balanceGains);
+
+    // Claude correction items 1-2: if common-quad rejection leaves any required
+    // color axis without absolute support, use the existing conservative neutral
+    // terminal state.  Do not borrow boundary chromaticity and do not desaturate a
+    // later RGB result to hide an upstream opponent error.
+    float completeColorSupport = min(sensorValid.r, min(sensorValid.g, sensorValid.b));
+    if (completeColorSupport < 0.5) {
+        float neutral = max(
+            neutralFallbackBalanced(p, balanceGains),
+            balancedRgb.g);
+        balancedRgb = vec3(max(neutral, 0.0));
+        float fallbackSigma = max(
+            balancedSigma.r, max(balancedSigma.g, balancedSigma.b));
+        balancedSigma = vec3(max(fallbackSigma, 0.000001));
+    }
 
     vec3 linearRgb = vec3(
         dot(colorRow0, balancedRgb),

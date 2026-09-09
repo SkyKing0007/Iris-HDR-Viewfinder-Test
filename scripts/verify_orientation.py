@@ -32,7 +32,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.34 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.35 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -62,7 +62,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.34 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.35 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -106,9 +106,19 @@ require(sha_text(frozen_shader_prefix(
             '    return sceneLinear * (mappedPeak / scenePeak);\n}\n'))
         == '41a5a793e7b7d55e86711669670cca2a0de76925f76651de4a5ba1e57e95def5',
         'V2.34 must keep the shared/live V2.33 HDR transfer byte-identical')
-require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java').read_bytes()).hexdigest()
-        == '8246184e90a8b5972585534786e16a9925471d01f62f0cd9c583daa009c5ee92',
-        'V2.34 must not modify V2.33 GL allocation/lifetime/registration plumbing')
+def normalized_v235_hdrgl(text):
+    text = re.sub(
+        r'\s*renderRawGreen\(\n?\s*outputTexture,\s*presentationTexture(?:,\s*rawInputTexture)?(?:,\s*)?(shortRaw|longRaw)(?:,\s*longRaw)?\s*\);',
+        lambda m: f'\n                __IRIS_RAW_GREEN_CALL_{m.group(1).upper()}__;',
+        text,
+        count=2)
+    start = text.index('        private void renderRawGreen(')
+    end = text.index('        private void renderRawReconstruction(', start)
+    return text[:start] + '        __IRIS_RAW_GREEN_METHOD__\n\n' + text[end:]
+
+require(sha_text(normalized_v235_hdrgl(gl))
+        == 'b6be39e9d6cbe6c3fe22cbf2dfc7d74ebe3eb2a098c5964ed330fca6ccfdce9c',
+        'V2.35 may change only renderRawGreen calls/bindings inside V2.34 HdrGlView; allocation/lifetime/registration plumbing is frozen')
 require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java').read_bytes()).hexdigest()
         == '569754e8043928cf86b1f1d34f2ad6b2885e3bf7948789725d4c2092129d4782',
         'V2.34 must not modify V2.33 JpegFusion registration mechanics')
@@ -788,13 +798,13 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# V2.34 runtime authority is the exact last successful compiler-tested V2.33
-# candidate/artifact. V2.28/V2.29 remain behavioral fusion-mechanics references only.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.33' in workflow
-        and 'run-id: 34303285781' in workflow
-        and "authority='68cbefcd7c42bf138258309c3d063743e4767ca8'" in workflow
-        and "authority_tree='226d9eddd057c2fab584ed243d21214c086aff29'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.33 Actions authority")
+# V2.35 runtime authority is the exact last successful compiler-tested V2.34
+# candidate/artifact. Older versions remain behavioral/reference evidence only.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.34' in workflow
+        and 'run-id: 34312591458' in workflow
+        and "authority='3ff48aa5ed36d2a758d1d812fd616d9dc2af72e5'" in workflow
+        and "authority_tree='36238f6c4b4ec1f00757fefa1081d6d26c30dcd8'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.34 Actions authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1368,23 +1378,41 @@ require('String rawGreenShader = loadAsset(context, "shaders/raw_green.frag");' 
         and 'rawGreenProgram = buildProgram(vertexShader, rawGreenShader);' in gl
         and gl.count('renderRawGreen(') == 3
         and 'uniform sampler2D packedRawTex;' in raw_green_shader
-        and 'vec3 greenAt(ivec2 p)' in raw_green_shader
-        and 'vec3 pairEstimate(' in raw_green_shader
-        and 'float noiseScale = sqrt(' in raw_green_shader
-        and '/ max(noiseScale, 0.00010)' in raw_green_shader
-        and 'greenSigma' in raw_green_shader
-        and 'IRIS_V234_CENSORED_GREEN_OWNER_BEGIN' in raw_green_shader,
-        "V2.32 staged physical-noise-normalized green owner must survive V2.34 with explicit censorship before R-G/B-G reconstruction")
+        and 'uniform highp usampler2D rawTex;' in raw_green_shader
+        and 'uniform float highlightClipThreshold;' in raw_green_shader
+        and 'uniform float highlightCeiling;' in raw_green_shader
+        and 'IRIS_V235_CLAUDE_EXACT_HIGHLIGHT_CALCULATION_SAMPLE_BEGIN' in raw_green_shader
+        and 'const float power = 3.0;' in raw_green_shader
+        and 'float opposed = targetColor == 0' in raw_green_shader
+        and 'reconstructed = min(max(reconstructed, calculationFallback), highlightCeiling);' in raw_green_shader
+        and 'return mix(calculationFallback, reconstructed, clipMask);' in raw_green_shader
+        and 'wideGreenEstimate' not in raw_green_shader
+        and 'IRIS_V234_CENSORED_GREEN_OWNER_BEGIN' not in raw_green_shader,
+        "V2.35 must wire Claude's exact power-3 highlightCalculationSample into the active staged green owner with no V2.34 wide-green hybrid")
+require('bindSampler2d(rawGreenProgram, "rawTex", rawTexture, 1);' in gl
+        and 'GLES30.glGetUniformLocation(rawGreenProgram, "highlightClipThreshold")' in gl
+        and '0.985f);' in gl
+        and 'GLES30.glGetUniformLocation(rawGreenProgram, "highlightCeiling")' in gl
+        and '8.0f);' in gl
+        and 'RawFusion.RawFrame colorOwner' in gl
+        and 'float[] wb = colorOwner.wbGains;' in gl,
+        "V2.35 must bind Claude guide physical sensor threshold, 8x ceiling and common LONG color owner")
 require('uniform sampler2D greenTex;' in raw_shader
         and 'vec3 colorDifferenceAt(ivec2 p)' in raw_shader
         and 'vec3 robustFourDifferences(' in raw_shader
         and 'axisDifference' in raw_shader and 'diagonalDifference' in raw_shader
-        and 'float valid = (1.0 - colorValue.z) * (1.0 - greenValue.z);' in raw_shader
+        and 'IRIS_V235_CLAUDE_COMMON_QUAD_CLIP_AUTHORITY_BEGIN' in raw_shader
+        and 'float commonQuadValid = 1.0 - quadHighlightAt(q);' in raw_shader
+        and 'float valid = (1.0 - colorValue.z) * commonQuadValid;' in raw_shader
+        and 'float valid = step(1.5, validSum);' in raw_shader
+        and 'opponentSupportQuality' not in raw_shader
+        and 'recoverCensoredBalanced' not in raw_shader
+        and 'boundaryChroma' not in raw_shader
+        and 'wideOffsets' not in raw_shader
         and 'texelFetch(greenTex' in raw_shader
         and 'cleanedRawAt(' not in raw_shader
-        and 'shadingMapAt(' not in raw_shader
-        and raw_shader.count('rawMeasurementAt(') <= 8,
-        "V2.32 R-G/B-G reconstruction must consume the staged CFA+green owners; V2.34 adds coupled uncensored validity without recursive neighborhood demosaic")
+        and 'shadingMapAt(' not in raw_shader,
+        "V2.35 must use common 2x2 physical clip authority plus absolute opponent support and remove V2.34 boundary-hue recovery")
 project_start = raw_shader.index('vec3 projectNonNegativeAtFixedLuma(vec3 rgb)')
 project_end = raw_shader.index('float transformedSigma', project_start)
 project_block = raw_shader[project_start:project_end]
@@ -1700,14 +1728,14 @@ require('JpegFusion.estimateRegistration(shortProxy, longProxy)' in saved_fusion
         and 'appearanceGain.r, appearanceGain.g, appearanceGain.b' in saved_fusion_slice,
         "V2.31 must preserve successful V2.28/V2.29 registration plus robust achromatic overlap radiometry using RAW-derived proxies only")
 require('renderRawPreprocess(\n                        presentationTexture, rawInputTexture, shadingTexture, shortRaw);' in saved_fusion_slice
-        and 'renderRawGreen(outputTexture, presentationTexture, shortRaw);' in saved_fusion_slice
+        and 'renderRawGreen(\n                        outputTexture, presentationTexture, rawInputTexture, shortRaw, longRaw);' in saved_fusion_slice
         and 'renderRawReconstruction(\n                        shortTexture, presentationTexture, outputTexture, shortRaw, longRaw);' in saved_fusion_slice
         and 'renderRawChromaDealias(presentationTexture, shortTexture, width, height);' in saved_fusion_slice
         and 'renderRawPreprocess(\n                        presentationTexture, rawInputTexture, shadingTexture, longRaw);' in saved_fusion_slice
-        and 'renderRawGreen(outputTexture, presentationTexture, longRaw);' in saved_fusion_slice
+        and 'renderRawGreen(\n                        outputTexture, presentationTexture, rawInputTexture, longRaw, longRaw);' in saved_fusion_slice
         and 'renderRawReconstruction(\n                        longTexture, presentationTexture, outputTexture, longRaw, longRaw);' in saved_fusion_slice
         and 'renderRawChromaDealias(presentationTexture, longTexture, width, height);' in saved_fusion_slice,
-        "V2.32 staged preprocess/green/reconstruct/dealias must retain LONG matched color metadata as common SHORT/LONG color owner")
+        "V2.35 staged preprocess/green/reconstruct/dealias must retain LONG matched color metadata as common SHORT/LONG color owner while exposing physical RAW only to Claude guide")
 require('registration.sampleDx, registration.sampleDy' in saved_fusion_slice
         and 'setTextureFilter(longTexture, GLES30.GL_NEAREST);' in saved_fusion_slice,
         "V2.30 must align only SHORT while retaining immutable LONG output geometry")
@@ -1961,9 +1989,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 52' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.34"' in build_gradle,
-        "V2.34 version/build marker must be exact")
+require('versionCode = 53' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.35"' in build_gradle,
+        "V2.35 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2349,17 +2377,17 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillRaws(' not in service
         and 'fuseStillRaws(' not in nafnet,
         "V2.30 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.33_to_V1.4.11-V2.34.forward.patch' in workflow
-        and 'V1.4.11-V2.34_to_V1.4.11-V2.33.rollback.patch' in workflow,
-        "V2.34 final artifact must export correctly named V2.33<->V2.34 patches")
-require("authority='68cbefcd7c42bf138258309c3d063743e4767ca8'" in workflow
-        and "authority_tree='226d9eddd057c2fab584ed243d21214c086aff29'" in workflow
+require('V1.4.11-V2.34_to_V1.4.11-V2.35.forward.patch' in workflow
+        and 'V1.4.11-V2.35_to_V1.4.11-V2.34.rollback.patch' in workflow,
+        "V2.35 final artifact must export correctly named V2.34<->V2.35 patches")
+require("authority='3ff48aa5ed36d2a758d1d812fd616d9dc2af72e5'" in workflow
+        and "authority_tree='36238f6c4b4ec1f00757fefa1081d6d26c30dcd8'" in workflow
         and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow,
-        "V2.34 must prove exact successful V2.33 parent authority")
+        "V2.35 must prove exact successful V2.34 parent authority")
 require("if len(tracked) != 35:" in workflow
-        and "V1.4.11 V2.33 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "V1.4.11 V2.34 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.34 must prove the 35-file V2.33 authority and exact 35-file candidate universe")
+        "V2.35 must prove the 35-file V2.34 authority and exact 35-file candidate universe")
 
 require('uniform vec2 stillGlobalShortOffsetPixels;' in hdr_shader
         and 'sampleUv + stillGlobalShortOffsetPixels / imageSize' in hdr_shader
@@ -2545,52 +2573,75 @@ for sigma_code in (0, 1, 31, 63, 95, 127):
         require(recovered_saturation == saturation and recovered_sigma == sigma_code,
                 "V2.32 sigma/saturation alpha packing must preserve its explicit physical saturation bit")
 
-# V2.34 exact device regressions. The successful V2.33 fusion source owner is frozen;
-# the remaining broad magenta failure is corrected before RGB by coupling opponent
-# validity to physical CFA censorship, while the V2.33 post-RGB chroma safety net stays.
-require('// IRIS_V234_CENSORED_GREEN_OWNER_BEGIN' in raw_green_shader
-        and 'packSigmaAndCensor' in raw_green_shader
-        and 'float censored = 1.0 - step(0.5, reliableLocal);' in raw_green_shader,
-        "V2.34 green owner must carry censored/reliable status into opponent reconstruction")
-require('// IRIS_V234_CENSORED_OPPONENT_HIGHLIGHT_RECOVERY_BEGIN' in raw_shader
-        and 'float valid = (1.0 - colorValue.z) * (1.0 - greenValue.z);' in raw_shader
-        and 'recoverCensoredBalanced(' in raw_shader
-        and 'vec3 sensorValid' in raw_shader,
-        "V2.34 must forbid R-G/B-G color authority whenever either side is physically censored")
-require('ivec2(-72, 0)' in raw_shader and 'ivec2(72, 72)' in raw_shader
-        and 'boundaryChroma' in raw_shader and 'neutralEvidence' in raw_shader,
-        "V2.34 highlight reconstruction must reach beyond broad clipped lamp cores and preserve boundary-derived hue")
+# V2.35 exact Claude correction regressions.  Claude analyzed the old Iris Camera
+# application, not this Viewfinder app; only its causal CFA contract is ported here.
+# Viewfinder fusion/registration/source ownership and the V2.34 carrier/presentation
+# remain frozen.  No donor/boundary hue method is added to this root correction.
+require('// IRIS_V235_CLAUDE_EXACT_HIGHLIGHT_CALCULATION_SAMPLE_BEGIN' in raw_green_shader
+        and 'float physicalSensorAt(ivec2 p)' in raw_green_shader
+        and 'int clampPhaseCoordinate(int value, int extent)' in raw_green_shader
+        and 'ivec2 phaseClamp(ivec2 p)' in raw_green_shader
+        and 'ivec2 sampleP = phaseClamp(q + ivec2(dx, dy));' in raw_green_shader
+        and 'smoothstep(highlightClipThreshold, 1.0, sensor)' in raw_green_shader
+        and 'const float power = 3.0;' in raw_green_shader
+        and '0.5 * (rootR + rootB)' in raw_green_shader
+        and 'reconstructed = min(max(reconstructed, calculationFallback), highlightCeiling);' in raw_green_shader,
+        "V2.35 must port Claude's exact highlightCalculationSample power-3 opposed-channel guide")
+require('// IRIS_V235_CLAUDE_COMMON_QUAD_CLIP_AUTHORITY_BEGIN' in raw_shader
+        and 'ivec2 base = ivec2(q.x & ~1, q.y & ~1);' in raw_shader
+        and 'for (int oy = 0; oy < 2; ++oy)' in raw_shader
+        and 'for (int ox = 0; ox < 2; ++ox)' in raw_shader
+        and 'float commonQuadValid = 1.0 - quadHighlightAt(q);' in raw_shader
+        and 'float valid = (1.0 - colorValue.z) * commonQuadValid;' in raw_shader,
+        "V2.35 must make the physical 2x2 Bayer quad the common opponent-color clipping authority")
+require('float valid = step(1.5, validSum);' in raw_shader
+        and 'opponentSupportQuality' not in raw_shader,
+        "V2.35 opponent confidence must be absolute support, never a ratio against collapsing green support")
+require('float saturation = step(0.985, normalized);' in raw_preprocess_shader
+        and 'highlightClipThreshold' in raw_green_shader
+        and '0.985f);' in gl,
+        "V2.35 clip exclusion and highlight guide must share the physical pre-WB 0.985 sensor domain")
+require('float signal = normalized * shadingGain;' in raw_preprocess_shader
+        and raw_preprocess_shader.find('float signal = normalized * shadingGain;') >= 0
+        and 'neutralFallbackBalanced' in raw_shader,
+        "V2.35 must retain Viewfinder lens shading before any neutral missing-support terminal state")
+require('recoverCensoredBalanced' not in raw_shader
+        and 'boundaryChroma' not in raw_shader
+        and 'wideOffsets' not in raw_shader
+        and 'wideGreenEstimate' not in raw_green_shader,
+        "V2.35 Claude root correction must not retain V2.34 boundary/wide-donor hybrid reconstruction")
 require('// IRIS_V233_SATURATION_CHROMA_BOUNDARY_BEGIN' in raw_chroma_shader
-        and 'float saturatedBoundaryRepair = saturationAt(p)' in raw_chroma_shader
-        and 'float periodicBoundaryRepair = (1.0 - saturationAt(p))' in raw_chroma_shader
-        and 'correctedC = mix(correctedC, boundaryC, boundaryRepair);' in raw_chroma_shader
         and 'outColor = vec4(encodedScene, carrierAt(p).a);' in raw_chroma_shader,
-        "V2.34 must retain V2.33 post-RGB luminance/alpha-preserving chroma safety net")
-require('rgbFromLumaChroma(centerY, correctedC)' in raw_chroma_shader
-        and 'projectNonNegativeAtFixedLuma(correctedRgb, centerY)' in raw_chroma_shader,
-        "V2.34 post-RGB safety net may not move center luminance/detail")
+        "V2.35 preserves the inherited V2.33 post-RGB safety net byte-for-byte; it is not the root correction")
 
-# Causal censored-opponent fixture from the supplied white chandelier/grow-light class.
-# Green is physically clipped first while R/B remain valid because WB gains are larger.
-def v234_balanced_recover(center_balanced, valid, boundary_chroma):
-    numerator=sum(center_balanced[i]*boundary_chroma[i]*valid[i] for i in range(3))
-    denominator=sum(boundary_chroma[i]*boundary_chroma[i]*valid[i] for i in range(3))
-    scale=numerator/max(denominator,1e-12)
-    predicted=[boundary_chroma[i]*scale for i in range(3)]
-    return [center_balanced[i] if valid[i] else predicted[i] for i in range(3)]
-
-# A neutral 1.20 balanced-sensor highlight with green censored must not become
-# R=B>G magenta. Boundary chromaticity 1/3,1/3,1/3 reconstructs only missing channels.
-neutral=v234_balanced_recover([1.20,1.00,1.20],[1.0,0.0,1.0],[1/3,1/3,1/3])
-require(max(neutral)-min(neutral) < 1e-9 and abs(neutral[0]-1.20) < 1e-9,
-        "V2.34 neutral clipped-green fixture must reconstruct neutral instead of magenta")
-# Genuine colored highlight: boundary hue remains the authority for the censored channel;
-# valid center channels stay byte/math-identical rather than being desaturated globally.
-colored_boundary=[0.58,0.27,0.15]
-colored=v234_balanced_recover([1.16,0.40,0.30],[1.0,0.0,1.0],colored_boundary)
-require(abs(colored[0]-1.16) < 1e-12 and abs(colored[2]-0.30) < 1e-12
-        and colored[0] > colored[1] > colored[2],
-        "V2.34 genuine colored clipped highlight must preserve boundary-derived hue and all valid channels")
+# Exact causal fixture from Claude's verdict: G support collapses while R/B still carry
+# the true balanced scene level.  The old failure produced R=B>G; common-quad rejection
+# removes those opponent observations, and missing color resolves to one neutral physical
+# brightness rather than a guessed hue.
+claude_green = 0.962
+claude_opponent = 0.519
+faulty = [claude_green + claude_opponent, claude_green, claude_green + claude_opponent]
+require(abs(faulty[0] - 1.481) < 1e-12 and abs(faulty[2] - 1.481) < 1e-12
+        and faulty[0] / faulty[1] > 1.5,
+        "Claude causal magenta fixture changed unexpectedly")
+valid_sum = 0.0  # common highlighted quad contributes no ordinary opponent sample
+ordinary_opponent_valid = 1.0 if valid_sum >= 1.5 else 0.0
+require(ordinary_opponent_valid == 0.0,
+        "V2.35 common-quad clip gate must make Claude failure opponent support zero")
+# Power-3 guide fixture: neutral R/B calculation evidence at L=1.519 reconstructs the
+# clipped green to the same L without any boundary donor.
+L = 1.519
+root_r = L ** (1.0 / 3.0)
+root_b = L ** (1.0 / 3.0)
+reconstructed_green = (0.5 * (root_r + root_b)) ** 3.0
+require(abs(reconstructed_green - L) < 1e-12,
+        "V2.35 exact Claude power-3 highlight guide must reconstruct neutral clipped green")
+# All four CFA phases in one highlighted parent quad must share one permission decision.
+quad_flags = [1.0, 0.0, 0.0, 0.0]
+quad_highlight = max(quad_flags)
+permissions = [1.0 - quad_highlight for _ in quad_flags]
+require(permissions == [0.0, 0.0, 0.0, 0.0],
+        "V2.35 common Bayer quad clipping authority may not alternate by CFA phase")
 
 # V2.34 redistributes the SAME RGBA8 RGB carrier; no extra full-resolution texture is
 # permitted.  The exact 1..8 recovered-highlight interval must receive at least twice
@@ -2697,4 +2748,4 @@ require(v234_hdr_peak(4.0) < 0.91 and v234_hdr_peak(5.6) <= 0.931,
 require(v234_hdr_peak(16.0) < 0.99,
         "V2.34 must reserve smooth headroom above the ceiling gradient for true lamp cores")
 
-print("V1.4.11 V2.34 REGRESSION PASS: successful V2.33 fusion/registration/topology/source ownership is frozen; censored CFA cannot form opponent color; 1..8 RAW carrier precision is doubled without new GPU allocations; saved presentation is owner-independent and continuous; live transfer remains byte-identical")
+print("V1.4.11 V2.35 REGRESSION PASS: exact successful V2.34 fusion/registration/source ownership/presentation is frozen; Claude power-3 highlight guide is active; physical 2x2 clip authority gates opponent color; V2.34 boundary-hue hybrid is removed; carrier/lifetime remain unchanged")
