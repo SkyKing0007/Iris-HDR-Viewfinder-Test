@@ -5,9 +5,14 @@ in vec2 vUv;
 layout(location=0) out vec4 outColor;
 uniform sampler2D sourceTex;
 
-const float SIGNAL_COMPAND_K = 1.0;
 const float SIGMA_COMPAND_K = 0.01;
 const float CARRIER_MAX = 254.0 / 255.0;
+const float CARRIER_BODY_END = CARRIER_MAX * 0.42;
+const float CARRIER_DETAIL_END = CARRIER_MAX * 0.92;
+const float CARRIER_DETAIL_TOP = 8.0;
+const float CARRIER_DETAIL_STOPS = 3.0;
+const float CARRIER_TAIL_TOP = 32.0;
+const float CARRIER_TAIL_STOPS = 2.0;
 
 float expandPositive(float encoded, float k) {
     float e = min(max(encoded, 0.0), CARRIER_MAX);
@@ -19,6 +24,38 @@ float compandPositive(float value, float k) {
     float x = max(value, 0.0);
     return min(CARRIER_MAX, sqrt(x / max(x + k, 0.0000001)));
 }
+
+// IRIS_V234_HIGHLIGHT_PRECISION_CARRIER_BEGIN
+float decodeSceneChannel(float encoded) {
+    float e = clamp(encoded, 0.0, CARRIER_MAX);
+    if (e <= CARRIER_BODY_END) {
+        float t = e / max(CARRIER_BODY_END, 0.000001);
+        return t * t;
+    }
+    if (e <= CARRIER_DETAIL_END) {
+        float t = (e - CARRIER_BODY_END)
+            / max(CARRIER_DETAIL_END - CARRIER_BODY_END, 0.000001);
+        return exp2(CARRIER_DETAIL_STOPS * t);
+    }
+    float tailT = clamp((e - CARRIER_DETAIL_END)
+        / max(CARRIER_MAX - CARRIER_DETAIL_END, 0.000001), 0.0, 1.0);
+    return CARRIER_DETAIL_TOP * exp2(CARRIER_TAIL_STOPS * tailT);
+}
+
+float encodeSceneChannel(float value) {
+    float x = max(value, 0.0);
+    if (x <= 1.0) return CARRIER_BODY_END * sqrt(x);
+    if (x <= CARRIER_DETAIL_TOP) {
+        return CARRIER_BODY_END
+            + (CARRIER_DETAIL_END - CARRIER_BODY_END)
+                * (log2(x) / CARRIER_DETAIL_STOPS);
+    }
+    float tailStops = clamp(log2(x / CARRIER_DETAIL_TOP), 0.0, CARRIER_TAIL_STOPS);
+    float tailT = tailStops / CARRIER_TAIL_STOPS;
+    return min(CARRIER_MAX,
+        CARRIER_DETAIL_END + (CARRIER_MAX - CARRIER_DETAIL_END) * tailT);
+}
+// IRIS_V234_HIGHLIGHT_PRECISION_CARRIER_END
 
 ivec2 clampPixel(ivec2 p) {
     ivec2 size = textureSize(sourceTex, 0);
@@ -32,9 +69,9 @@ vec4 carrierAt(ivec2 p) {
 vec3 sceneAt(ivec2 p) {
     vec3 encoded = carrierAt(p).rgb;
     return vec3(
-        expandPositive(encoded.r, SIGNAL_COMPAND_K),
-        expandPositive(encoded.g, SIGNAL_COMPAND_K),
-        expandPositive(encoded.b, SIGNAL_COMPAND_K));
+        decodeSceneChannel(encoded.r),
+        decodeSceneChannel(encoded.g),
+        decodeSceneChannel(encoded.b));
 }
 
 float sigmaAt(ivec2 p) {
@@ -281,9 +318,9 @@ void main() {
     correctedRgb = projectNonNegativeAtFixedLuma(correctedRgb, centerY);
 
     vec3 encodedScene = vec3(
-        compandPositive(correctedRgb.r, SIGNAL_COMPAND_K),
-        compandPositive(correctedRgb.g, SIGNAL_COMPAND_K),
-        compandPositive(correctedRgb.b, SIGNAL_COMPAND_K));
+        encodeSceneChannel(correctedRgb.r),
+        encodeSceneChannel(correctedRgb.g),
+        encodeSceneChannel(correctedRgb.b));
     // Alpha is copied byte-for-byte from V2.32 center authority. Chroma repair may not
     // change physical sigma or the RAW saturation bit consumed by fusion ownership.
     outColor = vec4(encodedScene, carrierAt(p).a);

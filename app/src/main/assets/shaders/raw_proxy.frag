@@ -5,13 +5,28 @@ in vec2 vUv;
 layout(location=0) out vec4 outColor;
 uniform sampler2D sourceTex;
 
-const float SIGNAL_COMPAND_K = 1.0;
 const float CARRIER_MAX = 254.0 / 255.0;
+const float CARRIER_BODY_END = CARRIER_MAX * 0.42;
+const float CARRIER_DETAIL_END = CARRIER_MAX * 0.92;
+const float CARRIER_DETAIL_TOP = 8.0;
+const float CARRIER_DETAIL_STOPS = 3.0;
+const float CARRIER_TAIL_TOP = 32.0;
+const float CARRIER_TAIL_STOPS = 2.0;
 
-float expandPositive(float encoded, float k) {
-    float e = min(max(encoded, 0.0), CARRIER_MAX);
-    float e2 = e * e;
-    return k * e2 / max(1.0 - e2, 0.0000001);
+float decodeSceneChannel(float encoded) {
+    float e = clamp(encoded, 0.0, CARRIER_MAX);
+    if (e <= CARRIER_BODY_END) {
+        float t = e / max(CARRIER_BODY_END, 0.000001);
+        return t * t;
+    }
+    if (e <= CARRIER_DETAIL_END) {
+        float t = (e - CARRIER_BODY_END)
+            / max(CARRIER_DETAIL_END - CARRIER_BODY_END, 0.000001);
+        return exp2(CARRIER_DETAIL_STOPS * t);
+    }
+    float tailT = clamp((e - CARRIER_DETAIL_END)
+        / max(CARRIER_MAX - CARRIER_DETAIL_END, 0.000001), 0.0, 1.0);
+    return CARRIER_DETAIL_TOP * exp2(CARRIER_TAIL_STOPS * tailT);
 }
 
 float linearToSrgbChannel(float value) {
@@ -24,11 +39,11 @@ void main() {
     ivec2 p = clamp(ivec2(gl_FragCoord.xy), ivec2(0), size - ivec2(1));
     vec3 encoded = texelFetch(sourceTex, p, 0).rgb;
     vec3 scene = vec3(
-        expandPositive(encoded.r, SIGNAL_COMPAND_K),
-        expandPositive(encoded.g, SIGNAL_COMPAND_K),
-        expandPositive(encoded.b, SIGNAL_COMPAND_K));
-    // This RGBA8 image is diagnostic/registration evidence only. The real saved HDR
-    // source remains the extended-linear carrier above and is never replaced by this.
+        decodeSceneChannel(encoded.r),
+        decodeSceneChannel(encoded.g),
+        decodeSceneChannel(encoded.b));
+    // RGBA8 proxy remains registration evidence only.  Production fusion consumes
+    // the higher-highlight-precision extended-linear carrier directly.
     vec3 proxy = vec3(
         linearToSrgbChannel(clamp(scene.r, 0.0, 1.0)),
         linearToSrgbChannel(clamp(scene.g, 0.0, 1.0)),

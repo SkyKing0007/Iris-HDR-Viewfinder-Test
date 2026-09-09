@@ -1,15 +1,15 @@
-V1.4.11 V2.33 — SAFE EASY FLAT VSCODE.DEV HANDOFF
+V1.4.11 V2.34 — SAFE EASY FLAT VSCODE.DEV HANDOFF
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required parent: d106aa22d7a4f3dba5d00098f4243f3fce56082f (successful V2.32)
-Successful compiled authority: Actions 34295814090 / artifact 10083118010
+Required parent: 68cbefcd7c42bf138258309c3d063743e4767ca8 (successful V2.33)
+Successful compiled authority: Actions 34303285781 / artifact 10085756068
 
 HANDOFF RULE
-This ZIP is FLAT, matching the V2.32 / V2.31 V1.1 delivery style that worked in vscode.dev.
+This ZIP is FLAT, matching the V2.33 / V2.32 / V2.31 V1.1 delivery style that worked in vscode.dev.
 Do NOT drag app/, scripts/, .github/, or a complete candidate tree over the repository.
 Replace only these individual files in their exact destinations.
 
-UPLOAD THESE 10 FILES
+UPLOAD THESE 13 FILES
 
 1. build.yml
    -> .github/workflows/build.yml
@@ -29,20 +29,26 @@ UPLOAD THESE 10 FILES
    -> app/src/main/assets/shaders/hdr_display.frag
 9. raw_chroma_dealias.frag
    -> app/src/main/assets/shaders/raw_chroma_dealias.frag
-10. verify_orientation.py
+10. raw_green.frag
+    -> app/src/main/assets/shaders/raw_green.frag
+11. raw_proxy.frag
+    -> app/src/main/assets/shaders/raw_proxy.frag
+12. raw_reconstruct.frag
+    -> app/src/main/assets/shaders/raw_reconstruct.frag
+13. verify_orientation.py
     -> scripts/verify_orientation.py
 
 BEFORE COMMIT
-Source Control must show exactly 10 changes:
-- 10 [M]
+Source Control must show exactly 13 changes:
+- 13 [M]
 - 0 [A]
 - 0 [D]
 
 CameraController.java, HdrGlView.java, RawFusion.java, JpegFusion.java, CaptureSetSaver.java,
-raw_preprocess.frag, raw_green.frag, raw_reconstruct.frag, raw_proxy.frag, NafNetDenoiser.java,
-the NAFNet model/license, AndroidManifest.xml and all other protected runtime files must NOT appear.
+raw_preprocess.frag, NafNetDenoiser.java, the NAFNet model/license, AndroidManifest.xml and all
+other protected runtime files must NOT appear.
 
 Suggested commit message:
-V1.4.11 V2.33 protect fusion and correct highlight chroma presentation
+V1.4.11 V2.34 censored-CFA highlight color and continuous ceiling rendering
 
 GitHub Actions remains authoritative for pinned real GLSL, real Java and full :app:assembleDebug.

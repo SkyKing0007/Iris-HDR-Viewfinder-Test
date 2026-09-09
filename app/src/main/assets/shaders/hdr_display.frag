@@ -80,13 +80,19 @@ float max3(vec3 value) {
 }
 
 // IRIS_V232_EXTENDED_LINEAR_RAW_CARRIER_BEGIN
-// Saved RAW stills use an extended-linear companded RGB carrier. Live preview and
-// mode-6 presentation remain ordinary sRGB. A value of 1.0 in scene space is no
-// longer a storage ceiling; the positive compander asymptotically represents much
-// larger values while alpha carries the reconstructed physical 1-sigma uncertainty.
-const float rawCarrierSignalK = 1.0;
+// Saved RAW stills remain an extended-linear RGB + physical-sigma carrier. V2.34
+// changes only the RGB code distribution inside the inherited RGBA8 allocation:
+// shadows keep square-root precision, 1..8 scene energy receives the dense majority
+// of highlight codes, and >8 remains an asymptotic specular tail. Alpha retains the
+// exact V2.32/V2.33 sigma+saturation contract consumed by fusion ownership.
 const float rawCarrierSigmaK = 0.01;
 const float rawCarrierMax = 254.0 / 255.0;
+const float rawCarrierBodyEnd = rawCarrierMax * 0.42;
+const float rawCarrierDetailEnd = rawCarrierMax * 0.92;
+const float rawCarrierDetailTop = 8.0;
+const float rawCarrierDetailStops = 3.0;
+const float rawCarrierTailTop = 32.0;
+const float rawCarrierTailStops = 2.0;
 
 bool savedRawSourceMode() {
     return mode == 3 || mode == 4 || mode == 5;
@@ -96,6 +102,22 @@ float expandRawCarrier(float encoded, float k) {
     float e = min(max(encoded, 0.0), rawCarrierMax);
     float e2 = e * e;
     return k * e2 / max(1.0 - e2, 0.0000001);
+}
+
+float decodeRawSceneChannel(float encoded) {
+    float e = clamp(encoded, 0.0, rawCarrierMax);
+    if (e <= rawCarrierBodyEnd) {
+        float t = e / max(rawCarrierBodyEnd, 0.000001);
+        return t * t;
+    }
+    if (e <= rawCarrierDetailEnd) {
+        float t = (e - rawCarrierBodyEnd)
+            / max(rawCarrierDetailEnd - rawCarrierBodyEnd, 0.000001);
+        return exp2(rawCarrierDetailStops * t);
+    }
+    float tailT = clamp((e - rawCarrierDetailEnd)
+        / max(rawCarrierMax - rawCarrierDetailEnd, 0.000001), 0.0, 1.0);
+    return rawCarrierDetailTop * exp2(rawCarrierTailStops * tailT);
 }
 
 float rawCarrierSigma(float encodedAlpha) {
@@ -111,9 +133,9 @@ float rawCarrierSaturation(float encodedAlpha) {
 
 vec4 decodeRawCarrier(vec4 encoded) {
     return vec4(
-        expandRawCarrier(encoded.r, rawCarrierSignalK),
-        expandRawCarrier(encoded.g, rawCarrierSignalK),
-        expandRawCarrier(encoded.b, rawCarrierSignalK),
+        decodeRawSceneChannel(encoded.r),
+        decodeRawSceneChannel(encoded.g),
+        decodeRawSceneChannel(encoded.b),
         rawCarrierSigma(encoded.a));
 }
 
@@ -214,21 +236,16 @@ vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
     return sceneLinear * (mappedPeak / scenePeak);
 }
 
-// IRIS_V233_SAVED_RECOVERED_HIGHLIGHT_PRESENTATION_BEGIN
-// V2.32 device evidence says source ownership is now correct, but subtle recovered
-// ceiling illumination/reflection structure is visually compressed. Preserve the
-// shared/live V2.32 transfer byte-identical and apply this pointwise monotonic shape
-// only when mode-5 has already proven binary SHORT ownership. No neighbor sampling,
-// no histogram/scene-global knots, and one whole-RGB scale preserve geometry/hue.
-vec3 savedRecoveredHdrToneMap(
-        vec3 sceneLinear, float ratio, float bracketStops, float recoveredOwner) {
-    if (recoveredOwner < 0.5) {
-        return adaptiveHdrToneMap(sceneLinear, ratio, bracketStops);
-    }
-
+// IRIS_V234_CONTINUOUS_SAVED_HIGHLIGHT_PRESENTATION_BEGIN
+// Presentation must not reveal the binary fusion ownership mask.  Mode-5 has already
+// selected one physically registered scene radiance; from here every saved pixel uses
+// one pointwise whole-RGB transfer.  A mild concave stop shape keeps the lower/middle
+// ceiling gradient and subtle X reflection separated while a lower detailTop reserves
+// headroom so the chandelier glow cannot become a detached white island.
+vec3 savedContinuousHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
     const float knee = 0.70;
-    const float detailTop = 0.965;
-    const float detailContrast = 0.55;
+    const float detailTop = 0.930;
+    const float lowerSlopeBias = 0.35;
     float scenePeak = max3(sceneLinear);
     if (scenePeak <= knee || scenePeak <= 0.000001) return sceneLinear;
 
@@ -237,18 +254,17 @@ vec3 savedRecoveredHdrToneMap(
     float mappedPeak;
     if (highlightStops <= detailStops) {
         float t = clamp(highlightStops / detailStops, 0.0, 1.0);
-        // Endpoint-anchored S-shape: lower recovered levels separate slightly downward,
-        // upper recovered levels separate upward, and the midpoint is unchanged. This
-        // restores visible local slope for the ceiling gradient/X without lifting the
-        // entire recovered region or creating a scene-global exposure change.
-        float shapedT = t + detailContrast * t * (1.0 - t) * (2.0 * t - 1.0);
+        // Concave endpoint-preserving shape: lower/mid recovered levels receive more
+        // slope while the upper interval compresses progressively toward detailTop.
+        // No spatial neighborhood or owner mask participates, so smooth ceilings
+        // cannot acquire rings at SHORT/LONG ownership boundaries.
+        float shapedT = t + lowerSlopeBias * t * (1.0 - t);
         mappedPeak = knee + (detailTop - knee) * clamp(shapedT, 0.0, 1.0);
     } else {
         float tailStops = highlightStops - detailStops;
-        // The shaped detail interval reaches detailTop with derivative (1-c). Match
-        // that derivative into the same asymptotic white tail so no shoulder boundary
-        // or hard ceiling is introduced at the recoverable-bracket limit.
-        float endSlopeScale = max(1.0 - detailContrast, 0.05);
+        // Match the reduced end slope of the concave detail interval into the
+        // asymptotic specular tail (C1 continuity, no hard shoulder boundary).
+        float endSlopeScale = max(1.0 - lowerSlopeBias, 0.05);
         float tailStopScale = (1.0 - detailTop) * detailStops
             / ((detailTop - knee) * endSlopeScale);
         mappedPeak = detailTop + (1.0 - detailTop)
@@ -257,7 +273,7 @@ vec3 savedRecoveredHdrToneMap(
     mappedPeak = clamp(mappedPeak, knee, 1.0);
     return sceneLinear * (mappedPeak / scenePeak);
 }
-// IRIS_V233_SAVED_RECOVERED_HIGHLIGHT_PRESENTATION_END
+// IRIS_V234_CONTINUOUS_SAVED_HIGHLIGHT_PRESENTATION_END
 
 float linearLuma(vec3 rgb) {
     return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -1147,8 +1163,8 @@ void main() {
 
         float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
         vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
-        vec3 displayLinear = savedRecoveredHdrToneMap(
-            bodyToned, ratio, bracketStops, shortOwns);
+        vec3 displayLinear = savedContinuousHdrToneMap(
+            bodyToned, ratio, bracketStops);
         displayLinear = applyDisplayGamma(displayLinear, displayGamma);
         outColor = vec4(clamp(linearToSrgb(displayLinear), 0.0, 1.0), 1.0);
         // IRIS_V217_REGION_SOURCE_OWNERSHIP_END
