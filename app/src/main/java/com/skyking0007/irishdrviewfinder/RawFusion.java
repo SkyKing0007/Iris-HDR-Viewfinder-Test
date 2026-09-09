@@ -8,9 +8,11 @@ import android.hardware.camera2.params.ColorSpaceTransform;
 import android.hardware.camera2.params.LensShadingMap;
 import android.hardware.camera2.params.RggbChannelVector;
 import android.media.Image;
+import android.util.Pair;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Locale;
 
 /**
  * V2.30 immutable RAW_SENSOR carrier for saved SHORT/LONG fusion.
@@ -38,6 +40,8 @@ final class RawFusion {
         final long sensorTimestampNs;
         final long exposureTimeNs;
         final int sensitivityIso;
+        final float noiseSlope;
+        final float noiseOffset;
 
         RawFrame(
                 int width,
@@ -53,7 +57,9 @@ final class RawFusion {
                 float[] shadingMapRgba,
                 long sensorTimestampNs,
                 long exposureTimeNs,
-                int sensitivityIso) {
+                int sensitivityIso,
+                float noiseSlope,
+                float noiseOffset) {
             this.width = width;
             this.height = height;
             this.pixels = pixels;
@@ -68,6 +74,8 @@ final class RawFusion {
             this.sensorTimestampNs = sensorTimestampNs;
             this.exposureTimeNs = exposureTimeNs;
             this.sensitivityIso = sensitivityIso;
+            this.noiseSlope = noiseSlope;
+            this.noiseOffset = noiseOffset;
         }
 
         ByteBuffer directUnsigned16Buffer() {
@@ -197,6 +205,31 @@ final class RawFusion {
             }
         }
 
+        // V2.32 physical RAW-noise authority. Camera2 exposes the per-capture
+        // variance model as pairs (S,O) with variance = S * signal + O. Iris uses
+        // the conservative envelope across reported color planes so CFA reconstruction
+        // never depends on a guessed channel order and never treats sensor uncertainty
+        // as scene structure. The exact per-pixel lens-shading gain is applied to this
+        // model later in raw_preprocess.frag.
+        Pair<Double, Double>[] noiseProfile = result.get(CaptureResult.SENSOR_NOISE_PROFILE);
+        if (noiseProfile == null || noiseProfile.length == 0) {
+            throw new IllegalStateException("V2.32 RAW fusion requires SENSOR_NOISE_PROFILE");
+        }
+        double maxNoiseSlope = 0.0;
+        double maxNoiseOffset = 0.0;
+        for (Pair<Double, Double> pair : noiseProfile) {
+            if (pair == null || pair.first == null || pair.second == null
+                    || !Double.isFinite(pair.first) || !Double.isFinite(pair.second)
+                    || pair.first < 0.0 || pair.second < 0.0) {
+                throw new IllegalStateException("Invalid RAW SENSOR_NOISE_PROFILE entry");
+            }
+            maxNoiseSlope = Math.max(maxNoiseSlope, pair.first);
+            maxNoiseOffset = Math.max(maxNoiseOffset, pair.second);
+        }
+        if (!(maxNoiseSlope > 0.0 || maxNoiseOffset > 0.0)) {
+            throw new IllegalStateException("RAW SENSOR_NOISE_PROFILE is all zero");
+        }
+
         Long timestamp = result.get(CaptureResult.SENSOR_TIMESTAMP);
         Long exposure = result.get(CaptureResult.SENSOR_EXPOSURE_TIME);
         Integer iso = result.get(CaptureResult.SENSOR_SENSITIVITY);
@@ -210,10 +243,23 @@ final class RawFusion {
                             + " result=" + timestamp);
         }
 
+        float noiseSlope = (float) maxNoiseSlope;
+        float noiseOffset = (float) maxNoiseOffset;
+        if (!Float.isFinite(noiseSlope) || !Float.isFinite(noiseOffset)
+                || noiseSlope < 0.0f || noiseOffset < 0.0f
+                || !(noiseSlope > 0.0f || noiseOffset > 0.0f)) {
+            throw new IllegalStateException("RAW SENSOR_NOISE_PROFILE cannot be represented as finite floats");
+        }
+        RuntimeLogger.event(
+                "RAW_NOISE_PROFILE",
+                String.format(Locale.US,
+                        "iso=%d planes=%d slopeMax=%.9g offsetMax=%.9g",
+                        iso, noiseProfile.length, noiseSlope, noiseOffset));
+
         return new RawFrame(
                 width, height, pixels, blackPattern, white, cfa, wb, rows,
                 shadingWidth, shadingHeight, shadingRgba,
-                timestamp, exposure, iso);
+                timestamp, exposure, iso, noiseSlope, noiseOffset);
     }
 
     static double rawExposureRatio(RawFrame shortFrame, RawFrame longFrame) {

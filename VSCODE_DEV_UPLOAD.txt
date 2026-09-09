@@ -1,17 +1,15 @@
-V1.4.11 V2.31 V1.1 — SAFE EASY VSCODE.DEV COMPILER-REPAIR HANDOFF
+V1.4.11 V2.32 — SAFE EASY FLAT VSCODE.DEV HANDOFF
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Current required parent: e6c1e4abab0101772cfe9a882b5c3de85b0fdc7b (failed V2.31)
-Successful compiled runtime authority remains: 3d11f41dc4ec6989b925ac117ff86fd49b1b079d / Actions 34250645187 (V2.30)
+Required parent: 97f93f5a8f3ab02a30f01df59702a67a40a2b3f5 (successful V2.31 V1.1)
+Successful compiled authority: Actions 34272023077 / artifact 10074269678
 
-WHY THIS HANDOFF IS SMALL
-The V2.31 Actions failure is one Java compiler regression: HdrGlView calls median3(...) but the helper is missing. V1.1 restores that helper and updates only the version/proof/package files required for an authoritative repair build. No RAW/HDR/chroma/moire design is reopened.
+HANDOFF RULE
+This ZIP is FLAT, matching the V2.31 V1.1 delivery style that worked in vscode.dev.
+Do NOT drag app/, scripts/, .github/, or a complete candidate tree over the repository.
+Replace only these individual files in their exact destinations.
 
-PERMANENT VSCODE.DEV DELIVERY RULE
-Do NOT drag app/, scripts/, .github/, or a full candidate tree over the repository.
-Handoff ZIPs are FLAT. Replace only the listed individual files in their exact destination folders. This keeps unchanged ML/model/protected files out of vscode.dev writes and gives a predictable Source Control count.
-
-UPLOAD THESE 9 FILES ONE AT A TIME
+UPLOAD THESE 16 FILES
 
 1. build.yml
    -> .github/workflows/build.yml
@@ -27,16 +25,34 @@ UPLOAD THESE 9 FILES ONE AT A TIME
    -> VSCODE_DEV_UPLOAD.txt (repository root)
 7. app_build.gradle.kts
    -> app/build.gradle.kts
-8. HdrGlView.java
-   -> app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-9. verify_orientation.py
-   -> scripts/verify_orientation.py
+8. hdr_display.frag
+   -> app/src/main/assets/shaders/hdr_display.frag
+9. raw_chroma_dealias.frag
+   -> app/src/main/assets/shaders/raw_chroma_dealias.frag
+10. raw_green.frag
+    -> app/src/main/assets/shaders/raw_green.frag (NEW)
+11. raw_preprocess.frag
+    -> app/src/main/assets/shaders/raw_preprocess.frag
+12. raw_proxy.frag
+    -> app/src/main/assets/shaders/raw_proxy.frag (NEW)
+13. raw_reconstruct.frag
+    -> app/src/main/assets/shaders/raw_reconstruct.frag
+14. HdrGlView.java
+    -> app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
+15. RawFusion.java
+    -> app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java
+16. verify_orientation.py
+    -> scripts/verify_orientation.py
 
 BEFORE COMMIT
-Source Control must show exactly 9 changes, all [M], and ZERO [A] / [D].
-No shader file, CameraController.java, JpegFusion.java, RawFusion.java, CaptureSetSaver.java, NafNetDenoiser.java, model, or license should appear in Source Control for this repair.
+Source Control must show exactly 16 changes:
+- 14 [M]
+- 2 [A]: raw_green.frag and raw_proxy.frag
+- 0 [D]
+
+CameraController.java, JpegFusion.java, CaptureSetSaver.java, NafNetDenoiser.java, the NAFNet model/license, AndroidManifest.xml and all other protected runtime files must NOT appear in Source Control.
 
 Suggested commit message:
-V1.4.11 V2.31 V1.1 restore RAW fusion radiometric helper
+V1.4.11 V2.32 noise-aware extended-linear RAW CFA fusion
 
 GitHub Actions remains authoritative for pinned real GLSL, real Java and full :app:assembleDebug.

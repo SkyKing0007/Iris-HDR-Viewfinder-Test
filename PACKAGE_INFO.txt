@@ -1,74 +1,73 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.31 V1.1 — JAVAC REPAIR / RAW PARITY / HIGH-DR / CHROMA-MOIRE
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.32 — NOISE-AWARE EXTENDED-LINEAR RAW/CFA FUSION
 
 STATUS
-PREPARED / UPLOAD-READY only after the final clean-extract proof described below passes.
-NOT BUILD-PROVEN until GitHub Actions runs the pinned real GLSL compiler, real project Java compiler, and full :app:assembleDebug.
+PREPARED / UPLOAD-READY only after final clean-extract replay passes.
+NOT BUILD-PROVEN until GitHub Actions runs the pinned real GLSL compiler, real project Java compiler and full :app:assembleDebug.
 No backup requested or created. No source commit or push is performed by this handoff preparation.
 
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 49
-Target versionName: 1.0-v1.4.11-v2.31-v1.1
+Target versionCode: 50
+Target versionName: 1.0-v1.4.11-v2.32
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL ACTIONS COMPILED CANDIDATE
-Commit: 3d11f41dc4ec6989b925ac117ff86fd49b1b079d
-Compiled candidate tree: 4fd09b02019f72c1acc5f3bcb6cb6691c751970e
-GitHub Actions run: 34250645187 — SUCCESS
-Artifact ID: 10065909599
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.30
-Artifact ZIP digest: sha256:3522348db40ef43e19a73c58778026219ca76c89195c452e3736195e10c1b6a6
-V2.30 APK SHA-256: a7f81eafc03eaa8add71c0de4330f44ce2bea3be0fa0e5599b70a5c25d1fb421
-V2.30 source-candidate TAR SHA-256: 2e08234d1c2f861cd19033c155e76efc97ad0ada98757c7c0f0569a789d21624
-V2.30 runtime manifest SHA-256: 9e85a118d9593f9c15e72f879c2d9736141893956b96c324de804bdcb47346b7
-V2.30 repository manifest SHA-256: 305ac84689d04a3989f0cb632461f812ff651f46c618b4082ecc79de13977150
-V2.30 regressions SHA-256: 1699d7372ef3c4e87cac74fc5a7ad529685a1437dd059ee8ed3cfd190f5ed248
-
-DEVICE-RUNTIME STATUS OF V2.30
-V2.30 is compiler/build successful but device-runtime rejected. The supplied capture proved two exact regressions:
-1. GL_R16UI returned integer RAW codes while Java scaled black/white by 1/65535, saturating reconstruction and producing the nearly uniform purple FUSED_HDR.
-2. AUTO physically captured SHORT and LONG at the same approximately 1/120 ISO50 setting in a bright-window/high-DR scene, yielding a 1.00x / 0EV pair with no real HDR acquisition.
-These conditions are permanent V2.31 regressions and V2.30 remains the exact byte authority only; V2.28/V2.29 successful fusion behavior is the semantic authority described below.
-
-
-V2.31 V1.1 COMPILER-REPAIR AUTHORITY
-Failed V2.31 commit: e6c1e4abab0101772cfe9a882b5c3de85b0fdc7b
-Failed V2.31 tree: 81f74beebddbf6837cd8741b93c3dee5eb4f4aa5
-Failed Actions run: 34270364791
-Exact javac failure: HdrGlView.java called median3(float,float,float) but the helper was absent.
-Repair: restore exactly one private static median3 helper and add a permanent pre-compiler regression requiring call+helper coexistence.
-No RAW math, fusion ownership, HDR policy, chroma/moire algorithm, JpegFusion, RawFusion, CaptureSetSaver, NAFNet model, or protected runtime behavior is changed by V1.1.
+Commit: 97f93f5a8f3ab02a30f01df59702a67a40a2b3f5
+Compiled candidate tree: aceb5a25936eac0b8f8f9b8c6e5353b9e0dd9cb9
+GitHub Actions run: 34272023077 — SUCCESS
+Artifact ID: 10074269678
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-V1.1
+Artifact ZIP digest: sha256:63fe4ba932d861371950c517634aec965f762b1c115f999950fcba3a6d454528
+APK SHA-256: 75fbcf7e719f9292e4296d11233195ac60ec9297270154006d91019931c22131
+Source-candidate TAR SHA-256: d0444d13a9239aca668aa946b4aa15b1a4317e87ca63c3699492b29ca6b37ed1
+Runtime manifest SHA-256: cbe4cf549b6e198a95db93b5d14f3b535e861175e9ded10a401b5795bc248b69
+Repository manifest SHA-256: 09c2b0a19f58a59d5207cb621a8f8b7376f958c334b915af7d4f7e43b1572673
+Regressions SHA-256: 4a20641c8d634e3c03d56294f7c476078a895edaac96a720c3f7f66c085048f4
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.29-derived 15-step procedure, inherited through successful V2.30 Actions run 34250645187. Authority reconstruction, deterministic full-index forward/rollback proof, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, reserved-identifier scan, real GLSL compile, real project Java compile, regression replay, full :app:assembleDebug, post-build invariance, exactly-one-APK proof and deterministic artifact export retain the proven ordering.
+Exact successful V2.31 V1.1 procedure from Actions run 34272023077. Authority reconstruction, candidate allowlist, deterministic full-index forward/rollback proof, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, complete reserved-identifier scan, real runtime GLSL compile, real project Java compile, regression replay, full :app:assembleDebug, post-build invariance, exactly-one-APK/model proof and artifact export retain the successful ordering. V2.32 does not redesign these mechanics.
 
-FUSION-BEHAVIOR AUTHORITY
-Successful V2.28/V2.29 saved-fusion mechanics remain the semantic owner:
-- LONG is immutable full-resolution output geometry and default body/chroma/detail authority.
-- SHORT is the only moved/resampled source.
-- global registration uses the proven bidirectional coarse-cycle authority with analysis-domain subpixel refinement.
-- local SHORT residual flow is bounded/fail-closed and may not become a path-propagated final warp.
-- SHORT recovery is binary whole-RGB source ownership, never per-channel/fractional color mixing.
-- connected-region topology determines recovery connectivity; full-resolution physical information-loss evidence determines final SHORT ownership.
-- unsupported/motion/disoccluded regions fail closed to LONG.
-JpegFusion.java remains byte-identical to successful V2.30/V2.29: SHA-256 569754e8043928cf86b1f1d34f2ad6b2885e3bf7948789725d4c2092129d4782.
+REFERENCE BOUNDARY
+Photon Camera APK observations are reference-only. Iris HDR Viewfinder successful artifacts, source candidates, device samples and regressions are implementation authority.
 
-INTENDED V2.30 -> V2.31 RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 6
+DEVICE EVIDENCE / ROOT FAILURE CLASS
+The supplied MANUAL RAW HDR pair is a real approximately 8.33x / 3.06EV bracket (SHORT 1/500 ISO50; LONG approximately 1/120 ISO100), so the false-color/zipper/moire defects are not caused by a collapsed bracket. The DNG/Camera2 physical noise profiles prove that exposure-normalized SHORT uncertainty exceeds LONG uncertainty by more than 2x through normal body levels and substantially more in dark regions. V2.31's RAW path did not carry this physical uncertainty into reconstruction/ownership and converted saved RAW-derived source data toward display RGB too early.
+
+V2.32 RUNTIME CONTRACT
+- Production saved fusion remains timestamp-matched SHORT/LONG RAW_SENSOR only. HAL JPEGs are independent references, never production inputs.
+- RawFrame carries finite non-negative SENSOR_NOISE_PROFILE authority with variance=S*signal+O.
+- raw_preprocess.frag preserves one sensor-code sample/black/white domain, applies per-frame lens shading once, performs same-CFA noise-gated outlier cleanup, preserves extended-linear signal and carries signal/sigma/raw-saturation.
+- raw_green.frag is the staged structural green owner.
+- raw_reconstruct.frag uses staged green plus noise-aware R-G/B-G evidence, applies WB after structure reconstruction and uses LONG's matched color transform for both observations. Production saved source remains extended-linear rather than sRGB.
+- raw_chroma_dealias.frag is linear, opponent-chroma-only, sigma-aware and center-luminance preserving.
+- raw_proxy.frag produces sRGB only as transient evidence for the byte-preserved JpegFusion registration estimator.
+- SHORT remains GL_NEAREST and is interpolated explicitly only after extended-linear decode.
+- physical RAW saturation remains independent from display RGB/gamut.
+- effective SHORT structure advantage is reduced by a conservative four-sigma uncertainty allowance before it may influence V2.31 connected recovery.
+- final recovered source selection remains binary whole-RGB, LONG geometry remains immutable, and unsupported/motion/disoccluded regions fail closed to LONG.
+
+PRESERVED V2.31 V1.1 RUNTIME
+CameraController.java/high-DR acquisition is byte-identical, including the >=3EV high-DR bracket invariant. JpegFusion.java, CaptureSetSaver.java, NAFNet/model, DNG/media/background ownership, live preview and all other protected runtime files are unchanged.
+
+INTENDED V2.31 V1.1 -> V2.32 RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 8
 - app/src/main/assets/shaders/hdr_display.frag [MODIFY]
-- app/src/main/assets/shaders/raw_chroma_dealias.frag [ADD]
-- app/src/main/assets/shaders/raw_preprocess.frag [ADD]
+- app/src/main/assets/shaders/raw_chroma_dealias.frag [MODIFY]
+- app/src/main/assets/shaders/raw_green.frag [ADD]
+- app/src/main/assets/shaders/raw_preprocess.frag [MODIFY]
+- app/src/main/assets/shaders/raw_proxy.frag [ADD]
 - app/src/main/assets/shaders/raw_reconstruct.frag [MODIFY]
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java [MODIFY]
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java [MODIFY]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java [MODIFY]
 
-PROTECTED V2.30 RUNTIME — BYTE-IDENTICAL
+PROTECTED V2.31 V1.1 RUNTIME — EXACTLY 14 BYTE-IDENTICAL FILES
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/licenses/NAFNet_LICENSE.txt
 - app/src/main/assets/nafnet_sidd_width32_fp16.tflite
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/fullscreen.vert
 - app/src/main/assets/shaders/oes_to_rgb.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java
@@ -76,30 +75,6 @@ PROTECTED V2.30 RUNTIME — BYTE-IDENTICAL
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java
-
-V2.31 RUNTIME CONTRACT
-RAW source authority remains the timestamp-matched SHORT/LONG RAW_SENSOR pair. HAL JPEGs are saved references only and never feed production alignment, radiometry, source selection, or fusion.
-
-RAW reconstruction is intentionally staged before the proven V2.28/V2.29 fusion owner:
-1. raw_preprocess.frag consumes GL_R16UI integer sensor codes. RAW sample, black and white remain in identical sensor-code units; per-frame lens shading is applied once in Bayer space; the normalized Bayer value is packed as a 16-bit fixed-point signal in an RGBA8 carrier.
-2. raw_reconstruct.frag reconstructs sensor structure with bounded edge-directed green/diagonal selection and green-difference R/B reconstruction. WB occurs after structural demosaic. LONG's timestamp-matched WB/color transform remains the common color owner for both observations. Whole-RGB same-luminance gamut projection prevents independent R/G/B clipping from creating pink/green bright-edge rims.
-3. raw_chroma_dealias.frag performs a luminance-preserving opponent-chroma median/de-alias operation. It targets one-pixel Bayer false color, colored bright-edge fringes and chroma moire while leaving center luminance/detail owned by the demosaic result.
-
-GPU allocation is bounded: one RAW input texture and one lens-shading texture are reused sequentially; inherited SHORT/LONG/presentation full-resolution RGBA8 carriers are reused as packed/reconstruction scratch. No simultaneous second RAW pair and no new persistent full-resolution RGB scratch are introduced.
-
-V2.31 restores the V2.28/V2.29 robust achromatic registered-overlap appearance scalar, but derives it exclusively from RAW reconstructions. Physical exposure*ISO is the fallback. No independent RGB radiometric gain is allowed.
-
-HIGH-DR ACQUISITION CONTRACT
-V2.27 low-DR near-1x temporal denoise behavior remains allowed. A scene is classified high-DR only when measured highlight pressure coexists with a materially darker body and at least approximately 3 stops of highlight/body separation. In that state:
-- the physical LONG/SHORT target may not collapse below 8x / 3EV;
-- SHORT may not be brightened to fake the bracket;
-- LONG may not be darkened to satisfy highlight pressure;
-- the frozen still pair rechecks the same invariant at shutter time and raises LONG only, preferring physical integration/low ISO and respecting known 50/60Hz integer-cycle timing; capture fails closed if hardware cannot supply the real bracket.
-The exact V2.30 sample class (SHORT=LONG≈1/120 ISO50 in a bright-window scene) is explicitly required to classify high-DR.
-
-BATHROOM / EXTERIOR RECOVERY CONTRACT
-V2.29 device evidence showed a valid recovered sky while moderately flattened house/siding/tree structure inside the same exterior component could remain LONG-owned. V2.31 keeps the strict seed unchanged, but broadens only the connected physical-loss domain and the native-resolution information-loss recheck so a modest real SHORT structure advantage can complete that already-proven component. Healthy near-equal body structure remains below the final threshold. Final source selection stays binary whole-RGB and registration/connectivity gated.
 
 BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - .github/workflows/build.yml
@@ -108,7 +83,7 @@ BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-Yes, only for V2.31 authority/version/hash/allowlist/regression/output identities and the two additional active RAW shader compiler inputs. The successful 15-step compiler/build/post-build mechanics and ordering are otherwise unchanged.
+Yes, only for V2.32 authority/version/hash/allowlist/regression/output identities and to add raw_green.frag/raw_proxy.frag to the same pinned GLSL compile gate. Build/compiler/post-build mechanics and order are unchanged.
 
 DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - PACKAGE_INFO.txt
@@ -116,25 +91,15 @@ DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-TOTAL EXPECTED V2.30 -> V2.31 TRACKED CHANGESET — EXACTLY 14 PATHS
-Runtime: 6. Infrastructure: 4. Delivery documents: 4.
-Candidate tracked universe: exactly 33 files.
-Runtime universe: exactly 20 app/src files.
-V2.31 V1.1 runtime manifest digest: cbe4cf549b6e198a95db93b5d14f3b535e861175e9ded10a401b5795bc248b69
-
-LOCAL VERIFICATION STATUS BEFORE FINAL ZIP SEAL
-- Exact V2.30 Actions artifact/source candidate and protected runtime authority: PASS; artifact ZIP SHA-256 3522348db40ef43e19a73c58778026219ca76c89195c452e3736195e10c1b6a6 and compiled-candidate tree 4fd09b02019f72c1acc5f3bcb6cb6691c751970e are pinned.
-- Complete GLSL reserved-identifier scan on all 7 runtime shaders: PASS.
-- V2.31 semantic/ownership/domain/regression suite, including exact purple, 0EV-high-DR, bathroom connected-recovery, chroma/moire and GPU-lifetime conditions: PASS.
-- Workflow and BUILD_WORKFLOW_COPY byte equality: PASS.
-- Python syntax for packaged verifiers: PASS.
-- Deterministic V2.30<->V2.31 full-index patches at core.abbrev 7/12/40, fuzz=0 and exact rollback: PASS before final document freeze; regenerated and replayed again after final manifest seal.
-- PRE-BUILD SAFETY PROOF against the real V2.30 Actions artifact: PASS locally using an exact-tree surrogate for the signed V2.30 commit object; exact signed commit/parent identity remains an Actions gate.
-- Clean-extract final handoff replay: required after ZIP seal.
+TOTAL EXPECTED V2.31 V1.1 -> V2.32 TRACKED CHANGESET — EXACTLY 16 PATHS
+Runtime: 8. Infrastructure: 4. Delivery documents: 4.
+Candidate tracked universe: exactly 35 files.
+Runtime universe: exactly 22 app/src files.
+V2.32 runtime manifest digest: e34eed84257688b2ac8c5003076a4426ce959b69d961a7036f3396bfe3aaf979
 
 COMPILER STATUS BEFORE ACTIONS
-REAL PINNED GLSL COMPILE: NOT RUN locally; the exact package glslang-tools=15.1.0-2~ubuntu0.24.04.2 remains a mandatory Actions gate.
+REAL PINNED GLSL COMPILE: NOT RUN locally; mandatory Actions gate.
 REAL KOTLIN COMPILE: N/A.
 REAL PROJECT JAVA COMPILE: NOT RUN locally; mandatory Actions gate.
 FULL ANDROID :app:assembleDebug: NOT RUN locally; mandatory Actions gate.
-FINAL ACTIONS AUTHORITY: successful V2.30 run 34250645187 remains the last successful compiled authority until V2.31 V1.1 passes.
+FINAL ACTIONS AUTHORITY: successful V2.31 V1.1 run 34272023077 until V2.32 passes.

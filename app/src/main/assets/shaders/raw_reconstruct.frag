@@ -4,11 +4,16 @@ precision highp int;
 in vec2 vUv;
 layout(location=0) out vec4 outColor;
 uniform sampler2D packedRawTex;
+uniform sampler2D greenTex;
 uniform int cfaArrangement;
 uniform vec4 wbGains;
 uniform vec3 colorRow0;
 uniform vec3 colorRow1;
 uniform vec3 colorRow2;
+
+const float SIGNAL_COMPAND_K = 1.0;
+const float SIGMA_COMPAND_K = 0.01;
+const float CARRIER_MAX = 254.0 / 255.0;
 
 int patternIndex(ivec2 p) {
     return ((p.y & 1) << 1) | (p.x & 1);
@@ -16,22 +21,21 @@ int patternIndex(ivec2 p) {
 
 int colorAt(ivec2 p) {
     int i = patternIndex(p);
-    if (cfaArrangement == 0) { // RGGB
+    if (cfaArrangement == 0) {
         if (i == 0) return 0;
         if (i == 3) return 2;
         return 1;
     }
-    if (cfaArrangement == 1) { // GRBG
+    if (cfaArrangement == 1) {
         if (i == 1) return 0;
         if (i == 2) return 2;
         return 1;
     }
-    if (cfaArrangement == 2) { // GBRG
+    if (cfaArrangement == 2) {
         if (i == 2) return 0;
         if (i == 1) return 2;
         return 1;
     }
-    // BGGR
     if (i == 3) return 0;
     if (i == 0) return 2;
     return 1;
@@ -42,88 +46,160 @@ ivec2 clampPixel(ivec2 p) {
     return clamp(p, ivec2(0), size - ivec2(1));
 }
 
-float rawSignalAt(ivec2 p) {
-    vec2 packed = texelFetch(packedRawTex, clampPixel(p), 0).rg;
-    float highByte = floor(packed.r * 255.0 + 0.5);
-    float lowByte = floor(packed.g * 255.0 + 0.5);
-    return (highByte * 256.0 + lowByte) / 65535.0;
+float expandPositive(float encoded, float k) {
+    float e = min(max(encoded, 0.0), 0.9999847);
+    float e2 = e * e;
+    return k * e2 / max(1.0 - e2, 0.0000001);
 }
 
-vec3 demosaicSensor(ivec2 p) {
+float compandPositive(float value, float k) {
+    float x = max(value, 0.0);
+    return min(CARRIER_MAX, sqrt(x / max(x + k, 0.0000001)));
+}
+
+float unpack16Code(vec2 packed) {
+    float highByte = floor(packed.x * 255.0 + 0.5);
+    float lowByte = floor(packed.y * 255.0 + 0.5);
+    return highByte * 256.0 + lowByte;
+}
+
+vec2 rawMeasurementAt(ivec2 p) {
+    vec4 packed = texelFetch(packedRawTex, clampPixel(p), 0);
+    float sigmaAndSat = unpack16Code(packed.ba);
+    float saturation = step(32767.5, sigmaAndSat);
+    float sigmaCode = sigmaAndSat - 32768.0 * saturation;
+    return vec2(
+        expandPositive(unpack16Code(packed.rg) / 65535.0, SIGNAL_COMPAND_K),
+        expandPositive(sigmaCode / 32767.0, SIGMA_COMPAND_K));
+}
+
+float rawSaturationAt(ivec2 p) {
+    vec4 packed = texelFetch(packedRawTex, clampPixel(p), 0);
+    return step(32767.5, unpack16Code(packed.ba));
+}
+
+vec2 greenAt(ivec2 p) {
+    vec4 packed = texelFetch(greenTex, clampPixel(p), 0);
+    return vec2(
+        expandPositive(unpack16Code(packed.rg) / 65535.0, SIGNAL_COMPAND_K),
+        expandPositive(unpack16Code(packed.ba) / 65535.0, SIGMA_COMPAND_K));
+}
+
+float localRawSaturationAt(ivec2 p) {
+    float saturation = 0.0;
+    for (int oy = -1; oy <= 1; ++oy) {
+        for (int ox = -1; ox <= 1; ++ox) {
+            saturation = max(saturation, rawSaturationAt(p + ivec2(ox, oy)));
+        }
+    }
+    return saturation;
+}
+
+vec2 colorDifferenceAt(ivec2 p) {
+    vec2 colorValue = rawMeasurementAt(p);
+    vec2 greenValue = greenAt(p);
+    return vec2(
+        colorValue.x - greenValue.x,
+        sqrt(colorValue.y * colorValue.y + greenValue.y * greenValue.y));
+}
+
+float median4(float a, float b, float c, float d) {
+    float values[4] = float[4](a, b, c, d);
+    for (int i = 0; i < 3; ++i) {
+        for (int j = i + 1; j < 4; ++j) {
+            float lowValue = min(values[i], values[j]);
+            float highValue = max(values[i], values[j]);
+            values[i] = lowValue;
+            values[j] = highValue;
+        }
+    }
+    return 0.5 * (values[1] + values[2]);
+}
+
+vec2 robustFourDifferences(
+        vec2 d0, vec2 d1, vec2 d2, vec2 d3,
+        float spatial0, float spatial1, float spatial2, float spatial3) {
+    float centerDifference = median4(d0.x, d1.x, d2.x, d3.x);
+    vec2 values[4] = vec2[4](d0, d1, d2, d3);
+    float spatial[4] = float[4](spatial0, spatial1, spatial2, spatial3);
+    float weightedValue = 0.0;
+    float weightSum = 0.0;
+    float varianceSum = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        float sigmaValue = max(values[i].y, 0.00005);
+        float deviation = abs(values[i].x - centerDifference);
+        float normalizedDeviation = deviation / max(2.5 * sigmaValue, 0.00020);
+        float consistency = 1.0 / (1.0 + normalizedDeviation * normalizedDeviation);
+        float inverseVariance = 1.0 / (sigmaValue * sigmaValue + 0.00000002);
+        float weightValue = spatial[i] * consistency * inverseVariance;
+        weightedValue += values[i].x * weightValue;
+        weightSum += weightValue;
+        varianceSum += sigmaValue * sigmaValue * weightValue * weightValue;
+    }
+    float resultValue = weightSum > 0.0 ? weightedValue / weightSum : centerDifference;
+    float resultSigma = weightSum > 0.0
+        ? sqrt(varianceSum) / weightSum
+        : max(max(d0.y, d1.y), max(d2.y, d3.y));
+    return vec2(resultValue, max(resultSigma, 0.000001));
+}
+
+vec2 diagonalDifference(ivec2 q) {
+    vec2 d0 = colorDifferenceAt(q + ivec2(-1, -1));
+    vec2 d1 = colorDifferenceAt(q + ivec2(1, -1));
+    vec2 d2 = colorDifferenceAt(q + ivec2(-1, 1));
+    vec2 d3 = colorDifferenceAt(q + ivec2(1, 1));
+    return robustFourDifferences(d0, d1, d2, d3, 1.0, 1.0, 1.0, 1.0);
+}
+
+vec2 axisDifference(ivec2 q, ivec2 axis) {
+    vec2 nearNegative = colorDifferenceAt(q - axis);
+    vec2 nearPositive = colorDifferenceAt(q + axis);
+    vec2 farNegative = colorDifferenceAt(q - 3 * axis);
+    vec2 farPositive = colorDifferenceAt(q + 3 * axis);
+    return robustFourDifferences(
+        nearNegative, nearPositive, farNegative, farPositive,
+        1.0, 1.0, 0.35, 0.35);
+}
+
+void demosaicSensor(ivec2 p, out vec3 sensorRgb, out vec3 sensorSigma) {
     ivec2 q = clampPixel(p);
     int centerColor = colorAt(q);
-    float center = rawSignalAt(q);
+    vec2 greenValue = greenAt(q);
 
-    if (centerColor == 0 || centerColor == 2) {
-        float left = rawSignalAt(q + ivec2(-1, 0));
-        float right = rawSignalAt(q + ivec2(1, 0));
-        float up = rawSignalAt(q + ivec2(0, -1));
-        float down = rawSignalAt(q + ivec2(0, 1));
-        float gradH = abs(left - right);
-        float gradV = abs(up - down);
-        float weightH = 1.0 / (0.00002 + gradH * gradH);
-        float weightV = 1.0 / (0.00002 + gradV * gradV);
-        float green = clamp(
-            (0.5 * (left + right) * weightH + 0.5 * (up + down) * weightV)
-                / (weightH + weightV),
-            0.0, 1.0);
-
-        float nw = rawSignalAt(q + ivec2(-1, -1));
-        float ne = rawSignalAt(q + ivec2(1, -1));
-        float sw = rawSignalAt(q + ivec2(-1, 1));
-        float se = rawSignalAt(q + ivec2(1, 1));
-        float gradD1 = abs(nw - se);
-        float gradD2 = abs(ne - sw);
-        float weightD1 = 1.0 / (0.00002 + gradD1 * gradD1);
-        float weightD2 = 1.0 / (0.00002 + gradD2 * gradD2);
-        float opposite = clamp(
-            (0.5 * (nw + se) * weightD1 + 0.5 * (ne + sw) * weightD2)
-                / (weightD1 + weightD2),
-            0.0, 1.0);
-        return centerColor == 0
-            ? vec3(center, green, opposite)
-            : vec3(opposite, green, center);
+    if (centerColor == 0) {
+        vec2 redValue = rawMeasurementAt(q);
+        vec2 blueDifference = diagonalDifference(q);
+        float blue = greenValue.x + blueDifference.x;
+        sensorRgb = vec3(redValue.x, greenValue.x, blue);
+        sensorSigma = vec3(
+            redValue.y,
+            greenValue.y,
+            sqrt(greenValue.y * greenValue.y + blueDifference.y * blueDifference.y));
+        return;
+    }
+    if (centerColor == 2) {
+        vec2 blueValue = rawMeasurementAt(q);
+        vec2 redDifference = diagonalDifference(q);
+        float red = greenValue.x + redDifference.x;
+        sensorRgb = vec3(red, greenValue.x, blueValue.x);
+        sensorSigma = vec3(
+            sqrt(greenValue.y * greenValue.y + redDifference.y * redDifference.y),
+            greenValue.y,
+            blueValue.y);
+        return;
     }
 
-    // At a native green sample, reconstruct R/B as color differences against nearby
-    // green support rather than plain RGB bilinear interpolation. The required
-    // direction is fixed by CFA phase; the +/-2 green samples stabilize real edges.
     bool redHorizontal = colorAt(q + ivec2(1, 0)) == 0
         || colorAt(q + ivec2(-1, 0)) == 0;
-    float red;
-    float blue;
-    if (redHorizontal) {
-        float redL = rawSignalAt(q + ivec2(-1, 0));
-        float redR = rawSignalAt(q + ivec2(1, 0));
-        float greenL2 = rawSignalAt(q + ivec2(-2, 0));
-        float greenR2 = rawSignalAt(q + ivec2(2, 0));
-        float blueU = rawSignalAt(q + ivec2(0, -1));
-        float blueD = rawSignalAt(q + ivec2(0, 1));
-        float greenU2 = rawSignalAt(q + ivec2(0, -2));
-        float greenD2 = rawSignalAt(q + ivec2(0, 2));
-        red = center + 0.5 * (
-            redL - 0.5 * (center + greenL2)
-            + redR - 0.5 * (center + greenR2));
-        blue = center + 0.5 * (
-            blueU - 0.5 * (center + greenU2)
-            + blueD - 0.5 * (center + greenD2));
-    } else {
-        float redU = rawSignalAt(q + ivec2(0, -1));
-        float redD = rawSignalAt(q + ivec2(0, 1));
-        float greenU2 = rawSignalAt(q + ivec2(0, -2));
-        float greenD2 = rawSignalAt(q + ivec2(0, 2));
-        float blueL = rawSignalAt(q + ivec2(-1, 0));
-        float blueR = rawSignalAt(q + ivec2(1, 0));
-        float greenL2 = rawSignalAt(q + ivec2(-2, 0));
-        float greenR2 = rawSignalAt(q + ivec2(2, 0));
-        red = center + 0.5 * (
-            redU - 0.5 * (center + greenU2)
-            + redD - 0.5 * (center + greenD2));
-        blue = center + 0.5 * (
-            blueL - 0.5 * (center + greenL2)
-            + blueR - 0.5 * (center + greenR2));
-    }
-    return clamp(vec3(red, center, blue), vec3(0.0), vec3(1.0));
+    vec2 redDifference = axisDifference(q, redHorizontal ? ivec2(1, 0) : ivec2(0, 1));
+    vec2 blueDifference = axisDifference(q, redHorizontal ? ivec2(0, 1) : ivec2(1, 0));
+    float red = greenValue.x + redDifference.x;
+    float blue = greenValue.x + blueDifference.x;
+    sensorRgb = vec3(red, greenValue.x, blue);
+    sensorSigma = vec3(
+        sqrt(greenValue.y * greenValue.y + redDifference.y * redDifference.y),
+        greenValue.y,
+        sqrt(greenValue.y * greenValue.y + blueDifference.y * blueDifference.y));
 }
 
 float linearLuma(vec3 rgb) {
@@ -134,48 +210,59 @@ float min3(vec3 value) {
     return min(value.r, min(value.g, value.b));
 }
 
-float max3(vec3 value) {
-    return max(value.r, max(value.g, value.b));
-}
-
-vec3 projectToUnitGamut(vec3 rgb) {
-    // Whole-RGB, same-luminance projection prevents a single transformed channel
-    // from clipping first and creating pink/green rims at bright high-contrast edges.
-    float y = clamp(linearLuma(rgb), 0.0, 1.0);
+vec3 projectNonNegativeAtFixedLuma(vec3 rgb) {
+    float y = max(linearLuma(rgb), 0.0);
     vec3 neutral = vec3(y);
-    float low = min3(rgb);
-    if (low < 0.0) {
-        float t = clamp(y / max(y - low, 0.000001), 0.0, 1.0);
-        rgb = mix(neutral, rgb, t);
+    float lowValue = min3(rgb);
+    if (lowValue < 0.0) {
+        float scale = clamp(y / max(y - lowValue, 0.000001), 0.0, 1.0);
+        rgb = mix(neutral, rgb, scale);
     }
-    float high = max3(rgb);
-    if (high > 1.0) {
-        float t = clamp((1.0 - y) / max(high - y, 0.000001), 0.0, 1.0);
-        rgb = mix(neutral, rgb, t);
-    }
-    return clamp(rgb, vec3(0.0), vec3(1.0));
+    // No upper gamut projection here. >1 scene energy stays available to the final HDR
+    // owner instead of becoming a pre-fusion display clamp/false-color boundary.
+    return max(rgb, vec3(0.0));
 }
 
-float linearToSrgbChannel(float value) {
-    float x = max(value, 0.0);
-    return x <= 0.0031308 ? 12.92 * x : 1.055 * pow(x, 1.0 / 2.4) - 0.055;
+float transformedSigma(vec3 rowValue, vec3 sigmaValue) {
+    vec3 weighted = rowValue * sigmaValue;
+    return sqrt(dot(weighted, weighted));
+}
+
+float encodeSigmaAndSaturation(float sigma, float saturation) {
+    float sigmaEncoded = compandPositive(sigma, SIGMA_COMPAND_K);
+    float sigmaCode = min(127.0,
+        floor(clamp(sigmaEncoded, 0.0, 1.0) * 127.0 + 0.5));
+    return (sigmaCode + 128.0 * step(0.5, saturation)) / 255.0;
 }
 
 void main() {
     ivec2 p = ivec2(gl_FragCoord.xy);
-    vec3 sensorRgb = demosaicSensor(p);
+    vec3 sensorRgb;
+    vec3 sensorSigma;
+    demosaicSensor(p, sensorRgb, sensorSigma);
+    sensorRgb = max(sensorRgb, vec3(0.0));
+
     float greenGain = 0.5 * (wbGains.y + wbGains.z);
-    // WB follows structure reconstruction. LONG's matched gains/matrix remain the
-    // common color owner for both SHORT/LONG observations.
-    vec3 balancedRgb = sensorRgb * vec3(wbGains.x, greenGain, wbGains.w);
-    vec3 linearSrgb = vec3(
+    vec3 balanceGains = vec3(wbGains.x, greenGain, wbGains.w);
+    vec3 balancedRgb = sensorRgb * balanceGains;
+    vec3 balancedSigma = sensorSigma * abs(balanceGains);
+
+    vec3 linearRgb = vec3(
         dot(colorRow0, balancedRgb),
         dot(colorRow1, balancedRgb),
         dot(colorRow2, balancedRgb));
-    linearSrgb = projectToUnitGamut(linearSrgb);
-    vec3 encoded = vec3(
-        linearToSrgbChannel(linearSrgb.r),
-        linearToSrgbChannel(linearSrgb.g),
-        linearToSrgbChannel(linearSrgb.b));
-    outColor = vec4(clamp(encoded, vec3(0.0), vec3(1.0)), 1.0);
+    vec3 transformedNoise = vec3(
+        transformedSigma(colorRow0, balancedSigma),
+        transformedSigma(colorRow1, balancedSigma),
+        transformedSigma(colorRow2, balancedSigma));
+    linearRgb = projectNonNegativeAtFixedLuma(linearRgb);
+    float sceneSigma = max(transformedNoise.r, max(transformedNoise.g, transformedNoise.b));
+    float saturationEvidence = localRawSaturationAt(p);
+
+    vec3 encodedScene = vec3(
+        compandPositive(linearRgb.r, SIGNAL_COMPAND_K),
+        compandPositive(linearRgb.g, SIGNAL_COMPAND_K),
+        compandPositive(linearRgb.b, SIGNAL_COMPAND_K));
+    outColor = vec4(encodedScene,
+        encodeSigmaAndSaturation(sceneSigma, saturationEvidence));
 }

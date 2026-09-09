@@ -282,8 +282,10 @@ final class HdrGlView extends GLSurfaceView {
         private int copyProgram;
         private int displayProgram;
         private int rawPreprocessProgram;
+        private int rawGreenProgram;
         private int rawReconstructProgram;
         private int rawChromaDealiasProgram;
+        private int rawProxyProgram;
         private int externalTexture;
         private int normalTexture;
         private int shortTexture;
@@ -345,14 +347,18 @@ final class HdrGlView extends GLSurfaceView {
             String copyShader = loadAsset(context, "shaders/copy_2d.frag");
             String displayShader = loadAsset(context, "shaders/hdr_display.frag");
             String rawPreprocessShader = loadAsset(context, "shaders/raw_preprocess.frag");
+            String rawGreenShader = loadAsset(context, "shaders/raw_green.frag");
             String rawReconstructShader = loadAsset(context, "shaders/raw_reconstruct.frag");
             String rawChromaDealiasShader = loadAsset(context, "shaders/raw_chroma_dealias.frag");
+            String rawProxyShader = loadAsset(context, "shaders/raw_proxy.frag");
             oesProgram = buildProgram(vertexShader, oesShader);
             copyProgram = buildProgram(vertexShader, copyShader);
             displayProgram = buildProgram(vertexShader, displayShader);
             rawPreprocessProgram = buildProgram(vertexShader, rawPreprocessShader);
+            rawGreenProgram = buildProgram(vertexShader, rawGreenShader);
             rawReconstructProgram = buildProgram(vertexShader, rawReconstructShader);
             rawChromaDealiasProgram = buildProgram(vertexShader, rawChromaDealiasShader);
+            rawProxyProgram = buildProgram(vertexShader, rawProxyShader);
 
             externalTexture = createExternalTexture();
             normalTexture = createTexture2d();
@@ -886,7 +892,7 @@ final class HdrGlView extends GLSurfaceView {
             RuntimeLogger.event(
                     "GPU_STILL_RAW_FUSION",
                     String.format(java.util.Locale.US,
-                            "V2.30 RAW_SENSOR fusion start %dx%d ratio=%.3f shortTs=%d longTs=%d brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
+                            "V2.32 RAW_SENSOR fusion start %dx%d ratio=%.3f shortTs=%d longTs=%d brightness=%+.2fEV gamma=%.2f dehaze=%.2f micro=%.2f",
                             width, height, exposureRatio,
                             shortRaw.sensorTimestampNs, longRaw.sensorTimestampNs,
                             brightnessEv, gamma, dehaze, microContrast));
@@ -922,42 +928,58 @@ final class HdrGlView extends GLSurfaceView {
 
                 allocateRgbTexture(shortTexture, width, height);
                 allocateRgbTexture(longTexture, width, height);
-                // Reuse the later mode-5 presentation texture as a temporary full-res
-                // reconstruction carrier. This keeps the V2.29 full-resolution texture
-                // budget unchanged while adding a chroma-only RAW de-alias pass.
+                // V2.32 keeps the same four full-resolution RGBA8 allocations that are
+                // already needed by the final saved-fusion path. presentationTexture is
+                // reused as packed-CFA/reconstruction/dealias scratch; outputTexture is
+                // the staged green owner first and is overwritten only by the final output.
+                // No extra persistent full-res image is introduced by the RAW correction.
                 allocateRgbTexture(presentationTexture, width, height);
+                allocateRgbTexture(outputTexture, width, height);
                 setTextureFilter(presentationTexture, GLES30.GL_NEAREST);
+                setTextureFilter(outputTexture, GLES30.GL_NEAREST);
+                setTextureFilter(shortTexture, GLES30.GL_NEAREST);
+                setTextureFilter(longTexture, GLES30.GL_NEAREST);
 
                 // One common color owner prevents a source boundary from acquiring a
-                // different WB/matrix. Per-frame black/white/shading remain physical RAW
+                // different WB/matrix. Per-frame black/white/shading/noise remain RAW
                 // owners, while LONG's matched WB + sensor->linear-sRGB transform owns
-                // both reconstructed observations. Each source texture first carries a
-                // 16-bit fixed-point normalized Bayer signal, then is overwritten by its
-                // final RGB after the separate reconstruction + chroma-dealias passes.
+                // both observations. The saved source textures are NOT display sRGB:
+                // they retain an extended-linear companded RGB carrier plus scene sigma.
                 uploadRaw16Texture(rawInputTexture, shortRaw);
                 uploadShadingTexture(shadingTexture, shortRaw);
                 renderRawPreprocess(
-                        shortTexture, rawInputTexture, shadingTexture, shortRaw);
+                        presentationTexture, rawInputTexture, shadingTexture, shortRaw);
+                renderRawGreen(outputTexture, presentationTexture, shortRaw);
                 renderRawReconstruction(
-                        presentationTexture, shortTexture, shortRaw, longRaw);
-                renderRawChromaDealias(shortTexture, presentationTexture, width, height);
+                        shortTexture, presentationTexture, outputTexture, shortRaw, longRaw);
+                renderRawChromaDealias(presentationTexture, shortTexture, width, height);
+                int textureSwap = shortTexture;
+                shortTexture = presentationTexture;
+                presentationTexture = textureSwap;
 
                 uploadRaw16Texture(rawInputTexture, longRaw);
                 uploadShadingTexture(shadingTexture, longRaw);
                 renderRawPreprocess(
-                        longTexture, rawInputTexture, shadingTexture, longRaw);
+                        presentationTexture, rawInputTexture, shadingTexture, longRaw);
+                renderRawGreen(outputTexture, presentationTexture, longRaw);
                 renderRawReconstruction(
-                        presentationTexture, longTexture, longRaw, longRaw);
-                renderRawChromaDealias(longTexture, presentationTexture, width, height);
+                        longTexture, presentationTexture, outputTexture, longRaw, longRaw);
+                renderRawChromaDealias(presentationTexture, longTexture, width, height);
+                textureSwap = longTexture;
+                longTexture = presentationTexture;
+                presentationTexture = textureSwap;
                 deleteTexture(rawInputTexture);
                 rawInputTexture = 0;
                 deleteTexture(shadingTexture);
                 shadingTexture = 0;
 
-                // Registration evidence is read from the RAW-derived reconstructions.
-                // It never decodes or samples the saved HAL JPEGs.
-                shortProxy = readTextureBitmap(shortTexture, width, height);
-                longProxy = readTextureBitmap(longTexture, width, height);
+                // JpegFusion registration mechanics remain byte-identical. Feed them a
+                // transient full-resolution sRGB proxy rendered from the linear carrier;
+                // the proxy is evidence only and never replaces the RAW-derived sources.
+                renderRawProxy(presentationTexture, shortTexture, width, height);
+                shortProxy = readTextureBitmap(presentationTexture, width, height);
+                renderRawProxy(presentationTexture, longTexture, width, height);
+                longProxy = readTextureBitmap(presentationTexture, width, height);
                 JpegFusion.Registration registration =
                         JpegFusion.estimateRegistration(shortProxy, longProxy);
                 alignedShortProxy = JpegFusion.alignLongToShort(shortProxy, registration);
@@ -1003,7 +1025,10 @@ final class HdrGlView extends GLSurfaceView {
                 // SHORT is the only aligned auxiliary. The raw-derived SHORT texture is
                 // left in native sensor geometry; global + bounded local displacement is
                 // applied only while sampling it. LONG remains exact output geometry.
-                setTextureFilter(shortTexture, GLES30.GL_LINEAR);
+                // SHORT stays NEAREST at the GL sampler. hdr_display.frag performs
+                // explicit four-tap interpolation after decoding the extended-linear
+                // carrier, so no interpolation occurs in companded/display code space.
+                setTextureFilter(shortTexture, GLES30.GL_NEAREST);
                 setTextureFilter(longTexture, GLES30.GL_NEAREST);
                 uploadRgba8Texture(
                         localFlowTexture,
@@ -1020,7 +1045,6 @@ final class HdrGlView extends GLSurfaceView {
                 // presentationTexture was allocated once above and is now free to be
                 // overwritten by the inherited V2.29 mode-5 fused raster.
                 setTextureFilter(presentationTexture, GLES30.GL_NEAREST);
-                allocateRgbTexture(outputTexture, width, height);
 
                 renderStillPass(
                         evidenceTexture, analysisWidth, analysisHeight,
@@ -1103,7 +1127,7 @@ final class HdrGlView extends GLSurfaceView {
                 long elapsedMs = (System.nanoTime() - startedNs) / 1_000_000L;
                 RuntimeLogger.event(
                         "GPU_STILL_RAW_FUSION",
-                        "V2.30 RAW_SENSOR fusion complete ms=" + elapsedMs
+                        "V2.32 RAW_SENSOR fusion complete ms=" + elapsedMs
                                 + " outputBytes=" + encoded.length
                                 + " orientation=" + captureOrientationDegrees);
                 return encoded;
@@ -1199,7 +1223,7 @@ final class HdrGlView extends GLSurfaceView {
             int status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
             if (status != GLES30.GL_FRAMEBUFFER_COMPLETE) {
                 throw new IllegalStateException(
-                        "V2.31 RAW preprocess framebuffer incomplete: 0x"
+                        "V2.32 RAW preprocess framebuffer incomplete: 0x"
                                 + Integer.toHexString(status));
             }
             GLES30.glViewport(0, 0, sourceFrame.width, sourceFrame.height);
@@ -1220,11 +1244,45 @@ final class HdrGlView extends GLSurfaceView {
             GLES30.glUniform1i(
                     GLES30.glGetUniformLocation(rawPreprocessProgram, "cfaArrangement"),
                     sourceFrame.cfaArrangement);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(rawPreprocessProgram, "noiseSlope"),
+                    sourceFrame.noiseSlope);
+            GLES30.glUniform1f(
+                    GLES30.glGetUniformLocation(rawPreprocessProgram, "noiseOffset"),
+                    sourceFrame.noiseOffset);
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
             int error = GLES30.glGetError();
             if (error != GLES30.GL_NO_ERROR) {
                 throw new IllegalStateException(
-                        "V2.31 RAW preprocess GL failure: 0x"
+                        "V2.32 RAW preprocess GL failure: 0x"
+                                + Integer.toHexString(error));
+            }
+        }
+
+        private void renderRawGreen(
+                int targetTexture, int packedRawTexture, RawFusion.RawFrame sourceFrame) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+            GLES30.glFramebufferTexture2D(
+                    GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                    GLES30.GL_TEXTURE_2D, targetTexture, 0);
+            int status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
+            if (status != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                throw new IllegalStateException(
+                        "V2.32 RAW green framebuffer incomplete: 0x"
+                                + Integer.toHexString(status));
+            }
+            GLES30.glViewport(0, 0, sourceFrame.width, sourceFrame.height);
+            GLES30.glUseProgram(rawGreenProgram);
+            bindQuad();
+            bindSampler2d(rawGreenProgram, "packedRawTex", packedRawTexture, 0);
+            GLES30.glUniform1i(
+                    GLES30.glGetUniformLocation(rawGreenProgram, "cfaArrangement"),
+                    sourceFrame.cfaArrangement);
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+            int error = GLES30.glGetError();
+            if (error != GLES30.GL_NO_ERROR) {
+                throw new IllegalStateException(
+                        "V2.32 RAW green GL failure: 0x"
                                 + Integer.toHexString(error));
             }
         }
@@ -1232,6 +1290,7 @@ final class HdrGlView extends GLSurfaceView {
         private void renderRawReconstruction(
                 int targetTexture,
                 int packedRawTexture,
+                int greenTexture,
                 RawFusion.RawFrame sourceFrame,
                 RawFusion.RawFrame colorOwner) {
             GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
@@ -1241,13 +1300,14 @@ final class HdrGlView extends GLSurfaceView {
             int status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
             if (status != GLES30.GL_FRAMEBUFFER_COMPLETE) {
                 throw new IllegalStateException(
-                        "V2.31 RAW reconstruction framebuffer incomplete: 0x"
+                        "V2.32 RAW reconstruction framebuffer incomplete: 0x"
                                 + Integer.toHexString(status));
             }
             GLES30.glViewport(0, 0, sourceFrame.width, sourceFrame.height);
             GLES30.glUseProgram(rawReconstructProgram);
             bindQuad();
             bindSampler2d(rawReconstructProgram, "packedRawTex", packedRawTexture, 0);
+            bindSampler2d(rawReconstructProgram, "greenTex", greenTexture, 1);
             GLES30.glUniform1i(
                     GLES30.glGetUniformLocation(rawReconstructProgram, "cfaArrangement"),
                     sourceFrame.cfaArrangement);
@@ -1269,7 +1329,7 @@ final class HdrGlView extends GLSurfaceView {
             int error = GLES30.glGetError();
             if (error != GLES30.GL_NO_ERROR) {
                 throw new IllegalStateException(
-                        "V2.31 RAW reconstruction GL failure: 0x"
+                        "V2.32 RAW reconstruction GL failure: 0x"
                                 + Integer.toHexString(error));
             }
         }
@@ -1283,7 +1343,7 @@ final class HdrGlView extends GLSurfaceView {
             int status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
             if (status != GLES30.GL_FRAMEBUFFER_COMPLETE) {
                 throw new IllegalStateException(
-                        "V2.31 RAW chroma de-alias framebuffer incomplete: 0x"
+                        "V2.32 RAW chroma de-alias framebuffer incomplete: 0x"
                                 + Integer.toHexString(status));
             }
             GLES30.glViewport(0, 0, width, height);
@@ -1294,7 +1354,32 @@ final class HdrGlView extends GLSurfaceView {
             int error = GLES30.glGetError();
             if (error != GLES30.GL_NO_ERROR) {
                 throw new IllegalStateException(
-                        "V2.31 RAW chroma de-alias GL failure: 0x"
+                        "V2.32 RAW chroma de-alias GL failure: 0x"
+                                + Integer.toHexString(error));
+            }
+        }
+
+        private void renderRawProxy(
+                int targetTexture, int sourceTexture, int width, int height) {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, framebuffer);
+            GLES30.glFramebufferTexture2D(
+                    GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+                    GLES30.GL_TEXTURE_2D, targetTexture, 0);
+            int status = GLES30.glCheckFramebufferStatus(GLES30.GL_FRAMEBUFFER);
+            if (status != GLES30.GL_FRAMEBUFFER_COMPLETE) {
+                throw new IllegalStateException(
+                        "V2.32 RAW proxy framebuffer incomplete: 0x"
+                                + Integer.toHexString(status));
+            }
+            GLES30.glViewport(0, 0, width, height);
+            GLES30.glUseProgram(rawProxyProgram);
+            bindQuad();
+            bindSampler2d(rawProxyProgram, "sourceTex", sourceTexture, 0);
+            GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4);
+            int error = GLES30.glGetError();
+            if (error != GLES30.GL_NO_ERROR) {
+                throw new IllegalStateException(
+                        "V2.32 RAW proxy GL failure: 0x"
                                 + Integer.toHexString(error));
             }
         }

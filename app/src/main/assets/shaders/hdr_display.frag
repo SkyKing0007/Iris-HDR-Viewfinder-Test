@@ -79,6 +79,114 @@ float max3(vec3 value) {
     return max(value.r, max(value.g, value.b));
 }
 
+// IRIS_V232_EXTENDED_LINEAR_RAW_CARRIER_BEGIN
+// Saved RAW stills use an extended-linear companded RGB carrier. Live preview and
+// mode-6 presentation remain ordinary sRGB. A value of 1.0 in scene space is no
+// longer a storage ceiling; the positive compander asymptotically represents much
+// larger values while alpha carries the reconstructed physical 1-sigma uncertainty.
+const float rawCarrierSignalK = 1.0;
+const float rawCarrierSigmaK = 0.01;
+const float rawCarrierMax = 254.0 / 255.0;
+
+bool savedRawSourceMode() {
+    return mode == 3 || mode == 4 || mode == 5;
+}
+
+float expandRawCarrier(float encoded, float k) {
+    float e = min(max(encoded, 0.0), rawCarrierMax);
+    float e2 = e * e;
+    return k * e2 / max(1.0 - e2, 0.0000001);
+}
+
+float rawCarrierSigma(float encodedAlpha) {
+    float code = floor(encodedAlpha * 255.0 + 0.5);
+    float saturation = step(127.5, code);
+    float sigmaCode = code - 128.0 * saturation;
+    return expandRawCarrier(sigmaCode / 127.0, rawCarrierSigmaK);
+}
+
+float rawCarrierSaturation(float encodedAlpha) {
+    return step(127.5, floor(encodedAlpha * 255.0 + 0.5));
+}
+
+vec4 decodeRawCarrier(vec4 encoded) {
+    return vec4(
+        expandRawCarrier(encoded.r, rawCarrierSignalK),
+        expandRawCarrier(encoded.g, rawCarrierSignalK),
+        expandRawCarrier(encoded.b, rawCarrierSignalK),
+        rawCarrierSigma(encoded.a));
+}
+
+vec4 shortCarrierLinearNearestAt(vec2 sourceUv) {
+    ivec2 size = textureSize(shortTex, 0);
+    ivec2 p = clamp(ivec2(clamp(sourceUv, vec2(0.0), vec2(0.99999994)) * vec2(size)),
+        ivec2(0), size - ivec2(1));
+    return decodeRawCarrier(texelFetch(shortTex, p, 0));
+}
+
+vec4 shortCarrierLinearAt(vec2 sourceUv) {
+    ivec2 size = textureSize(shortTex, 0);
+    vec2 pixel = clamp(sourceUv, vec2(0.0), vec2(1.0)) * vec2(size) - vec2(0.5);
+    ivec2 p0 = ivec2(floor(pixel));
+    vec2 f = fract(pixel);
+    ivec2 maxPixel = size - ivec2(1);
+    ivec2 p00 = clamp(p0, ivec2(0), maxPixel);
+    ivec2 p10 = clamp(p0 + ivec2(1, 0), ivec2(0), maxPixel);
+    ivec2 p01 = clamp(p0 + ivec2(0, 1), ivec2(0), maxPixel);
+    ivec2 p11 = clamp(p0 + ivec2(1, 1), ivec2(0), maxPixel);
+    vec4 a = decodeRawCarrier(texelFetch(shortTex, p00, 0));
+    vec4 b = decodeRawCarrier(texelFetch(shortTex, p10, 0));
+    vec4 c = decodeRawCarrier(texelFetch(shortTex, p01, 0));
+    vec4 d = decodeRawCarrier(texelFetch(shortTex, p11, 0));
+    float w00 = (1.0 - f.x) * (1.0 - f.y);
+    float w10 = f.x * (1.0 - f.y);
+    float w01 = (1.0 - f.x) * f.y;
+    float w11 = f.x * f.y;
+    vec3 rgb = a.rgb * w00 + b.rgb * w10 + c.rgb * w01 + d.rgb * w11;
+    // Independent-sample interpolation propagates variance with squared weights.
+    float sigma = sqrt(
+        a.a * a.a * w00 * w00 + b.a * b.a * w10 * w10
+        + c.a * c.a * w01 * w01 + d.a * d.a * w11 * w11);
+    return vec4(rgb, sigma);
+}
+
+vec4 longCarrierLinearAt(vec2 sourceUv) {
+    ivec2 size = textureSize(longTex, 0);
+    ivec2 p = clamp(ivec2(clamp(sourceUv, vec2(0.0), vec2(0.99999994)) * vec2(size)),
+        ivec2(0), size - ivec2(1));
+    return decodeRawCarrier(texelFetch(longTex, p, 0));
+}
+
+float shortCarrierSaturationAt(vec2 sourceUv) {
+    ivec2 size = textureSize(shortTex, 0);
+    vec2 pixel = clamp(sourceUv, vec2(0.0), vec2(1.0)) * vec2(size) - vec2(0.5);
+    ivec2 p0 = ivec2(floor(pixel));
+    vec2 f = fract(pixel);
+    ivec2 maxPixel = size - ivec2(1);
+    ivec2 p00 = clamp(p0, ivec2(0), maxPixel);
+    ivec2 p10 = clamp(p0 + ivec2(1, 0), ivec2(0), maxPixel);
+    ivec2 p01 = clamp(p0 + ivec2(0, 1), ivec2(0), maxPixel);
+    ivec2 p11 = clamp(p0 + ivec2(1, 1), ivec2(0), maxPixel);
+    float w00 = (1.0 - f.x) * (1.0 - f.y);
+    float w10 = f.x * (1.0 - f.y);
+    float w01 = (1.0 - f.x) * f.y;
+    float w11 = f.x * f.y;
+    return clamp(
+        rawCarrierSaturation(texelFetch(shortTex, p00, 0).a) * w00
+        + rawCarrierSaturation(texelFetch(shortTex, p10, 0).a) * w10
+        + rawCarrierSaturation(texelFetch(shortTex, p01, 0).a) * w01
+        + rawCarrierSaturation(texelFetch(shortTex, p11, 0).a) * w11,
+        0.0, 1.0);
+}
+
+float longCarrierSaturationAt(vec2 sourceUv) {
+    ivec2 size = textureSize(longTex, 0);
+    ivec2 p = clamp(ivec2(clamp(sourceUv, vec2(0.0), vec2(0.99999994)) * vec2(size)),
+        ivec2(0), size - ivec2(1));
+    return rawCarrierSaturation(texelFetch(longTex, p, 0).a);
+}
+// IRIS_V232_EXTENDED_LINEAR_RAW_CARRIER_END
+
 vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
     // V2.27 universal recovered-highlight transfer. Reserve a real display interval
     // for valid SHORT information with a guaranteed stop-domain slope; only energy
@@ -158,25 +266,74 @@ vec2 stillShortUvAt(vec2 sampleUv) {
 }
 
 vec3 stillShortRgbAt(vec2 sampleUv) {
-    // SHORT is the aligned auxiliary. Both global and bounded residual registration
-    // address SHORT only; LONG coordinates never depend on SHORT motion.
+    // Live preview keeps the inherited sRGB source contract. Saved RAW modes never
+    // consume this path as scene authority; they decode the extended-linear carrier.
     return texture(shortTex, stillShortUvAt(sampleUv)).rgb;
 }
 
 vec3 stillLongRgbAt(vec2 sampleUv) {
-    // Exact immutable LONG body sample.
+    // Live preview keeps the inherited sRGB source contract.
     return texture(longTex, clamp(sampleUv, vec2(0.0), vec2(1.0))).rgb;
 }
 
+vec4 savedShortLinearAt(vec2 sampleUv) {
+    // Final source sampling uses explicit four-tap interpolation after linear decode.
+    return shortCarrierLinearAt(stillShortUvAt(sampleUv));
+}
+
+vec4 savedShortEvidenceAt(vec2 sampleUv) {
+    // Analysis/ownership probes deliberately use one nearest decoded source sample.
+    // This keeps V2.32 full-resolution mode-5 cost bounded near V2.31 while avoiding
+    // any interpolation in companded or sRGB code space.
+    return shortCarrierLinearNearestAt(stillShortUvAt(sampleUv));
+}
+
+vec4 savedLongLinearAt(vec2 sampleUv) {
+    return longCarrierLinearAt(clamp(sampleUv, vec2(0.0), vec2(1.0)));
+}
+
+float savedShortSaturationAt(vec2 sampleUv) {
+    return shortCarrierSaturationAt(stillShortUvAt(sampleUv));
+}
+
+float savedShortEvidenceSaturationAt(vec2 sampleUv) {
+    vec2 sourceUv = stillShortUvAt(sampleUv);
+    ivec2 size = textureSize(shortTex, 0);
+    ivec2 p = clamp(ivec2(clamp(sourceUv, vec2(0.0), vec2(0.99999994)) * vec2(size)),
+        ivec2(0), size - ivec2(1));
+    return rawCarrierSaturation(texelFetch(shortTex, p, 0).a);
+}
+
+float savedLongSaturationAt(vec2 sampleUv) {
+    return longCarrierSaturationAt(clamp(sampleUv, vec2(0.0), vec2(1.0)));
+}
+
 float mappedShortLinearLumaAt(vec2 sampleUv) {
+    if (savedRawSourceMode()) {
+        return linearLuma(savedShortEvidenceAt(sampleUv).rgb * stillShortScalarGain);
+    }
     return linearLuma(srgbToLinear(stillShortRgbAt(sampleUv)) * stillShortScalarGain);
 }
 
 float longLinearLumaAt(vec2 sampleUv) {
+    if (savedRawSourceMode()) {
+        return linearLuma(savedLongLinearAt(sampleUv).rgb);
+    }
     return linearLuma(srgbToLinear(stillLongRgbAt(sampleUv)));
 }
 
+float mappedShortSigmaAt(vec2 sampleUv) {
+    return savedRawSourceMode()
+        ? savedShortEvidenceAt(sampleUv).a * stillShortScalarGain
+        : 0.0;
+}
+
+float longSigmaAt(vec2 sampleUv) {
+    return savedRawSourceMode() ? savedLongLinearAt(sampleUv).a : 0.0;
+}
+
 vec2 localLinearRangeAtRadius(vec2 sampleUv, float radiusPixels);
+vec2 localNoiseSigmaAtRadius(vec2 sampleUv, float radiusPixels);
 
 float channelClipDamage(vec3 rgb) {
     // A single near-clipped channel is not equivalent to losing the whole RGB
@@ -189,39 +346,87 @@ float channelClipDamage(vec3 rgb) {
 }
 
 float shortInformationAdvantageAt(vec2 sampleUv) {
-    vec3 shortRgb = stillShortRgbAt(sampleUv);
-    vec3 longRgb = stillLongRgbAt(sampleUv);
-    float clipAdvantage = smoothstep(
-        0.03, 0.45, channelClipDamage(longRgb) - channelClipDamage(shortRgb));
+    if (!savedRawSourceMode()) {
+        vec3 shortRgb = stillShortRgbAt(sampleUv);
+        vec3 longRgb = stillLongRgbAt(sampleUv);
+        float clipAdvantage = smoothstep(
+            0.03, 0.45, channelClipDamage(longRgb) - channelClipDamage(shortRgb));
+        vec2 localRanges = localLinearRangeAtRadius(sampleUv, 4.0);
+        float shortStructure = smoothstep(0.003, 0.022, localRanges.x);
+        float structureAdvantage = smoothstep(
+            0.0015, 0.018, localRanges.x - 1.03 * localRanges.y);
+        return max(clipAdvantage, shortStructure * structureAdvantage);
+    }
+
+    // V2.32 saved RAW evidence is noise-normalized. A SHORT range that is explainable
+    // by its physical S*x+O uncertainty is not scene structure and cannot steal LONG
+    // ownership. Four sigma is intentionally conservative for the sparse 9-point range.
     vec2 localRanges = localLinearRangeAtRadius(sampleUv, 4.0);
-    float shortStructure = smoothstep(0.003, 0.022, localRanges.x);
+    vec2 localNoise = localNoiseSigmaAtRadius(sampleUv, 4.0);
+    float shortExcess = max(localRanges.x - 4.0 * localNoise.x, 0.0);
+    float longExcess = max(localRanges.y - 4.0 * localNoise.y, 0.0);
+    float shortStructure = smoothstep(0.0025, 0.020, shortExcess);
     float structureAdvantage = smoothstep(
-        0.0015, 0.018, localRanges.x - 1.03 * localRanges.y);
-    return max(clipAdvantage, shortStructure * structureAdvantage);
+        0.0010, 0.015, shortExcess - 1.03 * longExcess);
+
+    vec3 shortScene = savedShortEvidenceAt(sampleUv).rgb * stillShortScalarGain;
+    vec3 longScene = savedLongLinearAt(sampleUv).rgb;
+    // Extended-linear headroom replaces encoded-channel clipping as the saved-RAW
+    // loss cue. Whole-RGB source ownership remains unchanged.
+    float longPressure = max(savedLongSaturationAt(sampleUv),
+        smoothstep(0.96, 1.12, max3(longScene)));
+    float shortPressure = max(savedShortEvidenceSaturationAt(sampleUv),
+        smoothstep(0.96, 1.12, max3(shortScene)));
+    float headroomAdvantage = longPressure * (1.0 - 0.90 * shortPressure);
+    return max(headroomAdvantage, shortStructure * structureAdvantage);
 }
 
 float shortRecoveryValidityAt(vec2 sampleUv) {
     // V2.22 strict seed validity is INFORMATION-relative, not max-channel-headroom
-    // based. A filament may have one clipped channel yet still contain coherent
-    // shape/color/gradient information that is clearly superior to clipped LONG.
-    vec3 shortRgb = stillShortRgbAt(sampleUv);
-    float signal = smoothstep(0.012, 0.050, encodedLuma(shortRgb));
+    // based. V2.32 additionally requires saved RAW structure to rise above the
+    // timestamp-matched physical sensor uncertainty.
+    if (!savedRawSourceMode()) {
+        vec3 shortRgb = stillShortRgbAt(sampleUv);
+        float signal = smoothstep(0.012, 0.050, encodedLuma(shortRgb));
+        vec2 localRanges = localLinearRangeAtRadius(sampleUv, 4.0);
+        float retainedStructure = smoothstep(0.003, 0.020, localRanges.x);
+        float channelRetention = 1.0 - smoothstep(
+            0.72, 0.995, channelClipDamage(shortRgb));
+        float relativeAdvantage = shortInformationAdvantageAt(sampleUv);
+        return signal * max(relativeAdvantage, max(retainedStructure, channelRetention * 0.55));
+    }
+
+    vec4 shortRaw = savedShortEvidenceAt(sampleUv);
+    vec3 shortScene = shortRaw.rgb * stillShortScalarGain;
+    float shortSigma = shortRaw.a * stillShortScalarGain;
+    float signal = smoothstep(0.0009, 0.0040, linearLuma(shortScene));
     vec2 localRanges = localLinearRangeAtRadius(sampleUv, 4.0);
-    float retainedStructure = smoothstep(0.003, 0.020, localRanges.x);
-    float channelRetention = 1.0 - smoothstep(
-        0.72, 0.995, channelClipDamage(shortRgb));
+    vec2 localNoise = localNoiseSigmaAtRadius(sampleUv, 4.0);
+    float retainedExcess = max(localRanges.x - 4.0 * localNoise.x, 0.0);
+    float retainedStructure = smoothstep(0.0025, 0.018, retainedExcess);
+    float signalSnr = smoothstep(2.0, 6.0,
+        linearLuma(shortScene) / max(shortSigma, 0.000001));
+    float headroomValidity = (1.0 - savedShortEvidenceSaturationAt(sampleUv))
+        * (1.0 - smoothstep(1.50, 3.00, max3(shortScene)));
     float relativeAdvantage = shortInformationAdvantageAt(sampleUv);
-    return signal * max(relativeAdvantage, max(retainedStructure, channelRetention * 0.55));
+    return signal * max(relativeAdvantage,
+        max(retainedStructure, 0.55 * signalSnr * headroomValidity));
 }
 
 float shortRecoveryDomainValidityAt(vec2 sampleUv) {
     // Once a connected LONG-loss component has a valid seed, every real SHORT
     // sample with usable signal remains eligible for ownership propagation. Near
-    // clipping is deliberately NOT a domain hole: if SHORT is the less-damaged
-    // exposure it remains the correct recovery source, and a fully clipped core
-    // stays connected to its informative SHORT boundary instead of falling to LONG.
-    vec3 shortRgb = stillShortRgbAt(sampleUv);
-    return smoothstep(0.004, 0.020, encodedLuma(shortRgb));
+    // clipping is deliberately NOT a domain hole.
+    if (!savedRawSourceMode()) {
+        vec3 shortRgb = stillShortRgbAt(sampleUv);
+        return smoothstep(0.004, 0.020, encodedLuma(shortRgb));
+    }
+    vec4 shortRaw = savedShortEvidenceAt(sampleUv);
+    float mappedY = linearLuma(shortRaw.rgb * stillShortScalarGain);
+    float mappedSigma = shortRaw.a * stillShortScalarGain;
+    float signal = smoothstep(0.00030, 0.00155, mappedY);
+    float snr = smoothstep(1.0, 3.0, mappedY / max(mappedSigma, 0.000001));
+    return signal * snr;
 }
 
 float registrationNeighborhoodConfidenceAt(vec2 sampleUv) {
@@ -301,6 +506,15 @@ vec2 localLinearRangeAtRadius(vec2 sampleUv, float radiusPixels) {
     return vec2(shortMaximum - shortMinimum, longMaximum - longMinimum);
 }
 
+vec2 localNoiseSigmaAtRadius(vec2 sampleUv, float radiusPixels) {
+    if (!savedRawSourceMode()) return vec2(0.0);
+    // Lens shading and the S*x+O profile vary smoothly compared with the 4/12-pixel
+    // structure probes. Use center sigma with a radius-dependent safety margin instead
+    // of another 9 texture reads per scale; this keeps full-res ownership bounded.
+    float safety = radiusPixels <= 4.0 ? 1.20 : 1.35;
+    return vec2(mappedShortSigmaAt(sampleUv), longSigmaAt(sampleUv)) * safety;
+}
+
 float radiometricAgreementAt(vec2 sampleUv) {
     float shortY = max(mappedShortLinearLumaAt(sampleUv), 0.00001);
     float longY = max(longLinearLumaAt(sampleUv), 0.00001);
@@ -332,15 +546,18 @@ float temporalShortWeight(float ratio, float support) {
 float stillTemporalBodySupportAt(vec2 sampleUv, float ratio) {
     float overlap = temporalExposureOverlap(ratio);
     if (overlap <= 0.0) return 0.0;
-    vec3 longRgb = stillLongRgbAt(sampleUv);
-    vec3 shortRgb = stillShortRgbAt(sampleUv);
-    vec3 longScene = srgbToLinear(longRgb);
-    vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;
-    float body = 1.0 - smoothstep(0.62, 0.84, max3(longRgb));
+    vec4 longRaw = savedLongLinearAt(sampleUv);
+    vec4 shortRaw = savedShortEvidenceAt(sampleUv);
+    vec3 longScene = longRaw.rgb;
+    vec3 shortScene = shortRaw.rgb * stillShortScalarGain;
+    float body = 1.0 - smoothstep(0.34, 0.67, max3(longScene));
     float geometry = smoothstep(0.20, 0.50, registrationNeighborhoodConfidenceAt(sampleUv));
     float radiometry = radiometricAgreementAt(sampleUv);
     float rgbAgreement = temporalRgbAgreement(shortScene, longScene);
-    float shortSignal = smoothstep(0.006, 0.030, encodedLuma(shortRgb));
+    float shortY = linearLuma(shortScene);
+    float shortSigma = shortRaw.a * stillShortScalarGain;
+    float shortSignal = smoothstep(0.00045, 0.0023, shortY)
+        * smoothstep(1.5, 4.0, shortY / max(shortSigma, 0.000001));
     return overlap * body * geometry * radiometry * rgbAgreement * shortSignal;
 }
 
@@ -366,9 +583,14 @@ float liveTemporalBodySupportAt(
 // IRIS_V227_TEMPORAL_BODY_SNR_END
 
 float longHardLossBaseAt(vec2 sampleUv) {
-    // Any near-saturated LONG channel is real information-loss evidence. Unlike
-    // V2.16, literal clipping does not also require SHORT texture at that pixel.
-    return smoothstep(0.965, 0.995, max3(stillLongRgbAt(sampleUv)));
+    // Live retains the exact encoded-JPEG-era threshold. Saved RAW uses extended
+    // linear headroom; storage no longer clips at 1.0 before this test.
+    if (!savedRawSourceMode()) {
+        return smoothstep(0.965, 0.995, max3(stillLongRgbAt(sampleUv)));
+    }
+    float physicalSaturation = savedLongSaturationAt(sampleUv);
+    float extendedPressure = smoothstep(0.98, 1.15, max3(savedLongLinearAt(sampleUv).rgb));
+    return max(physicalSaturation, 0.55 * extendedPressure);
 }
 
 float compactHardLossSupportAt(vec2 sampleUv) {
@@ -389,7 +611,6 @@ float compactHardLossSupportAt(vec2 sampleUv) {
 }
 
 float longEffectiveLossAt(vec2 sampleUv) {
-    vec3 longRgb = stillLongRgbAt(sampleUv);
     vec2 mediumRanges = localLinearRangeAtRadius(sampleUv, 4.0);
     vec2 broadRanges = localLinearRangeAtRadius(sampleUv, 12.0);
     float shortMediumRange = mediumRanges.x;
@@ -398,48 +619,71 @@ float longEffectiveLossAt(vec2 sampleUv) {
     float longBroadRange = broadRanges.y;
 
     // IRIS_V229_INFORMATION_LOSS_NOT_WHITE_GATED_BEGIN
-    // V2.29: information loss is not a synonym for near-white LONG. A LONG sample
-    // that is safely above the encoded black/noise floor may still have lost real
-    // local variation that the exposure-normalized SHORT retains. Keep the existing
-    // multi-scale dominance + radiometric plausibility proof, but make source
-    // observability -- not highlight brightness -- the contextual gate.
-    float observableContext = smoothstep(0.08, 0.20, max3(longRgb));
+    if (!savedRawSourceMode()) {
+        vec3 longRgb = stillLongRgbAt(sampleUv);
+        float observableContext = smoothstep(0.08, 0.20, max3(longRgb));
+        float mediumStructure = smoothstep(0.004, 0.022, shortMediumRange);
+        float mediumRelativeDominance = smoothstep(
+            1.03, 1.18, shortMediumRange / max(longMediumRange, 0.0025));
+        float mediumAbsoluteDominance = smoothstep(
+            0.0010, 0.012, shortMediumRange - longMediumRange);
+        float mediumDominance = max(
+            0.72 * mediumRelativeDominance, mediumAbsoluteDominance);
+        float broadStructure = smoothstep(0.008, 0.050, shortBroadRange);
+        float broadRelativeDominance = smoothstep(
+            1.02, 1.15, shortBroadRange / max(longBroadRange, 0.0040));
+        float broadAbsoluteDominance = smoothstep(
+            0.0020, 0.025, shortBroadRange - longBroadRange);
+        float broadDominance = max(
+            0.75 * broadRelativeDominance, broadAbsoluteDominance);
+        float shortY = max(mappedShortLinearLumaAt(sampleUv), 0.00001);
+        float longY = max(longLinearLumaAt(sampleUv), 0.00001);
+        float errorEv = abs(log2(shortY / longY));
+        float radiometricPlausibility = 1.0 - smoothstep(1.25, 2.75, errorEv);
+        float informationDominance = max(
+            mediumStructure * mediumDominance,
+            broadStructure * broadDominance);
+        return observableContext * informationDominance * radiometricPlausibility;
+    }
     // IRIS_V229_INFORMATION_LOSS_NOT_WHITE_GATED_END
-    // IRIS_V231_CONNECTED_EFFECTIVE_LOSS_COMPLETION_BEGIN
-    // V2.29 device evidence proved that the sky could seed recovery while moderately
-    // bright exterior house/siding/tree structure still stayed LONG-owned. Keep
-    // SHORT structure mandatory, but detect information dominance in both relative
-    // and absolute terms instead of requiring the old ~8-10% range advantage at
-    // every pixel. This remains luminance/structure evidence only; source ownership
-    // below is still complete binary RGB and remains connectivity/registration gated.
-    float mediumStructure = smoothstep(0.004, 0.022, shortMediumRange);
+
+    // IRIS_V232_NOISE_NORMALIZED_EFFECTIVE_LOSS_BEGIN
+    // The V2.31 bathroom completion remains, but only structure above each frame's
+    // physical RAW uncertainty may contribute. This prevents amplified SHORT CFA/noise
+    // from masquerading as detail while preserving real house/tree recovery.
+    vec2 mediumNoise = localNoiseSigmaAtRadius(sampleUv, 4.0);
+    vec2 broadNoise = localNoiseSigmaAtRadius(sampleUv, 12.0);
+    float shortMediumExcess = max(shortMediumRange - 4.0 * mediumNoise.x, 0.0);
+    float longMediumExcess = max(longMediumRange - 4.0 * mediumNoise.y, 0.0);
+    float shortBroadExcess = max(shortBroadRange - 4.0 * broadNoise.x, 0.0);
+    float longBroadExcess = max(longBroadRange - 4.0 * broadNoise.y, 0.0);
+
+    vec3 longScene = savedLongLinearAt(sampleUv).rgb;
+    float observableContext = smoothstep(0.007, 0.033, max3(longScene));
+    float mediumStructure = smoothstep(0.003, 0.020, shortMediumExcess);
     float mediumRelativeDominance = smoothstep(
-        1.03, 1.18, shortMediumRange / max(longMediumRange, 0.0025));
+        1.03, 1.18, shortMediumExcess / max(longMediumExcess, 0.0025));
     float mediumAbsoluteDominance = smoothstep(
-        0.0010, 0.012, shortMediumRange - longMediumRange);
+        0.0010, 0.012, shortMediumExcess - longMediumExcess);
     float mediumDominance = max(
         0.72 * mediumRelativeDominance, mediumAbsoluteDominance);
-    float broadStructure = smoothstep(0.008, 0.050, shortBroadRange);
+    float broadStructure = smoothstep(0.006, 0.045, shortBroadExcess);
     float broadRelativeDominance = smoothstep(
-        1.02, 1.15, shortBroadRange / max(longBroadRange, 0.0040));
+        1.02, 1.15, shortBroadExcess / max(longBroadExcess, 0.0040));
     float broadAbsoluteDominance = smoothstep(
-        0.0020, 0.025, shortBroadRange - longBroadRange);
+        0.0020, 0.025, shortBroadExcess - longBroadExcess);
     float broadDominance = max(
         0.75 * broadRelativeDominance, broadAbsoluteDominance);
-    // IRIS_V231_CONNECTED_EFFECTIVE_LOSS_COMPLETION_END
 
     float shortY = max(mappedShortLinearLumaAt(sampleUv), 0.00001);
     float longY = max(longLinearLumaAt(sampleUv), 0.00001);
     float errorEv = abs(log2(shortY / longY));
-    // Absolute equality is not required inside a flattened/clipped LONG region,
-    // but wildly inconsistent radiometry remains a fail-closed guard against
-    // unrelated motion/color patches taking ownership.
     float radiometricPlausibility = 1.0 - smoothstep(1.25, 2.75, errorEv);
-
     float informationDominance = max(
         mediumStructure * mediumDominance,
         broadStructure * broadDominance);
     return observableContext * informationDominance * radiometricPlausibility;
+    // IRIS_V232_NOISE_NORMALIZED_EFFECTIVE_LOSS_END
 }
 
 float shortRecoveryEvidenceAt(vec2 sampleUv) {
@@ -460,11 +704,16 @@ float longLossRecoveryDomainAt(vec2 sampleUv) {
     // LONG component. This is the key distinction between component topology and
     // local registration confidence.
     vec3 longRgb = stillLongRgbAt(sampleUv);
+    vec3 longScene = savedRawSourceMode()
+        ? savedLongLinearAt(sampleUv).rgb
+        : srgbToLinear(longRgb);
     float shortUsable = shortRecoveryDomainValidityAt(sampleUv);
     float hardLoss = longHardLossBaseAt(sampleUv);
     float hardSupport = compactHardLossSupportAt(sampleUv);
-    float nearHardInterior = smoothstep(0.86, 0.965, max3(longRgb))
-        * smoothstep(0.05, 0.24, hardSupport);
+    float nearHardInterior = savedRawSourceMode()
+        ? max(savedLongSaturationAt(sampleUv), smoothstep(0.78, 1.00, max3(longScene)))
+            * smoothstep(0.05, 0.24, hardSupport)
+        : smoothstep(0.86, 0.965, max3(longRgb)) * smoothstep(0.05, 0.24, hardSupport);
     float effectiveLoss = longEffectiveLossAt(sampleUv);
     float physicalLoss = max(hardLoss, max(nearHardInterior, effectiveLoss));
     return shortUsable * physicalLoss;
@@ -821,8 +1070,11 @@ void main() {
         // it may not turn the entire atlas cell into SHORT. Re-evaluate the physical
         // LONG-loss/usable-SHORT domain at the actual output pixel.
         float connectedRecovery = step(0.50, support.r);
-        float fullResolutionLoss = max(
-            longLossRecoveryDomainAt(uv), shortRecoveryEvidenceAt(uv));
+        // V2.32 evaluates the physical recovery domain once at native resolution.
+        // Strict seed/geometry proof already belongs to the connected mode-3/4 atlas;
+        // recomputing shortRecoveryEvidence here duplicated the expensive multi-scale
+        // RAW probes and could not create a new connected owner by itself.
+        float fullResolutionLoss = longLossRecoveryDomainAt(uv);
         // V2.31 completes the connected exterior component at native resolution.
         // The V2.29 0.16 re-test left house/siding/tree holes even after a valid sky
         // seed had proven the component. Connectivity + physical loss remain mandatory;
@@ -833,17 +1085,16 @@ void main() {
         // Use the proven local residual field only where that field itself supplies it;
         // unsupported panes therefore fall back to the stable global registration.
         // Never warp a pane with a residual merely propagated along an atlas path.
-        vec3 shortRgb = stillShortRgbAt(uv);
+        vec4 shortRaw = savedShortLinearAt(uv);
         // IRIS_V229_FULL_RES_FINAL_SHORT_OWNERSHIP_END
-        vec3 longRgb = stillLongRgbAt(uv);
-        vec3 shortScene = srgbToLinear(shortRgb) * stillShortScalarGain;
-        vec3 longScene = srgbToLinear(longRgb);
+        vec4 longRaw = savedLongLinearAt(uv);
+        vec3 shortScene = shortRaw.rgb * stillShortScalarGain;
+        vec3 longScene = longRaw.rgb;
 
-        // V2.27 low-DR body denoise is a separate owner from HDR replacement. Where
-        // both exposures carry the same registered body information, use one scalar
-        // inverse-variance weight to average complete RGB. Any registration/radiometry
-        // doubt returns exactly to LONG. Proven highlight regions remain binary SHORT.
-        vec3 bodyShortScene = srgbToLinear(stillShortRgbAt(uv)) * stillShortScalarGain;
+        // V2.27 low-DR body denoise is a separate owner from HDR replacement. V2.32
+        // keeps this operation in the extended-linear RAW-derived domain; no sRGB
+        // encode/decode round-trip or gamma-space SHORT interpolation participates.
+        vec3 bodyShortScene = shortRaw.rgb * stillShortScalarGain;
         float bodySupport = stillTemporalBodySupportAt(uv, ratio);
         float bodyShortWeight = temporalShortWeight(ratio, bodySupport);
         vec3 temporalBody = mix(longScene, bodyShortScene, bodyShortWeight);

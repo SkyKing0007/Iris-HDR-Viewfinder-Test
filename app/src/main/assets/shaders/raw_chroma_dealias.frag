@@ -5,54 +5,19 @@ in vec2 vUv;
 layout(location=0) out vec4 outColor;
 uniform sampler2D sourceTex;
 
-float srgbToLinearChannel(float value) {
-    return value <= 0.04045
-        ? value / 12.92
-        : pow((value + 0.055) / 1.055, 2.4);
+const float SIGNAL_COMPAND_K = 1.0;
+const float SIGMA_COMPAND_K = 0.01;
+const float CARRIER_MAX = 254.0 / 255.0;
+
+float expandPositive(float encoded, float k) {
+    float e = min(max(encoded, 0.0), CARRIER_MAX);
+    float e2 = e * e;
+    return k * e2 / max(1.0 - e2, 0.0000001);
 }
 
-vec3 srgbToLinear(vec3 value) {
-    return vec3(
-        srgbToLinearChannel(value.r),
-        srgbToLinearChannel(value.g),
-        srgbToLinearChannel(value.b));
-}
-
-float linearToSrgbChannel(float value) {
+float compandPositive(float value, float k) {
     float x = max(value, 0.0);
-    return x <= 0.0031308 ? 12.92 * x : 1.055 * pow(x, 1.0 / 2.4) - 0.055;
-}
-
-vec3 linearToSrgb(vec3 value) {
-    return vec3(
-        linearToSrgbChannel(value.r),
-        linearToSrgbChannel(value.g),
-        linearToSrgbChannel(value.b));
-}
-
-float linearLuma(vec3 rgb) {
-    return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-}
-
-float max3(vec3 value) {
-    return max(value.r, max(value.g, value.b));
-}
-
-float min3(vec3 value) {
-    return min(value.r, min(value.g, value.b));
-}
-
-float median5(float a, float b, float c, float d, float e) {
-    float values[5] = float[5](a, b, c, d, e);
-    for (int i = 0; i < 4; ++i) {
-        for (int j = i + 1; j < 5; ++j) {
-            float low = min(values[i], values[j]);
-            float high = max(values[i], values[j]);
-            values[i] = low;
-            values[j] = high;
-        }
-    }
-    return values[2];
+    return min(CARRIER_MAX, sqrt(x / max(x + k, 0.0000001)));
 }
 
 ivec2 clampPixel(ivec2 p) {
@@ -60,13 +25,45 @@ ivec2 clampPixel(ivec2 p) {
     return clamp(p, ivec2(0), size - ivec2(1));
 }
 
-vec3 linearAt(ivec2 p) {
-    return srgbToLinear(texelFetch(sourceTex, clampPixel(p), 0).rgb);
+vec4 carrierAt(ivec2 p) {
+    return texelFetch(sourceTex, clampPixel(p), 0);
+}
+
+vec3 sceneAt(ivec2 p) {
+    vec3 encoded = carrierAt(p).rgb;
+    return vec3(
+        expandPositive(encoded.r, SIGNAL_COMPAND_K),
+        expandPositive(encoded.g, SIGNAL_COMPAND_K),
+        expandPositive(encoded.b, SIGNAL_COMPAND_K));
+}
+
+float sigmaAt(ivec2 p) {
+    float code = floor(carrierAt(p).a * 255.0 + 0.5);
+    float saturation = step(127.5, code);
+    float sigmaCode = code - 128.0 * saturation;
+    return expandPositive(sigmaCode / 127.0, SIGMA_COMPAND_K);
+}
+
+float saturationAt(ivec2 p) {
+    float code = floor(carrierAt(p).a * 255.0 + 0.5);
+    return step(127.5, code);
+}
+
+float encodeSigmaAndSaturation(float sigma, float saturation) {
+    float sigmaEncoded = compandPositive(sigma, SIGMA_COMPAND_K);
+    float sigmaCode = min(127.0, floor(clamp(sigmaEncoded, 0.0, 1.0) * 127.0 + 0.5));
+    return (sigmaCode + 128.0 * step(0.5, saturation)) / 255.0;
+}
+
+float linearLuma(vec3 rgb) {
+    return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+}
+
+float min3(vec3 value) {
+    return min(value.r, min(value.g, value.b));
 }
 
 vec2 chromaAt(vec3 rgb, float y) {
-    // Opponent coordinates are expressed around exact luminance so filtering these
-    // two values cannot alter spatial/luma detail.
     return vec2(rgb.b - y, rgb.r - y);
 }
 
@@ -77,76 +74,129 @@ vec3 rgbFromLumaChroma(float y, vec2 chroma) {
     return vec3(red, green, blue);
 }
 
-vec3 projectAtFixedLuma(vec3 rgb, float y) {
-    vec3 neutral = vec3(clamp(y, 0.0, 1.0));
-    float low = min3(rgb);
-    if (low < 0.0) {
-        float t = clamp(y / max(y - low, 0.000001), 0.0, 1.0);
-        rgb = mix(neutral, rgb, t);
+float median9(float v0, float v1, float v2, float v3, float v4,
+        float v5, float v6, float v7, float v8) {
+    float values[9] = float[9](v0, v1, v2, v3, v4, v5, v6, v7, v8);
+    for (int i = 0; i < 8; ++i) {
+        for (int j = i + 1; j < 9; ++j) {
+            float lowValue = min(values[i], values[j]);
+            float highValue = max(values[i], values[j]);
+            values[i] = lowValue;
+            values[j] = highValue;
+        }
     }
-    float high = max3(rgb);
-    if (high > 1.0) {
-        float t = clamp((1.0 - y) / max(high - y, 0.000001), 0.0, 1.0);
-        rgb = mix(neutral, rgb, t);
+    return values[4];
+}
+
+vec3 projectNonNegativeAtFixedLuma(vec3 rgb, float y) {
+    vec3 neutral = vec3(max(y, 0.0));
+    float lowValue = min3(rgb);
+    if (lowValue < 0.0) {
+        float scale = clamp(y / max(y - lowValue, 0.000001), 0.0, 1.0);
+        rgb = mix(neutral, rgb, scale);
     }
-    return clamp(rgb, vec3(0.0), vec3(1.0));
+    return max(rgb, vec3(0.0));
 }
 
 void main() {
     ivec2 p = ivec2(gl_FragCoord.xy);
-    vec3 centerRgb = linearAt(p);
-    vec3 northRgb = linearAt(p + ivec2(0, -1));
-    vec3 southRgb = linearAt(p + ivec2(0, 1));
-    vec3 westRgb = linearAt(p + ivec2(-1, 0));
-    vec3 eastRgb = linearAt(p + ivec2(1, 0));
+    ivec2 offsets[9] = ivec2[9](
+        ivec2(0, 0),
+        ivec2(-1, 0), ivec2(1, 0), ivec2(0, -1), ivec2(0, 1),
+        ivec2(-1, -1), ivec2(1, -1), ivec2(-1, 1), ivec2(1, 1));
 
-    float centerY = linearLuma(centerRgb);
-    float northY = linearLuma(northRgb);
-    float southY = linearLuma(southRgb);
-    float westY = linearLuma(westRgb);
-    float eastY = linearLuma(eastRgb);
-    vec2 centerC = chromaAt(centerRgb, centerY);
-    vec2 northC = chromaAt(northRgb, northY);
-    vec2 southC = chromaAt(southRgb, southY);
-    vec2 westC = chromaAt(westRgb, westY);
-    vec2 eastC = chromaAt(eastRgb, eastY);
+    vec3 rgbValues[9];
+    float yValues[9];
+    vec2 cValues[9];
+    float sigmaValues[9];
+    for (int i = 0; i < 9; ++i) {
+        rgbValues[i] = sceneAt(p + offsets[i]);
+        yValues[i] = linearLuma(rgbValues[i]);
+        cValues[i] = chromaAt(rgbValues[i], yValues[i]);
+        sigmaValues[i] = sigmaAt(p + offsets[i]);
+    }
 
+    float centerY = yValues[0];
+    vec2 centerC = cValues[0];
     vec2 medianC = vec2(
-        median5(centerC.x, northC.x, southC.x, westC.x, eastC.x),
-        median5(centerC.y, northC.y, southC.y, westC.y, eastC.y));
-    float medianY = median5(centerY, northY, southY, westY, eastY);
+        median9(cValues[0].x, cValues[1].x, cValues[2].x, cValues[3].x, cValues[4].x,
+                cValues[5].x, cValues[6].x, cValues[7].x, cValues[8].x),
+        median9(cValues[0].y, cValues[1].y, cValues[2].y, cValues[3].y, cValues[4].y,
+                cValues[5].y, cValues[6].y, cValues[7].y, cValues[8].y));
+    float medianY = median9(
+        yValues[0], yValues[1], yValues[2], yValues[3], yValues[4],
+        yValues[5], yValues[6], yValues[7], yValues[8]);
+    float medianSigma = median9(
+        sigmaValues[0], sigmaValues[1], sigmaValues[2], sigmaValues[3], sigmaValues[4],
+        sigmaValues[5], sigmaValues[6], sigmaValues[7], sigmaValues[8]);
 
+    float localMinimumY = yValues[0];
+    float localMaximumY = yValues[0];
+    float coherentVotes = 0.0;
+    float chromaNoise = max(0.00020, 1.60 * max(sigmaValues[0], medianSigma));
+    for (int i = 1; i < 9; ++i) {
+        localMinimumY = min(localMinimumY, yValues[i]);
+        localMaximumY = max(localMaximumY, yValues[i]);
+        coherentVotes += 1.0 - smoothstep(
+            2.0 * chromaNoise,
+            5.0 * chromaNoise + 0.002,
+            length(cValues[i] - centerC));
+    }
+
+    float localLumaRange = localMaximumY - localMinimumY;
     float chromaExcursion = length(centerC - medianC);
+    float normalizedChromaExcursion = chromaExcursion / chromaNoise;
     float lumaExcursion = abs(centerY - medianY);
-    float localLumaRange = max(
-        max(abs(northY - centerY), abs(southY - centerY)),
-        max(abs(westY - centerY), abs(eastY - centerY)));
 
-    // Bayer false color and moire characteristically alternate around one pixel:
-    // both opposite neighbors move away from the center in the same chroma direction.
-    // A real step edge normally has one same-side neighbor, so this product collapses.
+    // A real color region normally has several neighboring pixels with similar chroma.
+    // An isolated CFA false-color dot does not. Smooth luminance plus a many-sigma
+    // chroma excursion therefore gets strong cleanup without touching flat luminance.
+    float lowLumaStructure = 1.0 - smoothstep(
+        2.0 * chromaNoise + 0.002,
+        8.0 * chromaNoise + 0.018,
+        max(localLumaRange, lumaExcursion));
+    float isolatedChroma = 1.0 - smoothstep(1.5, 4.5, coherentVotes);
+    float flatFalseColor = smoothstep(3.0, 7.0, normalizedChromaExcursion)
+        * lowLumaStructure * isolatedChroma;
+
+    // One-pixel Bayer aliases on mesh/shutters alternate: both opposite neighbors move
+    // away from the center in the same opponent-chroma direction. Normalize the dot
+    // product by the physical noise scale so ordinary sensor noise cannot trigger it.
+    float noiseEnergy = chromaNoise * chromaNoise;
+    float horizontalDot = dot(cValues[2] - centerC, cValues[1] - centerC);
+    float verticalDot = dot(cValues[3] - centerC, cValues[4] - centerC);
     float horizontalAlternation = smoothstep(
-        0.00015, 0.0035, dot(eastC - centerC, westC - centerC));
+        1.0 * noiseEnergy, 16.0 * noiseEnergy + 0.000020, horizontalDot);
     float verticalAlternation = smoothstep(
-        0.00015, 0.0035, dot(northC - centerC, southC - centerC));
+        1.0 * noiseEnergy, 16.0 * noiseEnergy + 0.000020, verticalDot);
     float alternatingChroma = max(horizontalAlternation, verticalAlternation);
+    float periodicAlias = smoothstep(2.5, 6.0, normalizedChromaExcursion)
+        * alternatingChroma;
 
-    // Only chroma energy substantially in excess of local luminance structure is
-    // eligible. This protects real monochrome detail and keeps luminance byte-for-byte
-    // owned by the demosaic result while reducing colored Nyquist aliases.
-    float excessChroma = chromaExcursion
-        - 0.70 * lumaExcursion
-        - 0.18 * localLumaRange;
-    float aliasEvidence = smoothstep(0.004, 0.035, excessChroma);
-    float fineStructure = smoothstep(0.004, 0.040, localLumaRange);
-    float brightEdge = smoothstep(0.55, 0.92, max3(centerRgb)) * fineStructure;
-    float strength = aliasEvidence * max(
-        0.68 * alternatingChroma,
-        0.82 * brightEdge);
-    strength = clamp(strength, 0.0, 0.85);
+    float fineStructure = smoothstep(
+        max(0.004, 2.0 * chromaNoise),
+        max(0.030, 8.0 * chromaNoise),
+        localLumaRange);
+    float brightEdge = smoothstep(0.65, 1.25, max(rgbValues[0].r,
+        max(rgbValues[0].g, rgbValues[0].b)))
+        * fineStructure
+        * smoothstep(3.0, 7.0, normalizedChromaExcursion)
+        * (1.0 - smoothstep(3.0, 6.0, coherentVotes));
+
+    float strength = max(flatFalseColor, max(0.88 * periodicAlias, 0.78 * brightEdge));
+    strength = clamp(strength, 0.0, 0.92);
 
     vec2 correctedC = mix(centerC, medianC, strength);
     vec3 correctedRgb = rgbFromLumaChroma(centerY, correctedC);
-    correctedRgb = projectAtFixedLuma(correctedRgb, centerY);
-    outColor = vec4(clamp(linearToSrgb(correctedRgb), vec3(0.0), vec3(1.0)), 1.0);
+    correctedRgb = projectNonNegativeAtFixedLuma(correctedRgb, centerY);
+
+    vec3 encodedScene = vec3(
+        compandPositive(correctedRgb.r, SIGNAL_COMPAND_K),
+        compandPositive(correctedRgb.g, SIGNAL_COMPAND_K),
+        compandPositive(correctedRgb.b, SIGNAL_COMPAND_K));
+    // Chroma-only filtering cannot make the physical source estimate noisier. Keep the
+    // center sigma and literal RAW saturation evidence for downstream ownership.
+    float encodedSigmaAndSat = encodeSigmaAndSaturation(
+        sigmaValues[0], saturationAt(p));
+    outColor = vec4(encodedScene, encodedSigmaAndSat);
 }
