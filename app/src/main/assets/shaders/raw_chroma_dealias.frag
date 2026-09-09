@@ -98,6 +98,26 @@ vec3 projectNonNegativeAtFixedLuma(vec3 rgb, float y) {
     return max(rgb, vec3(0.0));
 }
 
+// IRIS_V233_SATURATION_CHROMA_BOUNDARY_BEGIN
+// V2.32 device evidence: correctly recovered SHORT geometry can still carry broad
+// magenta/green false color when one Bayer channel is physically near saturation.
+// Borrow only chromaticity from unsaturated, luma-compatible boundary samples;
+// center luminance, geometry, sigma and saturation metadata remain immutable.
+float lumaCompatibility(float centerY, float candidateY) {
+    float center = max(centerY, 0.0005);
+    float candidate = max(candidateY, 0.0005);
+    float stops = abs(log2(candidate / center));
+    return (1.0 - smoothstep(1.0, 3.0, stops))
+        * smoothstep(0.006, 0.040, candidateY);
+}
+
+float chromaConsensus(float varianceValue, float noiseScale) {
+    float soft = max(9.0 * noiseScale * noiseScale, 0.000004);
+    float hard = max(64.0 * noiseScale * noiseScale, 0.000100);
+    return 1.0 - smoothstep(soft, hard, varianceValue);
+}
+// IRIS_V233_SATURATION_CHROMA_BOUNDARY_END
+
 void main() {
     ivec2 p = ivec2(gl_FragCoord.xy);
     ivec2 offsets[9] = ivec2[9](
@@ -183,10 +203,80 @@ void main() {
         * smoothstep(3.0, 7.0, normalizedChromaExcursion)
         * (1.0 - smoothstep(3.0, 6.0, coherentVotes));
 
-    float strength = max(flatFalseColor, max(0.88 * periodicAlias, 0.78 * brightEdge));
-    strength = clamp(strength, 0.0, 0.92);
+    float baseStrength = max(flatFalseColor, max(0.88 * periodicAlias, 0.78 * brightEdge));
+    baseStrength = clamp(baseStrength, 0.0, 0.92);
 
-    vec2 correctedC = mix(centerC, medianC, strength);
+    // Sparse multi-radius boundary evidence reaches outside broad clipped lamp/LED
+    // cores without blurring luminance. On a strong edge, samples across the luma
+    // normal are down-weighted so chroma follows the edge instead of bleeding across it.
+    ivec2 wideOffsets[16] = ivec2[16](
+        ivec2(-4, 0), ivec2(4, 0), ivec2(0, -4), ivec2(0, 4),
+        ivec2(-4, -4), ivec2(4, -4), ivec2(-4, 4), ivec2(4, 4),
+        ivec2(-10, 0), ivec2(10, 0), ivec2(0, -10), ivec2(0, 10),
+        ivec2(-8, -8), ivec2(8, -8), ivec2(-8, 8), ivec2(8, 8));
+    vec2 lumaGradient = vec2(yValues[2] - yValues[1], yValues[4] - yValues[3]);
+    float gradientMagnitude = length(lumaGradient);
+    vec2 gradientDirection = gradientMagnitude > 0.000001
+        ? lumaGradient / gradientMagnitude : vec2(0.0);
+    float edgeDirectionalStrength = smoothstep(
+        max(0.004, 2.0 * chromaNoise),
+        max(0.030, 8.0 * chromaNoise),
+        gradientMagnitude);
+
+    vec2 boundarySum = vec2(0.0);
+    float boundarySecondMoment = 0.0;
+    float boundaryWeight = 0.0;
+    float boundaryVotes = 0.0;
+    for (int i = 0; i < 16; ++i) {
+        ivec2 q = p + wideOffsets[i];
+        vec3 candidateRgb = sceneAt(q);
+        float candidateY = linearLuma(candidateRgb);
+        vec2 candidateC = chromaAt(candidateRgb, candidateY);
+        float unsaturated = 1.0 - saturationAt(q);
+        float compatibleY = lumaCompatibility(centerY, candidateY);
+        vec2 offsetDirection = normalize(vec2(wideOffsets[i]));
+        float acrossEdge = gradientMagnitude > 0.000001
+            ? abs(dot(offsetDirection, gradientDirection)) : 0.0;
+        float tangentWeight = mix(1.0,
+            1.0 - smoothstep(0.30, 0.88, acrossEdge),
+            edgeDirectionalStrength);
+        float distanceWeight = i < 8 ? 1.0 : 0.62;
+        float weightValue = unsaturated * compatibleY * tangentWeight * distanceWeight;
+        boundarySum += candidateC * weightValue;
+        boundarySecondMoment += dot(candidateC, candidateC) * weightValue;
+        boundaryWeight += weightValue;
+        boundaryVotes += step(0.18, weightValue);
+    }
+
+    vec2 boundaryC = boundaryWeight > 0.0001
+        ? boundarySum / boundaryWeight : medianC;
+    float boundaryVariance = boundaryWeight > 0.0001
+        ? max(boundarySecondMoment / boundaryWeight - dot(boundaryC, boundaryC), 0.0)
+        : 1.0;
+    float boundaryAgreement = chromaConsensus(boundaryVariance, chromaNoise)
+        * smoothstep(2.0, 5.0, boundaryVotes);
+    float boundaryExcursion = length(centerC - boundaryC) / max(chromaNoise, 0.00020);
+
+    // Physical saturation is not a color instruction. It only says center chroma is
+    // unreliable. A coherent unsaturated boundary decides the replacement hue, which
+    // preserves truly colored lamps while neutralizing the false magenta white lights
+    // seen in the V2.32 chandelier/grow-light device samples.
+    float saturatedBoundaryRepair = saturationAt(p)
+        * boundaryAgreement
+        * smoothstep(2.5, 7.0, boundaryExcursion);
+
+    // For unsaturated green/yellow CFA dots on thin bright edges, require the existing
+    // Bayer alternation proof before the wider boundary is allowed to become authority.
+    // Real isolated colored lines therefore fail closed instead of being desaturated.
+    float periodicBoundaryRepair = (1.0 - saturationAt(p))
+        * periodicAlias
+        * boundaryAgreement
+        * smoothstep(2.5, 6.0, boundaryExcursion);
+    float boundaryRepair = clamp(max(saturatedBoundaryRepair, periodicBoundaryRepair),
+        0.0, 0.98);
+
+    vec2 correctedC = mix(centerC, medianC, baseStrength);
+    correctedC = mix(correctedC, boundaryC, boundaryRepair);
     vec3 correctedRgb = rgbFromLumaChroma(centerY, correctedC);
     correctedRgb = projectNonNegativeAtFixedLuma(correctedRgb, centerY);
 
@@ -194,9 +284,7 @@ void main() {
         compandPositive(correctedRgb.r, SIGNAL_COMPAND_K),
         compandPositive(correctedRgb.g, SIGNAL_COMPAND_K),
         compandPositive(correctedRgb.b, SIGNAL_COMPAND_K));
-    // Chroma-only filtering cannot make the physical source estimate noisier. Keep the
-    // center sigma and literal RAW saturation evidence for downstream ownership.
-    float encodedSigmaAndSat = encodeSigmaAndSaturation(
-        sigmaValues[0], saturationAt(p));
-    outColor = vec4(encodedScene, encodedSigmaAndSat);
+    // Alpha is copied byte-for-byte from V2.32 center authority. Chroma repair may not
+    // change physical sigma or the RAW saturation bit consumed by fusion ownership.
+    outColor = vec4(encodedScene, carrierAt(p).a);
 }

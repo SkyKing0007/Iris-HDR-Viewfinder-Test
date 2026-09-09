@@ -214,6 +214,51 @@ vec3 adaptiveHdrToneMap(vec3 sceneLinear, float ratio, float bracketStops) {
     return sceneLinear * (mappedPeak / scenePeak);
 }
 
+// IRIS_V233_SAVED_RECOVERED_HIGHLIGHT_PRESENTATION_BEGIN
+// V2.32 device evidence says source ownership is now correct, but subtle recovered
+// ceiling illumination/reflection structure is visually compressed. Preserve the
+// shared/live V2.32 transfer byte-identical and apply this pointwise monotonic shape
+// only when mode-5 has already proven binary SHORT ownership. No neighbor sampling,
+// no histogram/scene-global knots, and one whole-RGB scale preserve geometry/hue.
+vec3 savedRecoveredHdrToneMap(
+        vec3 sceneLinear, float ratio, float bracketStops, float recoveredOwner) {
+    if (recoveredOwner < 0.5) {
+        return adaptiveHdrToneMap(sceneLinear, ratio, bracketStops);
+    }
+
+    const float knee = 0.70;
+    const float detailTop = 0.965;
+    const float detailContrast = 0.55;
+    float scenePeak = max3(sceneLinear);
+    if (scenePeak <= knee || scenePeak <= 0.000001) return sceneLinear;
+
+    float detailStops = clamp(max(bracketStops, 2.0), 2.0, 6.0);
+    float highlightStops = max(log2(scenePeak / knee), 0.0);
+    float mappedPeak;
+    if (highlightStops <= detailStops) {
+        float t = clamp(highlightStops / detailStops, 0.0, 1.0);
+        // Endpoint-anchored S-shape: lower recovered levels separate slightly downward,
+        // upper recovered levels separate upward, and the midpoint is unchanged. This
+        // restores visible local slope for the ceiling gradient/X without lifting the
+        // entire recovered region or creating a scene-global exposure change.
+        float shapedT = t + detailContrast * t * (1.0 - t) * (2.0 * t - 1.0);
+        mappedPeak = knee + (detailTop - knee) * clamp(shapedT, 0.0, 1.0);
+    } else {
+        float tailStops = highlightStops - detailStops;
+        // The shaped detail interval reaches detailTop with derivative (1-c). Match
+        // that derivative into the same asymptotic white tail so no shoulder boundary
+        // or hard ceiling is introduced at the recoverable-bracket limit.
+        float endSlopeScale = max(1.0 - detailContrast, 0.05);
+        float tailStopScale = (1.0 - detailTop) * detailStops
+            / ((detailTop - knee) * endSlopeScale);
+        mappedPeak = detailTop + (1.0 - detailTop)
+            * (1.0 - exp(-tailStops / tailStopScale));
+    }
+    mappedPeak = clamp(mappedPeak, knee, 1.0);
+    return sceneLinear * (mappedPeak / scenePeak);
+}
+// IRIS_V233_SAVED_RECOVERED_HIGHLIGHT_PRESENTATION_END
+
 float linearLuma(vec3 rgb) {
     return dot(rgb, vec3(0.2126, 0.7152, 0.0722));
 }
@@ -1102,7 +1147,8 @@ void main() {
 
         float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
         vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
-        vec3 displayLinear = adaptiveHdrToneMap(bodyToned, ratio, bracketStops);
+        vec3 displayLinear = savedRecoveredHdrToneMap(
+            bodyToned, ratio, bracketStops, shortOwns);
         displayLinear = applyDisplayGamma(displayLinear, displayGamma);
         outColor = vec4(clamp(linearToSrgb(displayLinear), 0.0, 1.0), 1.0);
         // IRIS_V217_REGION_SOURCE_OWNERSHIP_END

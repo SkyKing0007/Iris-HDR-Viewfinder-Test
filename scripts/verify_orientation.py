@@ -32,7 +32,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.32 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.33 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -62,8 +62,57 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.32 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.33 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
+
+
+# V2.33 PRE-MORTEM FREEZE: successful V2.32 fusion/ownership is immutable.
+# hdr_display.frag is allowed to change only around saved-still presentation; these
+# hashes pin the active RAW carrier, all fusion evidence/domain math, topology walk,
+# mode-5 source-selection prefix, and the inherited shared/live HDR transfer exactly.
+def frozen_shader_section(text, start_marker, end_marker):
+    start = text.index(start_marker)
+    end = text.index(end_marker, start) + len(end_marker)
+    return text[start:end]
+
+def frozen_shader_prefix(text, start_marker, end_text):
+    start = text.index(start_marker)
+    end = text.index(end_text, start) + len(end_text)
+    return text[start:end]
+
+def sha_text(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+require(sha_text(frozen_shader_section(
+            hdr_shader,
+            '// IRIS_V232_EXTENDED_LINEAR_RAW_CARRIER_BEGIN',
+            '// IRIS_V232_EXTENDED_LINEAR_RAW_CARRIER_END'))
+        == 'b0877a00a672e447a1dec812fce66ab6e846b2540a5fd8fe5a1d5f45d1739217',
+        'V2.33 must not modify the successful V2.32 extended-linear RAW carrier')
+require(sha_text(frozen_shader_section(
+            hdr_shader,
+            '// IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN',
+            '// IRIS_V217_REVERSED_V215_LONG_TRUTH_END'))
+        == '4e0741c2882ae3c326ee113387bff056eed06f3ebf463866dfc585173f75dcd7',
+        'V2.33 must not modify V2.32 registration/evidence/physical-loss fusion math')
+require(sha_text(frozen_shader_section(
+            hdr_shader,
+            '// IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_BEGIN',
+            '// IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_END'))
+        == '583c1a512bce64bc6573a586d44a4536813766d4256caa62ed96f49bfc0cf633',
+        'V2.33 must not modify V2.32 mode-3/mode-4 topology reconstruction')
+require(sha_text(frozen_shader_prefix(
+            hdr_shader,
+            '    if (mode == 5) {',
+            '        vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;'))
+        == 'b212d64c45a9cafd70b3da2dd4c2d6e6a18d33b028a4ad9fe54ce9e69a6931cf',
+        'V2.33 must not modify V2.32 mode-5 SHORT/LONG source ownership or geometry')
+require(sha_text(frozen_shader_prefix(
+            hdr_shader,
+            'vec3 adaptiveHdrToneMap(',
+            '    return sceneLinear * (mappedPeak / scenePeak);\n}\n'))
+        == '41a5a793e7b7d55e86711669670cca2a0de76925f76651de4a5ba1e57e95def5',
+        'V2.33 must keep the shared/live V2.32 HDR transfer byte-identical')
 
 
 # 015 - Real javac failure from V1.4 must never return.
@@ -734,15 +783,13 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# V2.32 runtime authority is the exact last successful compiler-tested V2.31 V1.1
+# V2.33 runtime authority is the exact last successful compiler-tested V2.32
 # candidate/artifact. V2.28/V2.29 remain behavioral fusion-mechanics references only.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.31-V1.1' in workflow
-        and 'run-id: 34272023077' in workflow
-        and "authority='97f93f5a8f3ab02a30f01df59702a67a40a2b3f5'" in workflow
-        and "authority_tree='aceb5a25936eac0b8f8f9b8c6e5353b9e0dd9cb9'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.31 V1.1 Actions authority")
-require("authority='3d11f41dc4ec6989b925ac117ff86fd49b1b079d'" not in workflow,
-        "V2.32 may not bypass the last successful V2.31 V1.1 compiled-candidate authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.32' in workflow
+        and 'run-id: 34295814090' in workflow
+        and "authority='d106aa22d7a4f3dba5d00098f4243f3fce56082f'" in workflow
+        and "authority_tree='d282094797f2ad19bf7885d4ddae5d2468f8ba86'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.32 Actions authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1896,9 +1943,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 50' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.32"' in build_gradle,
-        "V2.32 version/build marker must be exact")
+require('versionCode = 51' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.33"' in build_gradle,
+        "V2.33 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2284,18 +2331,17 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillRaws(' not in service
         and 'fuseStillRaws(' not in nafnet,
         "V2.30 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.31-V1.1_to_V1.4.11-V2.32.forward.patch' in workflow
-        and 'V1.4.11-V2.32_to_V1.4.11-V2.31-V1.1.rollback.patch' in workflow,
-        "V2.32 final artifact must export correctly named V2.31 V1.1<->V2.32 patches")
-require("authority='97f93f5a8f3ab02a30f01df59702a67a40a2b3f5'" in workflow
-        and "authority_tree='aceb5a25936eac0b8f8f9b8c6e5353b9e0dd9cb9'" in workflow
+require('V1.4.11-V2.32_to_V1.4.11-V2.33.forward.patch' in workflow
+        and 'V1.4.11-V2.33_to_V1.4.11-V2.32.rollback.patch' in workflow,
+        "V2.33 final artifact must export correctly named V2.32<->V2.33 patches")
+require("authority='d106aa22d7a4f3dba5d00098f4243f3fce56082f'" in workflow
+        and "authority_tree='d282094797f2ad19bf7885d4ddae5d2468f8ba86'" in workflow
         and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow,
-        "V2.32 must prove exact successful V2.31 V1.1 parent authority")
-require("if len(tracked) != 33:" in workflow
-        and "V1.4.11 V2.31 V1.1 AUTHORITY REPOSITORY COUNT FAIL" in workflow
-        and "if len(tracked) != 35:" in workflow
+        "V2.33 must prove exact successful V2.32 parent authority")
+require("if len(tracked) != 35:" in workflow
+        and "V1.4.11 V2.32 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.32 must prove the 33-file V2.31 V1.1 authority and exact 35-file candidate universe")
+        "V2.33 must prove the 35-file V2.32 authority and exact 35-file candidate universe")
 
 require('uniform vec2 stillGlobalShortOffsetPixels;' in hdr_shader
         and 'sampleUv + stillGlobalShortOffsetPixels / imageSize' in hdr_shader
@@ -2481,4 +2527,84 @@ for sigma_code in (0, 1, 31, 63, 95, 127):
         require(recovered_saturation == saturation and recovered_sigma == sigma_code,
                 "V2.32 sigma/saturation alpha packing must preserve its explicit physical saturation bit")
 
-print("V1.4.11 V2.32 REGRESSION PASS: exact successful V2.31 V1.1 compiled candidate is runtime authority; RAW-only SHORT/LONG fusion remains authoritative; saved sources stay extended-linear through CFA cleanup, staged green and noise-aware R-G/B-G reconstruction; physical S*signal+O uncertainty cannot masquerade as SHORT detail; V2.31 high-DR acquisition and connected bathroom recovery remain protected; transient sRGB exists only for unchanged JpegFusion registration evidence and final presentation")
+# V2.33 exact device regressions: correctly fused SHORT geometry must not acquire broad
+# magenta/green/yellow chroma, and saved recovered highlights must retain visible local
+# slope for the ceiling gradient/X without changing the successful V2.32 fusion owner.
+require('// IRIS_V233_SATURATION_CHROMA_BOUNDARY_BEGIN' in raw_chroma_shader
+        and 'float saturatedBoundaryRepair = saturationAt(p)' in raw_chroma_shader
+        and 'float periodicBoundaryRepair = (1.0 - saturationAt(p))' in raw_chroma_shader
+        and 'correctedC = mix(correctedC, boundaryC, boundaryRepair);' in raw_chroma_shader
+        and 'outColor = vec4(encodedScene, carrierAt(p).a);' in raw_chroma_shader,
+        "V2.33 chroma repair must use coherent unsaturated boundary hue while preserving center alpha authority")
+require('rgbFromLumaChroma(centerY, correctedC)' in raw_chroma_shader
+        and 'projectNonNegativeAtFixedLuma(correctedRgb, centerY)' in raw_chroma_shader,
+        "V2.33 chroma repair may not move center luminance/detail")
+require('// IRIS_V233_SAVED_RECOVERED_HIGHLIGHT_PRESENTATION_BEGIN' in hdr_shader
+        and 'savedRecoveredHdrToneMap(' in hdr_shader
+        and 'bodyToned, ratio, bracketStops, shortOwns' in hdr_shader
+        and hdr_shader.count('savedRecoveredHdrToneMap(') == 2
+        and hdr_shader.count('adaptiveHdrToneMap(bodyToned, ratio, bracketStops)') == 1,
+        "V2.33 saved highlight transfer must be mode-5 SHORT-owned only; live transfer stays inherited")
+
+# Broad false magenta: physical saturation plus coherent neutral boundary must strongly
+# replace chroma. A truly colored saturated source whose boundary agrees in hue must not.
+def v233_boundary_strength(saturated, excursion_sigma, agreement=1.0, periodic=0.0):
+    sat_repair = saturated * agreement * smoothstep_math(2.5, 7.0, excursion_sigma)
+    periodic_repair = (1.0 - saturated) * periodic * agreement * smoothstep_math(2.5, 6.0, excursion_sigma)
+    return max(sat_repair, periodic_repair)
+require(v233_boundary_strength(1.0, 9.0) > 0.95,
+        "V2.33 broad saturated false-color fixture must accept coherent boundary hue")
+require(v233_boundary_strength(1.0, 0.8) < 0.01,
+        "V2.33 genuinely colored saturated fixture with matching boundary hue must remain unchanged")
+require(v233_boundary_strength(0.0, 9.0, periodic=0.0) == 0.0,
+        "V2.33 unsaturated real colored line cannot be changed without Bayer alternation proof")
+require(v233_boundary_strength(0.0, 9.0, periodic=1.0) > 0.95,
+        "V2.33 unsaturated green/yellow dotted-line fixture must be correctable when Bayer alternation is proven")
+
+# Saved recovered-highlight transfer: pointwise, monotonic, endpoint-anchored and body
+# preserving. It increases separation through the middle recovered-stop interval where
+# the supplied top-reference ceiling shows the gradual radial falloff + clean X reflection.
+def v232_hdr_peak(scene_peak, detail_stops=3.0):
+    knee=0.70; top=0.965
+    if scene_peak <= knee: return scene_peak
+    hs=max(math.log(scene_peak/knee, 2.0), 0.0)
+    if hs <= detail_stops:
+        return knee + (top-knee)*(hs/detail_stops)
+    tail=hs-detail_stops
+    scale=(1.0-top)*detail_stops/(top-knee)
+    return top + (1.0-top)*(1.0-math.exp(-tail/scale))
+
+def v233_hdr_peak(scene_peak, detail_stops=3.0):
+    knee=0.70; top=0.965; contrast=0.55
+    if scene_peak <= knee: return scene_peak
+    hs=max(math.log(scene_peak/knee, 2.0), 0.0)
+    if hs <= detail_stops:
+        t=max(0.0,min(1.0,hs/detail_stops))
+        shaped=t + contrast*t*(1.0-t)*(2.0*t-1.0)
+        return knee + (top-knee)*max(0.0,min(1.0,shaped))
+    tail=hs-detail_stops
+    end=max(1.0-contrast,0.05)
+    scale=(1.0-top)*detail_stops/((top-knee)*end)
+    return top + (1.0-top)*(1.0-math.exp(-tail/scale))
+
+for x in (0.0,0.1,0.35,0.69,0.70):
+    require(abs(v233_hdr_peak(x)-x) < 1e-12,
+            "V2.33 saved highlight transfer must be identity through the protected body/knee")
+prev=-1.0
+for i in range(1,5001):
+    x=0.70*math.exp(math.log(64.0/0.70)*i/5000.0)
+    y=v233_hdr_peak(x)
+    require(y + 1e-12 >= prev,
+            "V2.33 saved recovered-highlight transfer must remain strictly monotonic/non-reversing")
+    prev=y
+old_sep=v232_hdr_peak(1.8)-v232_hdr_peak(1.2)
+new_sep=v233_hdr_peak(1.8)-v233_hdr_peak(1.2)
+require(new_sep > 1.15*old_sep,
+        "V2.33 ceiling/X fixture must retain materially more visible local highlight separation than V2.32")
+mid_scene=0.70*(2.0**1.5)
+require(abs(v233_hdr_peak(mid_scene)-v232_hdr_peak(mid_scene)) < 1e-12,
+        "V2.33 endpoint-anchored contrast shape must not globally lift the recovered-highlight midpoint")
+require(v233_hdr_peak(64.0) < 1.0 and v233_hdr_peak(64.0) > 0.99,
+        "V2.33 extreme specular tail must remain bounded and asymptotic rather than hard-clipped")
+
+print("V1.4.11 V2.33 REGRESSION PASS: successful V2.32 fusion/registration/topology/source ownership is frozen; only chroma reliability and saved SHORT-owned highlight presentation may change; center luminance/sigma/saturation authority remains intact; live HDR transfer is byte-identical")

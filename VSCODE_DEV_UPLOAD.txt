@@ -1,15 +1,15 @@
-V1.4.11 V2.32 — SAFE EASY FLAT VSCODE.DEV HANDOFF
+V1.4.11 V2.33 — SAFE EASY FLAT VSCODE.DEV HANDOFF
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required parent: 97f93f5a8f3ab02a30f01df59702a67a40a2b3f5 (successful V2.31 V1.1)
-Successful compiled authority: Actions 34272023077 / artifact 10074269678
+Required parent: d106aa22d7a4f3dba5d00098f4243f3fce56082f (successful V2.32)
+Successful compiled authority: Actions 34295814090 / artifact 10083118010
 
 HANDOFF RULE
-This ZIP is FLAT, matching the V2.31 V1.1 delivery style that worked in vscode.dev.
+This ZIP is FLAT, matching the V2.32 / V2.31 V1.1 delivery style that worked in vscode.dev.
 Do NOT drag app/, scripts/, .github/, or a complete candidate tree over the repository.
 Replace only these individual files in their exact destinations.
 
-UPLOAD THESE 16 FILES
+UPLOAD THESE 10 FILES
 
 1. build.yml
    -> .github/workflows/build.yml
@@ -29,30 +29,20 @@ UPLOAD THESE 16 FILES
    -> app/src/main/assets/shaders/hdr_display.frag
 9. raw_chroma_dealias.frag
    -> app/src/main/assets/shaders/raw_chroma_dealias.frag
-10. raw_green.frag
-    -> app/src/main/assets/shaders/raw_green.frag (NEW)
-11. raw_preprocess.frag
-    -> app/src/main/assets/shaders/raw_preprocess.frag
-12. raw_proxy.frag
-    -> app/src/main/assets/shaders/raw_proxy.frag (NEW)
-13. raw_reconstruct.frag
-    -> app/src/main/assets/shaders/raw_reconstruct.frag
-14. HdrGlView.java
-    -> app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
-15. RawFusion.java
-    -> app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java
-16. verify_orientation.py
+10. verify_orientation.py
     -> scripts/verify_orientation.py
 
 BEFORE COMMIT
-Source Control must show exactly 16 changes:
-- 14 [M]
-- 2 [A]: raw_green.frag and raw_proxy.frag
+Source Control must show exactly 10 changes:
+- 10 [M]
+- 0 [A]
 - 0 [D]
 
-CameraController.java, JpegFusion.java, CaptureSetSaver.java, NafNetDenoiser.java, the NAFNet model/license, AndroidManifest.xml and all other protected runtime files must NOT appear in Source Control.
+CameraController.java, HdrGlView.java, RawFusion.java, JpegFusion.java, CaptureSetSaver.java,
+raw_preprocess.frag, raw_green.frag, raw_reconstruct.frag, raw_proxy.frag, NafNetDenoiser.java,
+the NAFNet model/license, AndroidManifest.xml and all other protected runtime files must NOT appear.
 
 Suggested commit message:
-V1.4.11 V2.32 noise-aware extended-linear RAW CFA fusion
+V1.4.11 V2.33 protect fusion and correct highlight chroma presentation
 
 GitHub Actions remains authoritative for pinned real GLSL, real Java and full :app:assembleDebug.
