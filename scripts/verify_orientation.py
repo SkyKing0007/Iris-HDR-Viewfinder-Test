@@ -2400,8 +2400,17 @@ require('V1.4.11-V2.35_to_V1.4.11-V2.36.forward.patch' in workflow
         "V2.36 final artifact must export correctly named V2.35<->V2.36 patches")
 require("authority='265e2ace3212e559f5020c62354875b4853ce2fe'" in workflow
         and "authority_tree='acc4948b05fc7d60dc5246f6d3dcafb50f3331ba'" in workflow
-        and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow,
-        "V2.36 must prove exact successful V2.35 parent authority")
+        and "failed_v236='6ecefdaf1a76f9bc2798adf54d70478e890c3607'" in workflow
+        and "failed_v236_tree='47d89d400d20b8520779f07ba47bb23eabd28950'" in workflow
+        and 'test "$(git rev-parse HEAD^)" = "$failed_v236"' in workflow
+        and 'test "$(git rev-parse HEAD^^)" = "$authority"' in workflow
+        and 'test "$(git rev-parse "$failed_v236^")" = "$authority"' in workflow,
+        "V2.36 R1 must prove failed V2.36 parent and exact successful V2.35 grandparent authority")
+require("authority = '265e2ace3212e559f5020c62354875b4853ce2fe'" in workflow
+        and "authority = '3ff48aa5ed36d2a758d1d812fd616d9dc2af72e5'" not in workflow,
+        "V2.36 R1 changed-file allowlist must compare against successful V2.35, never stale V2.34")
+require('273 - Exact V2.36 R1 allowlist regression:' in workflow,
+        "V2.36 R1 exact stale-allowlist-authority failure must remain a permanent regression")
 require("if len(tracked) != 35:" in workflow
         and "V1.4.11 V2.35 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,

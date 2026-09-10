@@ -1,6 +1,9 @@
 IRIS HDR VIEWFINDER TEST V1.4.11 V2.36 — FULL V2.35 ARTIFACT CORRECTION
 
 STATUS
+
+V2.36 R1 INFRASTRUCTURE REPAIR
+The first V2.36 Actions attempt stopped before compilers because one embedded changed-file allowlist block compared HEAD against stale V2.34 commit 3ff48aa5... instead of successful V2.35 commit 265e2ace.... The V2.36 runtime candidate itself is unchanged. R1 corrects only that authority identity, proves the failed V2.36 commit 6ecefdaf... is the direct child of successful V2.35, and adds the exact failure as a permanent verifier regression. Compiler/build/patch/assemble/invariance ordering is unchanged.
 PREPARED / UPLOAD-READY only after final clean-extract replay passes.
 NOT BUILD-PROVEN until GitHub Actions runs the pinned real GLSL compiler, real project Java compiler and full :app:assembleDebug.
 No backup requested or created. No source commit or push is performed by this handoff preparation.

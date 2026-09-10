@@ -1,53 +1,32 @@
-V1.4.11 V2.36 — SAFE EASY FLAT VSCODE.DEV HANDOFF
+V1.4.11 V2.36 R1 — STALE ALLOWLIST AUTHORITY REPAIR
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required parent: 265e2ace3212e559f5020c62354875b4853ce2fe (successful V2.35)
-Successful compiled authority: Actions 34358340770 / artifact 10106804351
+Required current parent: 6ecefdaf1a76f9bc2798adf54d70478e890c3607 (failed V2.36 allowlist-only attempt)
+Successful runtime authority remains: V2.35 commit 265e2ace3212e559f5020c62354875b4853ce2fe / Actions 34358340770 / artifact 10106804351
 
-HANDOFF RULE
-This ZIP is FLAT, matching the successful V2.35 / V2.34 delivery style in vscode.dev.
-Do NOT drag app/, scripts/, .github/, or a complete candidate tree over the repository.
-Replace only these individual files in their exact destinations.
+THIS IS INFRASTRUCTURE-ONLY.
+Do NOT replace any runtime shader/Java file. The V2.36 runtime bytes already committed in 6ecefdaf... remain unchanged.
 
-UPLOAD THESE 12 FILES
+UPLOAD THESE 6 FLAT FILES
 
 1. build.yml
    -> .github/workflows/build.yml
 2. BUILD_WORKFLOW_COPY.yml
-   -> BUILD_WORKFLOW_COPY.yml (repository root)
+   -> BUILD_WORKFLOW_COPY.yml
 3. PACKAGE_INFO.txt
-   -> PACKAGE_INFO.txt (repository root)
+   -> PACKAGE_INFO.txt
 4. PACKAGE_MANIFEST_SHA256.txt
-   -> PACKAGE_MANIFEST_SHA256.txt (repository root)
-5. README.md
-   -> README.md (repository root)
-6. VSCODE_DEV_UPLOAD.txt
-   -> VSCODE_DEV_UPLOAD.txt (repository root)
-7. app_build.gradle.kts
-   -> app/build.gradle.kts
-8. raw_chroma_dealias.frag
-   -> app/src/main/assets/shaders/raw_chroma_dealias.frag
-9. raw_green.frag
-   -> app/src/main/assets/shaders/raw_green.frag
-10. raw_reconstruct.frag
-    -> app/src/main/assets/shaders/raw_reconstruct.frag
-11. CameraController.java
-    -> app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-12. verify_orientation.py
-    -> scripts/verify_orientation.py
+   -> PACKAGE_MANIFEST_SHA256.txt
+5. VSCODE_DEV_UPLOAD.txt
+   -> VSCODE_DEV_UPLOAD.txt
+6. verify_orientation.py
+   -> scripts/verify_orientation.py
 
 BEFORE COMMIT
-Source Control must show exactly 12 changes:
-- 12 [M]
-- 0 [A]
-- 0 [D]
-
-HdrGlView.java, JpegFusion.java, RawFusion.java, hdr_display.frag, raw_preprocess.frag,
-raw_proxy.frag, NafNetDenoiser.java, CaptureSetSaver.java, FrameMeta.java,
-HdrProcessingService.java, MainActivity.java, MediaStoreWriter.java, AndroidManifest.xml,
-the NAFNet model/license and all other protected runtime files must NOT appear.
+Source Control must show exactly 6 modified files and no added/deleted files.
+No app/src/** file may appear.
 
 Suggested commit message:
-V1.4.11 V2.36 complete CFA edge correction and neutral AUTO presentation
+V1.4.11 V2.36 R1 repair stale allowlist authority
 
 GitHub Actions remains authoritative for pinned real GLSL, real Java and full :app:assembleDebug.

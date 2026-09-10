@@ -48,7 +48,12 @@ jobs:
 
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'experiment-v1.4.11-v2-brightness-4ev'
-          test "$(git rev-parse HEAD^)" = "$authority"
+          failed_v236='6ecefdaf1a76f9bc2798adf54d70478e890c3607'
+          failed_v236_tree='47d89d400d20b8520779f07ba47bb23eabd28950'
+          test "$(git rev-parse HEAD^)" = "$failed_v236"
+          test "$(git rev-parse HEAD^^)" = "$authority"
+          test "$(git rev-parse "$failed_v236^{tree}")" = "$failed_v236_tree"
+          test "$(git rev-parse "$failed_v236^")" = "$authority"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
           grep -Fq 'versionCode = 54' app/build.gradle.kts
@@ -135,7 +140,7 @@ jobs:
           from pathlib import Path
           import hashlib, subprocess
 
-          authority = '3ff48aa5ed36d2a758d1d812fd616d9dc2af72e5'
+          authority = '265e2ace3212e559f5020c62354875b4853ce2fe'
           expected_changes = {
               '.github/workflows/build.yml': 'M',
               'BUILD_WORKFLOW_COPY.yml': 'M',
@@ -749,6 +754,7 @@ jobs:
           270 - V2.36 raw_chroma_dealias may perform only local sigma-normalized luminance-preserving alias cleanup; the V2.33 distant +/-4..10 boundary hue donor and any competing post-RGB highlight chroma authority are forbidden.
           271 - V2.36 AUTO brightness remains scene-adaptive and retains physical SHORT/LONG exposure ownership; presentation may choose negative EV/gamma as needed but may not exceed +0.0 EV or gamma 1.65. No restaurant/Costco or other cross-scene histogram target is encoded.
           272 - V2.36 must not change successful V2.35 registration, fusion, SHORT/LONG source ownership, acquisition, DNG, NAFNet, GPU allocation/lifetime, or saved highlight transfer while repairing CFA/presentation artifacts.
+          273 - Exact V2.36 R1 allowlist regression: every V2.35-to-V2.36 changed-file comparison must use successful V2.35 commit 265e2ace3212e559f5020c62354875b4853ce2fe; stale V2.34 commit 3ff48aa5ed36d2a758d1d812fd616d9dc2af72e5 is forbidden as the active allowlist base.
           REGRESSIONS
           sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.36-debug.apk \
                     output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.36-source-candidate.tar \
