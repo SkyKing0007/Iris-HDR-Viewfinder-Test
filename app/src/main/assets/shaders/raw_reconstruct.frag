@@ -47,6 +47,17 @@ int colorAt(ivec2 p) {
     return 1;
 }
 
+float greenGain() {
+    return max(0.5 * (wbGains.y + wbGains.z), 0.000001);
+}
+
+float calculationWbForColor(int color) {
+    float g = greenGain();
+    if (color == 0) return wbGains.x / g;
+    if (color == 2) return wbGains.w / g;
+    return 1.0;
+}
+
 ivec2 clampPixel(ivec2 p) {
     ivec2 size = textureSize(packedRawTex, 0);
     return clamp(p, ivec2(0), size - ivec2(1));
@@ -148,6 +159,33 @@ float quadHighlightAt(ivec2 p) {
     return highlighted;
 }
 
+float quadCensoredFractionAt(ivec2 base) {
+    ivec2 q = ivec2(base.x & ~1, base.y & ~1);
+    float count = 0.0;
+    for (int oy = 0; oy < 2; ++oy) {
+        for (int ox = 0; ox < 2; ++ox) {
+            count += rawSaturationAt(q + ivec2(ox, oy));
+        }
+    }
+    return 0.25 * count;
+}
+
+float smoothCensoredFractionAt(ivec2 p) {
+    // IRIS_V236_PHASE_INVARIANT_CENSORED_ROLLOFF:
+    // Keep the strict Claude 2x2 gate binary for opponent permission. Only the
+    // terminal neutral fallback is bilinearly expanded so a packed CFA decision
+    // cannot print a hard 2x2 staircase into the final RGB image.
+    vec2 quadPos = 0.5 * vec2(p) - vec2(0.5);
+    ivec2 loQuad = 2 * ivec2(floor(quadPos));
+    ivec2 hiQuad = loQuad + ivec2(2);
+    vec2 f = fract(quadPos);
+    float a = quadCensoredFractionAt(loQuad);
+    float b = quadCensoredFractionAt(ivec2(hiQuad.x, loQuad.y));
+    float c = quadCensoredFractionAt(ivec2(loQuad.x, hiQuad.y));
+    float d = quadCensoredFractionAt(hiQuad);
+    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 // x=opponent difference, y=sigma, z=absolute validity.  There is deliberately no
 // support/green ratio here: Claude correction item 2 forbids confidence increasing
 // when green support collapses.  Later interpolation requires an absolute count of
@@ -156,11 +194,18 @@ vec3 colorDifferenceAt(ivec2 p) {
     ivec2 q = clampPixel(p);
     vec3 colorValue = rawMeasurementAt(q);
     vec3 greenValue = greenAt(q);
+    float calculationGain = calculationWbForColor(colorAt(q));
+    float calculationColor = colorValue.x * calculationGain;
+    float calculationSigma = colorValue.y * abs(calculationGain);
     float commonQuadValid = 1.0 - quadHighlightAt(q);
     float valid = (1.0 - colorValue.z) * commonQuadValid;
+    // IRIS_V236_CALCULATION_WB_OPPONENT_DOMAIN:
+    // Form R-G/B-G only after calculation WB, exactly like the old-Iris guide
+    // Claude analyzed. This prevents WB from magnifying green interpolation error
+    // into cyan/yellow edge color.
     return vec3(
-        colorValue.x - greenValue.x,
-        sqrt(colorValue.y * colorValue.y + greenValue.y * greenValue.y),
+        calculationColor - greenValue.x,
+        sqrt(calculationSigma * calculationSigma + greenValue.y * greenValue.y),
         valid);
 }
 // IRIS_V235_CLAUDE_COMMON_QUAD_CLIP_AUTHORITY_END
@@ -231,11 +276,14 @@ void demosaicSensorBase(
 
     if (centerColor == 0) {
         vec3 redValue = rawMeasurementAt(q);
+        float redGain = calculationWbForColor(0);
+        float red = redValue.x * redGain;
+        float redSigma = redValue.y * abs(redGain);
         vec3 blueDifference = diagonalDifference(q);
         float blue = greenValue.x + blueDifference.x;
-        sensorRgb = vec3(redValue.x, greenValue.x, blue);
+        sensorRgb = vec3(red, greenValue.x, blue);
         sensorSigma = vec3(
-            redValue.y,
+            redSigma,
             greenValue.y,
             sqrt(greenValue.y * greenValue.y + blueDifference.y * blueDifference.y));
         sensorValid = vec3(
@@ -246,13 +294,16 @@ void demosaicSensorBase(
     }
     if (centerColor == 2) {
         vec3 blueValue = rawMeasurementAt(q);
+        float blueGain = calculationWbForColor(2);
+        float blue = blueValue.x * blueGain;
+        float blueSigma = blueValue.y * abs(blueGain);
         vec3 redDifference = diagonalDifference(q);
         float red = greenValue.x + redDifference.x;
-        sensorRgb = vec3(red, greenValue.x, blueValue.x);
+        sensorRgb = vec3(red, greenValue.x, blue);
         sensorSigma = vec3(
             sqrt(greenValue.y * greenValue.y + redDifference.y * redDifference.y),
             greenValue.y,
-            blueValue.y);
+            blueSigma);
         sensorValid = vec3(
             greenValid * redDifference.z,
             greenValid,
@@ -339,24 +390,31 @@ void main() {
     demosaicSensorBase(p, sensorRgb, sensorSigma, sensorValid);
     sensorRgb = max(sensorRgb, vec3(0.0));
 
-    float greenGain = 0.5 * (wbGains.y + wbGains.z);
-    vec3 balanceGains = vec3(wbGains.x, greenGain, wbGains.w);
-    vec3 balancedRgb = sensorRgb * balanceGains;
-    vec3 balancedSigma = sensorSigma * abs(balanceGains);
+    // raw_green + opponent reconstruction are now entirely in calculation-WB
+    // coordinates (green normalized to 1). Restore Camera2's absolute common green
+    // scale exactly once before the unchanged sensor->linear-sRGB transform.
+    float commonGreenGain = greenGain();
+    vec3 balanceGains = vec3(wbGains.x, commonGreenGain, wbGains.w);
+    vec3 balancedRgb = sensorRgb * commonGreenGain;
+    vec3 balancedSigma = sensorSigma * abs(commonGreenGain);
 
-    // Claude correction items 1-2: if common-quad rejection leaves any required
-    // color axis without absolute support, use the existing conservative neutral
-    // terminal state.  Do not borrow boundary chromaticity and do not desaturate a
-    // later RGB result to hide an upstream opponent error.
-    float completeColorSupport = min(sensorValid.r, min(sensorValid.g, sensorValid.b));
-    if (completeColorSupport < 0.5) {
+    // Keep Claude's strict common-quad rejection as the COLOR authority. Do not
+    // turn that binary Bayer permission bit into a hard 2x2 RGB block: smoothly
+    // expand only the physical censored fraction for the terminal neutral fallback.
+    float censoredFraction = smoothCensoredFractionAt(p);
+    float neutralMix = smoothstep(0.0, 0.75, censoredFraction);
+    if (neutralMix > 0.0) {
         float neutral = max(
             neutralFallbackBalanced(p, balanceGains),
             balancedRgb.g);
-        balancedRgb = vec3(max(neutral, 0.0));
+        vec3 neutralRgb = vec3(max(neutral, 0.0));
+        balancedRgb = mix(balancedRgb, neutralRgb, neutralMix);
         float fallbackSigma = max(
             balancedSigma.r, max(balancedSigma.g, balancedSigma.b));
-        balancedSigma = vec3(max(fallbackSigma, 0.000001));
+        balancedSigma = mix(
+            balancedSigma,
+            vec3(max(fallbackSigma, 0.000001)),
+            neutralMix);
     }
 
     vec3 linearRgb = vec3(

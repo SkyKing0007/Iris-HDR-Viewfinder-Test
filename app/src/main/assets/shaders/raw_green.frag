@@ -183,17 +183,58 @@ float highlightCalculationSample(ivec2 p) {
 }
 // IRIS_V235_CLAUDE_EXACT_HIGHLIGHT_CALCULATION_SAMPLE_END
 
-// Keep the successful pre-hybrid Viewfinder edge weighting outside clipped regions.
-// Claude explicitly allowed porting highlightCalculationSample into the existing guide;
-// this avoids changing ordinary unsaturated CFA geometry while making clipped green
-// use the exact opposed-channel reconstruction instead of V2.34's wide donor search.
+// IRIS_V236_CALCULATION_WB_EDGE_GREEN_BEGIN
+// V2.35 proved the Claude highlight calculation on-device but left ordinary
+// Viewfinder green interpolation in place. The old-Iris guide that Claude
+// analyzed reconstructs green in the SAME calculation-WB domain as opponent
+// samples. Port that exact edge geometry here: +/-1 green observations, +/-2
+// same-phase curvature, directional second-order correction, gradient selection,
+// and final clamping to the immediate green envelope.
+float edgeGreen(ivec2 p, float center) {
+    float gL = highlightCalculationSample(p + ivec2(-1, 0));
+    float gR = highlightCalculationSample(p + ivec2(1, 0));
+    float gU = highlightCalculationSample(p + ivec2(0, -1));
+    float gD = highlightCalculationSample(p + ivec2(0, 1));
+    float cL2 = highlightCalculationSample(p + ivec2(-2, 0));
+    float cR2 = highlightCalculationSample(p + ivec2(2, 0));
+    float cU2 = highlightCalculationSample(p + ivec2(0, -2));
+    float cD2 = highlightCalculationSample(p + ivec2(0, 2));
+
+    float hLin = 0.5 * (gL + gR);
+    float vLin = 0.5 * (gU + gD);
+    float hCorr = clamp(
+        0.25 * (2.0 * center - cL2 - cR2),
+        -0.5 * abs(gL - gR),
+        0.5 * abs(gL - gR));
+    float vCorr = clamp(
+        0.25 * (2.0 * center - cU2 - cD2),
+        -0.5 * abs(gU - gD),
+        0.5 * abs(gU - gD));
+    float h = hLin + hCorr;
+    float v = vLin + vCorr;
+    float gh = abs(gL - gR) + abs(2.0 * center - cL2 - cR2);
+    float gv = abs(gU - gD) + abs(2.0 * center - cU2 - cD2);
+    float blendH = gv / max(gh + gv, 0.0000001);
+    float green = mix(v, h, blendH);
+    return clamp(
+        green,
+        min(min(gL, gR), min(gU, gD)),
+        max(max(gL, gR), max(gU, gD)));
+}
+
 vec2 greenAt(ivec2 p) {
-    ivec2 q = clampPixel(p);
+    ivec2 q = phaseClamp(p);
+    vec3 directValue = rawMeasurementAt(q);
+    float center = highlightCalculationSample(q);
     if (colorAt(q) == 1) {
-        vec3 directValue = rawMeasurementAt(q);
-        return vec2(highlightCalculationSample(q), max(directValue.y, 0.000001));
+        return vec2(center, max(directValue.y, 0.000001));
     }
 
+    float green = edgeGreen(q, center);
+
+    // The old guide is scalar. Keep Viewfinder's existing physical-noise carrier
+    // semantics only for sigma: derive uncertainty from the same immediate green
+    // observations without changing edgeGreen's reconstructed value.
     ivec2 pL = phaseClamp(q + ivec2(-1, 0));
     ivec2 pR = phaseClamp(q + ivec2(1, 0));
     ivec2 pU = phaseClamp(q + ivec2(0, -1));
@@ -202,38 +243,30 @@ vec2 greenAt(ivec2 p) {
     vec3 rightRaw = rawMeasurementAt(pR);
     vec3 upRaw = rawMeasurementAt(pU);
     vec3 downRaw = rawMeasurementAt(pD);
-    float leftValue = highlightCalculationSample(pL);
-    float rightValue = highlightCalculationSample(pR);
-    float upValue = highlightCalculationSample(pU);
-    float downValue = highlightCalculationSample(pD);
-
-    float horizontal = 0.5 * (leftValue + rightValue);
-    float vertical = 0.5 * (upValue + downValue);
     float horizontalSigma = 0.5 * sqrt(
         leftRaw.y * leftRaw.y + rightRaw.y * rightRaw.y);
     float verticalSigma = 0.5 * sqrt(
         upRaw.y * upRaw.y + downRaw.y * downRaw.y);
-
     float horizontalNoise = sqrt(
         leftRaw.y * leftRaw.y + rightRaw.y * rightRaw.y + 0.00000001);
     float verticalNoise = sqrt(
         upRaw.y * upRaw.y + downRaw.y * downRaw.y + 0.00000001);
-    float horizontalGradient = abs(leftValue - rightValue)
-        / max(horizontalNoise, 0.00010);
-    float verticalGradient = abs(upValue - downValue)
-        / max(verticalNoise, 0.00010);
-
+    float gL = highlightCalculationSample(pL);
+    float gR = highlightCalculationSample(pR);
+    float gU = highlightCalculationSample(pU);
+    float gD = highlightCalculationSample(pD);
+    float horizontalGradient = abs(gL - gR) / max(horizontalNoise, 0.00010);
+    float verticalGradient = abs(gU - gD) / max(verticalNoise, 0.00010);
     float horizontalWeight = 1.0 / (1.0 + horizontalGradient * horizontalGradient);
     float verticalWeight = 1.0 / (1.0 + verticalGradient * verticalGradient);
     float weightSum = horizontalWeight + verticalWeight;
-    float green = (horizontal * horizontalWeight + vertical * verticalWeight)
-        / max(weightSum, 0.000001);
     float greenSigma = sqrt(
         horizontalWeight * horizontalWeight * horizontalSigma * horizontalSigma
         + verticalWeight * verticalWeight * verticalSigma * verticalSigma)
         / max(weightSum, 0.000001);
     return vec2(max(green, 0.0), max(greenSigma, 0.000001));
 }
+// IRIS_V236_CALCULATION_WB_EDGE_GREEN_END
 
 vec2 pack16(float encoded) {
     float code = min(PACK_MAX_CODE, floor(clamp(encoded, 0.0, 1.0) * PACK_DENOM + 0.5));

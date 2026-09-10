@@ -134,9 +134,9 @@ final class CameraController {
     private static final double AUTO_SHORT_SCALE_MIN = 0.25;
     private static final double AUTO_SHORT_SCALE_MAX = 4.0;
     private static final float AUTO_PRESENT_BRIGHTNESS_MIN_EV = -4.00f;
-    private static final float AUTO_PRESENT_BRIGHTNESS_MAX_EV = 1.00f;
+    private static final float AUTO_PRESENT_BRIGHTNESS_MAX_EV = 0.00f;
     private static final float AUTO_PRESENT_GAMMA_MIN = 0.50f;
-    private static final float AUTO_PRESENT_GAMMA_MAX = 2.00f;
+    private static final float AUTO_PRESENT_GAMMA_MAX = 1.65f;
     private static final float AUTO_PRESENT_BRIGHTNESS_STEP_EV = 0.08f;
     private static final float AUTO_PRESENT_GAMMA_STEP = 0.025f;
     private static final int AUTO_PRESENT_STABLE_PAIRS = 3;
@@ -2111,10 +2111,14 @@ final class CameraController {
             // V2.27 SNR-aware presentation: when physical body evidence is weak or
             // high-ISO, AUTO may not disguise that acquisition deficit with the old
             // +1EV/gamma2 software rescue. A clean scene keeps the full V2.26 search.
-            float maxAutoBrightnessEv = lerpFloat(
-                    AUTO_PRESENT_BRIGHTNESS_MAX_EV, 0.45f, autoNoisePressure);
-            float maxAutoGamma = lerpFloat(
-                    AUTO_PRESENT_GAMMA_MAX, 1.80f, autoNoisePressure);
+            // IRIS_V236_AUTO_NEUTRAL_PRESENTATION_POLICY:
+            // AUTO remains scene-adaptive and keeps its physical SHORT/LONG capture
+            // exposure for SNR, but presentation may not manufacture positive EV
+            // rescue beyond Manual's neutral +0.0 EV family or exceed gamma 1.65.
+            // These are ceilings, not cross-scene histogram targets: the optimizer
+            // may still choose darker values for whatever scene AUTO is viewing.
+            float maxAutoBrightnessEv = AUTO_PRESENT_BRIGHTNESS_MAX_EV;
+            float maxAutoGamma = AUTO_PRESENT_GAMMA_MAX;
             float maxMedianDigitalLiftEv = lerpFloat(
                     5.00f, 3.60f, autoNoisePressure);
             for (float candidateBrightness = AUTO_PRESENT_BRIGHTNESS_MIN_EV;

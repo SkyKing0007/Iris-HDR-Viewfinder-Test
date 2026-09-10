@@ -32,7 +32,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.35 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.36 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -62,7 +62,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.35 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.36 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -122,9 +122,25 @@ require(sha_text(normalized_v235_hdrgl(gl))
 require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java').read_bytes()).hexdigest()
         == '569754e8043928cf86b1f1d34f2ad6b2885e3bf7948789725d4c2092129d4782',
         'V2.34 must not modify V2.33 JpegFusion registration mechanics')
-require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java').read_bytes()).hexdigest()
-        == '601c188cbc662b7ccba26a559e5db24ca421f56329009e026c4bd00232faa28e',
-        'V2.34 must not modify V2.33 acquisition/exposure policy')
+def normalized_v236_camera(text):
+    text = re.sub(
+        r'private static final float AUTO_PRESENT_BRIGHTNESS_MAX_EV = [-0-9.]+f;',
+        'private static final float AUTO_PRESENT_BRIGHTNESS_MAX_EV = __V236__;',
+        text, count=1)
+    text = re.sub(
+        r'private static final float AUTO_PRESENT_GAMMA_MAX = [-0-9.]+f;',
+        'private static final float AUTO_PRESENT_GAMMA_MAX = __V236__;',
+        text, count=1)
+    marker = text.find('            // IRIS_V236_AUTO_NEUTRAL_PRESENTATION_POLICY:')
+    statement = text.find('            float maxAutoBrightnessEv =')
+    start = marker if marker >= 0 and (statement < 0 or marker < statement) else statement
+    end = text.find('            float maxMedianDigitalLiftEv', start)
+    require(start >= 0 and end >= 0, 'V2.36 AUTO presentation normalization anchors missing')
+    return text[:start] + '            __IRIS_V236_AUTO_LIMIT_BLOCK__\n' + text[end:]
+
+require(sha_text(normalized_v236_camera(camera))
+        == 'd529dfa781673781d7bc843d3028a22a1bdc2c467114d473c63179330f2c365e',
+        'V2.36 may change only the agreed AUTO presentation ceilings/block inside successful V2.35 CameraController; capture/exposure/flicker ownership is frozen')
 require(hashlib.sha256((ROOT / 'app/src/main/assets/shaders/raw_preprocess.frag').read_bytes()).hexdigest()
         == '87f11cdd5f678977648cefadd181d21813c3bf23ee1107a3688772a4d46a3982',
         'V2.34 must not modify V2.33 black/white/lens-shading/noise RAW preprocess owner')
@@ -798,13 +814,13 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# V2.35 runtime authority is the exact last successful compiler-tested V2.34
+# V2.36 runtime authority is the exact last successful compiler-tested V2.35
 # candidate/artifact. Older versions remain behavioral/reference evidence only.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.34' in workflow
-        and 'run-id: 34312591458' in workflow
-        and "authority='3ff48aa5ed36d2a758d1d812fd616d9dc2af72e5'" in workflow
-        and "authority_tree='36238f6c4b4ec1f00757fefa1081d6d26c30dcd8'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.34 Actions authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.35' in workflow
+        and 'run-id: 34358340770' in workflow
+        and "authority='265e2ace3212e559f5020c62354875b4853ce2fe'" in workflow
+        and "authority_tree='acc4948b05fc7d60dc5246f6d3dcafb50f3331ba'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.35 Actions authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1213,12 +1229,11 @@ require(noise_pressure_math(0.004389, 0.007613, 400) > 0.95,
 require(noise_pressure_math(0.015, 0.065, 50) < 0.01,
         "clean target-level body at min ISO must not be falsely noise-limited")
 require('autoPresentationNoisePressureLocked(stats)' in camera
-        and 'float maxAutoBrightnessEv = lerpFloat(' in camera
-        and 'AUTO_PRESENT_BRIGHTNESS_MAX_EV, 0.45f, autoNoisePressure' in camera
-        and 'float maxAutoGamma = lerpFloat(' in camera
-        and 'AUTO_PRESENT_GAMMA_MAX, 1.80f, autoNoisePressure' in camera
+        and 'IRIS_V236_AUTO_NEUTRAL_PRESENTATION_POLICY' in camera
+        and 'float maxAutoBrightnessEv = AUTO_PRESENT_BRIGHTNESS_MAX_EV;' in camera
+        and 'float maxAutoGamma = AUTO_PRESENT_GAMMA_MAX;' in camera
         and '3.00f * excessLiftEv * excessLiftEv' in camera,
-        "V2.27 SNR-aware AUTO presentation restraints missing")
+        "V2.36 must preserve scene/SNR-aware AUTO optimization while forbidding noise-dependent positive rescue")
 require('targetBrightness = Math.min(targetBrightness, 0.15f);' not in camera
         and 'targetGamma = Math.min(targetGamma, 1.20f);' not in camera,
         "obsolete collapsed-bracket failure rule must not punish intentional low-DR 1x pairs")
@@ -1240,9 +1255,9 @@ require(math.isclose(live_step(+0.05), 0.0) and math.isclose(live_step(-0.05), 0
 # unchanged but AUTO now closes the loop on P10/P25/P50/P90 rather than two anchors.
 require('private void updateAdaptivePresentationLocked(' in camera
         and 'AUTO_PRESENT_BRIGHTNESS_MIN_EV = -4.00f' in camera
-        and 'AUTO_PRESENT_BRIGHTNESS_MAX_EV = 1.00f' in camera
+        and 'AUTO_PRESENT_BRIGHTNESS_MAX_EV = 0.00f' in camera
         and 'AUTO_PRESENT_GAMMA_MIN = 0.50f' in camera
-        and 'AUTO_PRESENT_GAMMA_MAX = 2.00f' in camera
+        and 'AUTO_PRESENT_GAMMA_MAX = 1.65f' in camera
         and 'float highlightPressure = Math.max(' in camera
         and 'float contrastCeiling = lerpFloat(2.00f, 2.60f, highlightPressure);' in camera
         and 'float sourceP10Ratio = clampFloat(' in camera
@@ -1252,7 +1267,7 @@ require('private void updateAdaptivePresentationLocked(' in camera
         and 'float predictedP25 = predictAutoPresentedLuma(' in camera
         and 'float predictedMedian = predictAutoPresentedLuma(' in camera
         and 'float predictedP90 = predictAutoPresentedLuma(' in camera,
-        "V2.21 four-anchor AUTO scene-key solver missing")
+        "V2.36 four-anchor AUTO scene-key solver / neutral presentation ceilings missing")
 require('float targetP90 = lerpFloat(0.024f, 0.020f, highlightPressure);' not in camera
         and '0.029f, 0.023f' not in camera,
         "V2.18 dark MANUAL-calibrated final-render targets survived")
@@ -1436,6 +1451,9 @@ require('String rawChromaDealiasShader = loadAsset(context, "shaders/raw_chroma_
         and 'float sigmaAt(ivec2 p)' in raw_chroma_shader
         and 'normalizedChromaExcursion' in raw_chroma_shader
         and 'periodicAlias' in raw_chroma_shader
+        and 'IRIS_V236_SINGLE_CHROMA_AUTHORITY' in raw_chroma_shader
+        and 'wideOffsets[16]' not in raw_chroma_shader
+        and 'boundaryRepair' not in raw_chroma_shader
         and 'rgbFromLumaChroma(centerY, correctedC)' in raw_chroma_shader
         and 'linearToSrgbChannel' not in raw_chroma_shader,
         "V2.32 chroma/moire safety pass must be physical-noise-normalized, luminance-preserving and linear-domain")
@@ -1989,9 +2007,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 53' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.35"' in build_gradle,
-        "V2.35 version/build marker must be exact")
+require('versionCode = 54' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.36"' in build_gradle,
+        "V2.36 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2377,17 +2395,17 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillRaws(' not in service
         and 'fuseStillRaws(' not in nafnet,
         "V2.30 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.34_to_V1.4.11-V2.35.forward.patch' in workflow
-        and 'V1.4.11-V2.35_to_V1.4.11-V2.34.rollback.patch' in workflow,
-        "V2.35 final artifact must export correctly named V2.34<->V2.35 patches")
-require("authority='3ff48aa5ed36d2a758d1d812fd616d9dc2af72e5'" in workflow
-        and "authority_tree='36238f6c4b4ec1f00757fefa1081d6d26c30dcd8'" in workflow
+require('V1.4.11-V2.35_to_V1.4.11-V2.36.forward.patch' in workflow
+        and 'V1.4.11-V2.36_to_V1.4.11-V2.35.rollback.patch' in workflow,
+        "V2.36 final artifact must export correctly named V2.35<->V2.36 patches")
+require("authority='265e2ace3212e559f5020c62354875b4853ce2fe'" in workflow
+        and "authority_tree='acc4948b05fc7d60dc5246f6d3dcafb50f3331ba'" in workflow
         and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow,
-        "V2.35 must prove exact successful V2.34 parent authority")
+        "V2.36 must prove exact successful V2.35 parent authority")
 require("if len(tracked) != 35:" in workflow
-        and "V1.4.11 V2.34 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "V1.4.11 V2.35 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.35 must prove the 35-file V2.34 authority and exact 35-file candidate universe")
+        "V2.36 must prove the 35-file V2.35 authority and exact 35-file candidate universe")
 
 require('uniform vec2 stillGlobalShortOffsetPixels;' in hdr_shader
         and 'sampleUv + stillGlobalShortOffsetPixels / imageSize' in hdr_shader
@@ -2610,9 +2628,12 @@ require('recoverCensoredBalanced' not in raw_shader
         and 'wideOffsets' not in raw_shader
         and 'wideGreenEstimate' not in raw_green_shader,
         "V2.35 Claude root correction must not retain V2.34 boundary/wide-donor hybrid reconstruction")
-require('// IRIS_V233_SATURATION_CHROMA_BOUNDARY_BEGIN' in raw_chroma_shader
+require('IRIS_V233_SATURATION_CHROMA_BOUNDARY_BEGIN' not in raw_chroma_shader
+        and 'wideOffsets[16]' not in raw_chroma_shader
+        and 'boundaryC' not in raw_chroma_shader
+        and 'IRIS_V236_SINGLE_CHROMA_AUTHORITY' in raw_chroma_shader
         and 'outColor = vec4(encodedScene, carrierAt(p).a);' in raw_chroma_shader,
-        "V2.35 preserves the inherited V2.33 post-RGB safety net byte-for-byte; it is not the root correction")
+        "V2.36 must retire the stale distant boundary-hue donor while retaining local luminance-preserving chroma cleanup")
 
 # Exact causal fixture from Claude's verdict: G support collapses while R/B still carry
 # the true balanced scene level.  The old failure produced R=B>G; common-quad rejection
@@ -2642,6 +2663,53 @@ quad_highlight = max(quad_flags)
 permissions = [1.0 - quad_highlight for _ in quad_flags]
 require(permissions == [0.0, 0.0, 0.0, 0.0],
         "V2.35 common Bayer quad clipping authority may not alternate by CFA phase")
+
+
+# V2.36 completion regressions from the full V2.35 device-sample audit.
+require('IRIS_V236_CALCULATION_WB_EDGE_GREEN_BEGIN' in raw_green_shader
+        and 'float edgeGreen(ivec2 p, float center)' in raw_green_shader
+        and '0.25 * (2.0 * center - cL2 - cR2)' in raw_green_shader
+        and '0.25 * (2.0 * center - cU2 - cD2)' in raw_green_shader
+        and 'float blendH = gv / max(gh + gv, 0.0000001);' in raw_green_shader,
+        "V2.36 must map the old-Iris edgeGreen geometry into the Viewfinder CFA owner")
+require('IRIS_V236_CALCULATION_WB_OPPONENT_DOMAIN' in raw_shader
+        and 'float calculationGain = calculationWbForColor(colorAt(q));' in raw_shader
+        and 'calculationColor - greenValue.x' in raw_shader
+        and 'vec3 balancedRgb = sensorRgb * commonGreenGain;' in raw_shader,
+        "V2.36 must form opponent chroma in calculation-WB space and restore the common green scale exactly once")
+require('IRIS_V236_PHASE_INVARIANT_CENSORED_ROLLOFF' in raw_shader
+        and 'return 0.25 * count;' in raw_shader
+        and 'float neutralMix = smoothstep(0.0, 0.75, censoredFraction);' in raw_shader
+        and 'if (completeColorSupport < 0.5)' not in raw_shader,
+        "V2.36 terminal censored fallback must not reprint the strict 2x2 permission gate as a hard RGB block")
+require('IRIS_V236_AUTO_NEUTRAL_PRESENTATION_POLICY' in camera
+        and 'AUTO_PRESENT_BRIGHTNESS_MAX_EV = 0.00f' in camera
+        and 'AUTO_PRESENT_GAMMA_MAX = 1.65f' in camera,
+        "V2.36 AUTO must use Manual-like neutral presentation ceilings without copying another scene's histogram")
+
+# Exact V2.35 edge-domain failure fixture.  The R photosite lies on a brighter
+# neutral side of an edge (raw R=.40 -> calculation-WB R=.80, local G=.80),
+# while the target green-site geometry is .50.  In the correct old-Iris domain
+# the neutral opponent is zero and reconstructed R stays .50.  V2.35 instead
+# formed raw-R minus calculation-G (-.40), added that to target G, then applied
+# 2x R WB, producing .20: a .30 false chroma edge from the same sensor evidence.
+raw_r = 0.40
+local_green = 0.80
+target_green = 0.50
+wb_r_norm = 2.0
+correct_rg = raw_r * wb_r_norm - local_green
+correct_r = target_green + correct_rg
+require(abs(correct_r - 0.50) < 1e-12,
+        "V2.36 calculation-WB opponent fixture no longer preserves a neutral edge")
+faulty_rg = raw_r - local_green
+faulty_r = (target_green + faulty_rg) * wb_r_norm
+require(abs(faulty_r - correct_r) > 0.25,
+        "V2.35 WB-domain failure fixture unexpectedly stopped exposing edge-color amplification")
+
+one_phase_fraction = 0.25
+neutral_mix_one_phase = smoothstep_math(0.0, 0.75, one_phase_fraction)
+require(0.0 < neutral_mix_one_phase < 0.5 and ordinary_opponent_valid == 0.0,
+        "V2.36 must separate strict opponent rejection from smooth terminal chroma rolloff")
 
 # V2.34 redistributes the SAME RGBA8 RGB carrier; no extra full-resolution texture is
 # permitted.  The exact 1..8 recovered-highlight interval must receive at least twice
@@ -2748,4 +2816,4 @@ require(v234_hdr_peak(4.0) < 0.91 and v234_hdr_peak(5.6) <= 0.931,
 require(v234_hdr_peak(16.0) < 0.99,
         "V2.34 must reserve smooth headroom above the ceiling gradient for true lamp cores")
 
-print("V1.4.11 V2.35 REGRESSION PASS: exact successful V2.34 fusion/registration/source ownership/presentation is frozen; Claude power-3 highlight guide is active; physical 2x2 clip authority gates opponent color; V2.34 boundary-hue hybrid is removed; carrier/lifetime remain unchanged")
+print("V1.4.11 V2.36 REGRESSION PASS: V2.35 Claude saturated-highlight correction preserved; calculation-WB edge/opponent domain completed; stale distant hue donor removed; phase-smooth censored fallback active; AUTO neutral presentation ceilings enforced; fusion/registration/acquisition remain protected")
