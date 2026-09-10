@@ -722,11 +722,20 @@ public final class MainActivity extends Activity implements CameraController.Lis
             float microContrast,
             boolean automatic) {
         runOnUiThread(() -> {
-            updatingControls = true;
-            displayBrightnessEv = brightnessEv;
-            displayGamma = gamma;
-            brightnessBar.setProgress(brightnessProgressForEv(displayBrightnessEv));
-            gammaBar.setProgress(gammaProgressForValue(displayGamma));
+            // IRIS_V237_MANUAL_UI_PRESENTATION_OWNER_BEGIN
+            // AUTO callbacks legitimately own and move Brightness/Gamma. Manual Safe
+            // callbacks carry only automatic Dehaze/Micro updates; they must not move
+            // the user's B/G thumbs, labels, or live GL uniforms back to queued state.
+            if (automatic) {
+                updatingControls = true;
+                displayBrightnessEv = brightnessEv;
+                displayGamma = gamma;
+                brightnessBar.setProgress(brightnessProgressForEv(displayBrightnessEv));
+                gammaBar.setProgress(gammaProgressForValue(displayGamma));
+                glView.setDisplayBrightnessEv(displayBrightnessEv);
+                glView.setDisplayGamma(displayGamma);
+                updatingControls = false;
+            }
             brightnessLabel.setText(String.format(
                     Locale.US,
                     automatic ? "Brightness AUTO %+.1f EV  Dehaze %.0f%%"
@@ -739,11 +748,9 @@ public final class MainActivity extends Activity implements CameraController.Lis
                             : "Gamma %.2f  Micro auto %.0f%%",
                     displayGamma,
                     100.0f * microContrast));
-            glView.setDisplayBrightnessEv(displayBrightnessEv);
-            glView.setDisplayGamma(displayGamma);
             glView.setDisplayEnhancement(dehaze, microContrast);
-            updatingControls = false;
             setManualControlsEnabled(!autoHdrEnabled);
+            // IRIS_V237_MANUAL_UI_PRESENTATION_OWNER_END
         });
     }
 

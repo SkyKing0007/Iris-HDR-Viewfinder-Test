@@ -32,7 +32,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.36 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.37 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -62,7 +62,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.36 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.37 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -122,25 +122,131 @@ require(sha_text(normalized_v235_hdrgl(gl))
 require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java').read_bytes()).hexdigest()
         == '569754e8043928cf86b1f1d34f2ad6b2885e3bf7948789725d4c2092129d4782',
         'V2.34 must not modify V2.33 JpegFusion registration mechanics')
-def normalized_v236_camera(text):
-    text = re.sub(
-        r'private static final float AUTO_PRESENT_BRIGHTNESS_MAX_EV = [-0-9.]+f;',
-        'private static final float AUTO_PRESENT_BRIGHTNESS_MAX_EV = __V236__;',
-        text, count=1)
-    text = re.sub(
-        r'private static final float AUTO_PRESENT_GAMMA_MAX = [-0-9.]+f;',
-        'private static final float AUTO_PRESENT_GAMMA_MAX = __V236__;',
-        text, count=1)
-    marker = text.find('            // IRIS_V236_AUTO_NEUTRAL_PRESENTATION_POLICY:')
-    statement = text.find('            float maxAutoBrightnessEv =')
-    start = marker if marker >= 0 and (statement < 0 or marker < statement) else statement
-    end = text.find('            float maxMedianDigitalLiftEv', start)
-    require(start >= 0 and end >= 0, 'V2.36 AUTO presentation normalization anchors missing')
-    return text[:start] + '            __IRIS_V236_AUTO_LIMIT_BLOCK__\n' + text[end:]
+# V2.37 is a localized presentation-control change on exact successful V2.36.
+# Normalize ONLY the three agreed V2.37 runtime owners back to their V2.36 bytes and
+# hash the result. This prevents a UI repair or extreme-emitter style from silently
+# changing acquisition, CFA, fusion, saved HDR transfer, DNG, or unrelated lifecycle.
+def normalized_v237_camera(text):
+    constants_start = text.index('    // V2.37 extreme-emitter presentation is a narrowly gated AUTO style learned from')
+    constants_end = text.index('    private static final float PRESENT_ENHANCEMENT_STEP = 0.06f;', constants_start)
+    text = text[:constants_start] + text[constants_end:]
 
-require(sha_text(normalized_v236_camera(camera))
-        == 'd529dfa781673781d7bc843d3028a22a1bdc2c467114d473c63179330f2c365e',
-        'V2.36 may change only the agreed AUTO presentation ceilings/block inside successful V2.35 CameraController; capture/exposure/flicker ownership is frozen')
+    start = text.index('            // IRIS_V237_EXTREME_EMITTER_PRESENTATION_BEGIN')
+    end_marker = '            // IRIS_V237_EXTREME_EMITTER_PRESENTATION_END\n'
+    end = text.index(end_marker, start) + len(end_marker)
+    if text[end:end + 1] == '\n':
+        end += 1
+    text = text[:start] + text[end:]
+
+    start = text.index('            // V2.37 leaves V2.36 AUTO enhancement neutral for every ordinary scene.')
+    end = text.index('        } else {', start)
+    old_auto_enhancement = (
+        '            // Keep mode-6 enhancement neutral in AUTO. V2.21 restores contrast in\n'
+        '            // the actual scene-key fit rather than by adding a second hidden exponent.\n'
+        '            displayDehaze = stepToward(\n'
+        '                    displayDehaze, 0.0f, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);\n'
+        '            displayMicroContrast = stepToward(\n'
+        '                    displayMicroContrast, 0.0f, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);\n'
+    )
+    text = text[:start] + old_auto_enhancement + text[end:]
+
+    start = text.index('    private static float extremeEmitterPressureLocked(')
+    end = text.index('    private static float predictAutoPresentedLuma(', start)
+    text = text[:start] + text[end:]
+
+    start = text.index('    private void publishPresentationLocked(boolean automatic) {')
+    end = text.index('    private static float predictAutoPresentedLuma(', start)
+    old_publish = (
+        '    private void publishPresentationLocked(boolean automatic) {\n'
+        '        if (stillFusionView != null) {\n'
+        '            stillFusionView.setDisplayBrightnessEv(displayBrightnessEv);\n'
+        '            stillFusionView.setDisplayGamma(displayGamma);\n'
+        '            stillFusionView.setDisplayEnhancement(displayDehaze, displayMicroContrast);\n'
+        '        }\n'
+        '        listener.onPresentationSettings(\n'
+        '                displayBrightnessEv, displayGamma, displayDehaze, displayMicroContrast, automatic);\n'
+        '    }\n\n'
+    )
+    text = text[:start] + old_publish + text[end:]
+    return text
+
+require(sha_text(normalized_v237_camera(camera))
+        == '784db5b7221b1d4af3a2a2a457b847a42c9c426f193f4d6f1300052bf2330368',
+        'V2.37 CameraController changes escaped the manual-owner/extreme-emitter presentation allowlist')
+
+def normalized_v237_main(text):
+    start = text.index('    @Override\n    public void onPresentationSettings(')
+    end = text.index('    @Override\n    public void onCaptureBackgroundSafe(', start)
+    old_callback = (
+        '    @Override\n'
+        '    public void onPresentationSettings(\n'
+        '            float brightnessEv,\n'
+        '            float gamma,\n'
+        '            float dehaze,\n'
+        '            float microContrast,\n'
+        '            boolean automatic) {\n'
+        '        runOnUiThread(() -> {\n'
+        '            updatingControls = true;\n'
+        '            displayBrightnessEv = brightnessEv;\n'
+        '            displayGamma = gamma;\n'
+        '            brightnessBar.setProgress(brightnessProgressForEv(displayBrightnessEv));\n'
+        '            gammaBar.setProgress(gammaProgressForValue(displayGamma));\n'
+        '            brightnessLabel.setText(String.format(\n'
+        '                    Locale.US,\n'
+        '                    automatic ? "Brightness AUTO %+.1f EV  Dehaze %.0f%%"\n'
+        '                            : "Brightness %+.1f EV  Dehaze auto %.0f%%",\n'
+        '                    displayBrightnessEv,\n'
+        '                    100.0f * dehaze));\n'
+        '            gammaLabel.setText(String.format(\n'
+        '                    Locale.US,\n'
+        '                    automatic ? "Gamma AUTO %.2f  Micro %.0f%%"\n'
+        '                            : "Gamma %.2f  Micro auto %.0f%%",\n'
+        '                    displayGamma,\n'
+        '                    100.0f * microContrast));\n'
+        '            glView.setDisplayBrightnessEv(displayBrightnessEv);\n'
+        '            glView.setDisplayGamma(displayGamma);\n'
+        '            glView.setDisplayEnhancement(dehaze, microContrast);\n'
+        '            updatingControls = false;\n'
+        '            setManualControlsEnabled(!autoHdrEnabled);\n'
+        '        });\n'
+        '    }\n\n'
+    )
+    text = text[:start] + old_callback + text[end:]
+    return text
+
+require(sha_text(normalized_v237_main(main))
+        == '9699c51defa2a47e1d751f0c8d13d65da40677659fa87a448c1a0e71d2ba35ce',
+        'V2.37 MainActivity changes escaped the manual presentation callback allowlist')
+
+def normalized_v237_hdr_shader(text):
+    new_split = (
+        '        // IRIS_V237_SPLIT_MANUAL_BG_PREVIEW_BEGIN\n'
+        '        // SPLIT remains the direct SHORT/LONG diagnostic view. It previews only the\n'
+        '        // user-owned Manual Safe Brightness/Gamma controls; automatic Dehaze/Micro\n'
+        '        // continues to be solved/stored by the controller for FUSED output but is not\n'
+        '        // introduced into this diagnostic branch.\n'
+        '        vec3 splitEncoded = leftHalf\n'
+        '            ? texture(shortTex, splitUv).rgb\n'
+        '            : texture(longTex, splitUv).rgb;\n'
+        '        vec3 splitLinear = srgbToLinear(splitEncoded);\n'
+        '        float splitBrightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));\n'
+        '        splitLinear *= splitBrightnessGain;\n'
+        '        splitLinear = applyDisplayGamma(splitLinear, displayGamma);\n'
+        '        outColor = vec4(clamp(linearToSrgb(splitLinear), 0.0, 1.0), 1.0);\n'
+        '        // IRIS_V237_SPLIT_MANUAL_BG_PREVIEW_END\n'
+    )
+    old_split = (
+        '        outColor = vec4(\n'
+        '            leftHalf ? texture(shortTex, splitUv).rgb : texture(longTex, splitUv).rgb,\n'
+        '            1.0);\n'
+    )
+    require(text.count(new_split) == 1, 'V2.37 SPLIT manual B/G normalization anchor missing')
+    return text.replace(new_split, old_split, 1)
+
+require(sha_text(normalized_v237_hdr_shader(hdr_shader))
+        == 'f0b24371e0a063a492f3602798e39f5e447c29534f336b779d5fc4bb6e1fa96e',
+        'V2.37 hdr_display changes escaped the SPLIT-only presentation allowlist')
+
 require(hashlib.sha256((ROOT / 'app/src/main/assets/shaders/raw_preprocess.frag').read_bytes()).hexdigest()
         == '87f11cdd5f678977648cefadd181d21813c3bf23ee1107a3688772a4d46a3982',
         'V2.34 must not modify V2.33 black/white/lens-shading/noise RAW preprocess owner')
@@ -814,13 +920,13 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# V2.36 runtime authority is the exact last successful compiler-tested V2.35
+# V2.37 runtime authority is the exact last successful compiler-tested V2.36 R1
 # candidate/artifact. Older versions remain behavioral/reference evidence only.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.35' in workflow
-        and 'run-id: 34358340770' in workflow
-        and "authority='265e2ace3212e559f5020c62354875b4853ce2fe'" in workflow
-        and "authority_tree='acc4948b05fc7d60dc5246f6d3dcafb50f3331ba'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.35 Actions authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.36' in workflow
+        and 'run-id: 34477638919' in workflow
+        and "authority='1268c56ae19bcff6a8c9bec42fdc9c911a8436d4'" in workflow
+        and "authority_tree='9665c112f2ab7c0aa0cc6d05cbce77894cacda24'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.36 Actions authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1271,8 +1377,9 @@ require('private void updateAdaptivePresentationLocked(' in camera
 require('float targetP90 = lerpFloat(0.024f, 0.020f, highlightPressure);' not in camera
         and '0.029f, 0.023f' not in camera,
         "V2.18 dark MANUAL-calibrated final-render targets survived")
-require('displayDehaze, 0.0f' in camera and 'displayMicroContrast, 0.0f' in camera,
-        "AUTO must neutralize the second mode-6 global darkening exponent")
+require('extremeEmitterPressure * extremeTargetDehaze' in camera
+        and 'extremeEmitterPressure * extremeTargetMicro' in camera,
+        "ordinary AUTO must keep the second mode-6 enhancement neutral; only the V2.37 physically gated extreme-emitter style may enable it")
 require('if (automatic) {' in camera[camera.index('private void updateAdaptivePresentationLocked'):camera.index('private void publishPresentationLocked')],
         "AUTO-only Brightness/Gamma authority boundary missing")
 manual_pres = camera[camera.index('private void updateAdaptivePresentationLocked'):camera.index('private void publishPresentationLocked')]
@@ -2007,9 +2114,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 54' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.36"' in build_gradle,
-        "V2.36 version/build marker must be exact")
+require('versionCode = 55' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.37"' in build_gradle,
+        "V2.37 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2395,26 +2502,24 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillRaws(' not in service
         and 'fuseStillRaws(' not in nafnet,
         "V2.30 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.35_to_V1.4.11-V2.36.forward.patch' in workflow
-        and 'V1.4.11-V2.36_to_V1.4.11-V2.35.rollback.patch' in workflow,
-        "V2.36 final artifact must export correctly named V2.35<->V2.36 patches")
-require("authority='265e2ace3212e559f5020c62354875b4853ce2fe'" in workflow
-        and "authority_tree='acc4948b05fc7d60dc5246f6d3dcafb50f3331ba'" in workflow
-        and "failed_v236='6ecefdaf1a76f9bc2798adf54d70478e890c3607'" in workflow
-        and "failed_v236_tree='47d89d400d20b8520779f07ba47bb23eabd28950'" in workflow
-        and 'test "$(git rev-parse HEAD^)" = "$failed_v236"' in workflow
-        and 'test "$(git rev-parse HEAD^^)" = "$authority"' in workflow
-        and 'test "$(git rev-parse "$failed_v236^")" = "$authority"' in workflow,
-        "V2.36 R1 must prove failed V2.36 parent and exact successful V2.35 grandparent authority")
-require("authority = '265e2ace3212e559f5020c62354875b4853ce2fe'" in workflow
-        and "authority = '3ff48aa5ed36d2a758d1d812fd616d9dc2af72e5'" not in workflow,
-        "V2.36 R1 changed-file allowlist must compare against successful V2.35, never stale V2.34")
+require('V1.4.11-V2.36_to_V1.4.11-V2.37.forward.patch' in workflow
+        and 'V1.4.11-V2.37_to_V1.4.11-V2.36.rollback.patch' in workflow,
+        "V2.37 final artifact must export correctly named V2.36<->V2.37 patches")
+require("authority='1268c56ae19bcff6a8c9bec42fdc9c911a8436d4'" in workflow
+        and "authority_tree='9665c112f2ab7c0aa0cc6d05cbce77894cacda24'" in workflow
+        and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow
+        and "failed_v236='" not in workflow,
+        "V2.37 must prove exact successful V2.36 direct-parent authority; repair-only V2.36 lineage mechanics may not remain active")
+require("authority = '1268c56ae19bcff6a8c9bec42fdc9c911a8436d4'" in workflow,
+        "V2.37 changed-file allowlist must compare against successful V2.36")
 require('273 - Exact V2.36 R1 allowlist regression:' in workflow,
         "V2.36 R1 exact stale-allowlist-authority failure must remain a permanent regression")
+require('274 - V2.37 runtime authority is exactly successful V2.36 R1 commit 1268c56ae19bcff6a8c9bec42fdc9c911a8436d4' in workflow,
+        "V2.37 exact successful-authority regression missing")
 require("if len(tracked) != 35:" in workflow
-        and "V1.4.11 V2.35 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "V1.4.11 V2.36 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.36 must prove the 35-file V2.35 authority and exact 35-file candidate universe")
+        "V2.37 must prove the 35-file V2.36 authority and exact 35-file candidate universe")
 
 require('uniform vec2 stillGlobalShortOffsetPixels;' in hdr_shader
         and 'sampleUv + stillGlobalShortOffsetPixels / imageSize' in hdr_shader
@@ -2720,6 +2825,101 @@ neutral_mix_one_phase = smoothstep_math(0.0, 0.75, one_phase_fraction)
 require(0.0 < neutral_mix_one_phase < 0.5 and ordinary_opponent_valid == 0.0,
         "V2.36 must separate strict opponent rejection from smooth terminal chroma rolloff")
 
+# V2.37 manual slider/live-preview and extreme-emitter presentation regressions.
+require('IRIS_V237_MANUAL_UI_PRESENTATION_OWNER_BEGIN' in main,
+        'V2.37 manual UI ownership marker missing')
+manual_callback = main[main.index('    public void onPresentationSettings('):
+        main.index('    public void onCaptureBackgroundSafe(', main.index('    public void onPresentationSettings('))]
+require(manual_callback.count('brightnessBar.setProgress(') == 1
+        and manual_callback.count('gammaBar.setProgress(') == 1
+        and manual_callback.count('glView.setDisplayBrightnessEv(') == 1
+        and manual_callback.count('glView.setDisplayGamma(') == 1
+        and 'if (automatic) {' in manual_callback,
+        'V2.37 presentation callback may update B/G bars/uniforms only inside AUTO ownership')
+require('IRIS_V237_MANUAL_PRESENTATION_OWNERSHIP_BEGIN' in camera,
+        'V2.37 controller manual presentation ownership marker missing')
+publish_start = camera.index('    private void publishPresentationLocked(boolean automatic) {')
+publish_end = camera.index('    private static float extremeEmitterPressureLocked(', publish_start)
+publish_block = camera[publish_start:publish_end]
+require('if (automatic) {' in publish_block
+        and publish_block.count('stillFusionView.setDisplayBrightnessEv(') == 1
+        and publish_block.count('stillFusionView.setDisplayGamma(') == 1
+        and publish_block.count('stillFusionView.setDisplayEnhancement(') == 1,
+        'V2.37 controller must let manual sliders own B/G while retaining automatic Dehaze/Micro ownership')
+
+split_start = hdr_shader.index('    if (mode == 1) {')
+split_end = hdr_shader.index('\n    if (haveShort == 0 || haveLong == 0) {', split_start) + 1
+split_mode = hdr_shader[split_start:split_end]
+require('IRIS_V237_SPLIT_MANUAL_BG_PREVIEW_BEGIN' in split_mode
+        and 'splitBrightnessGain' in split_mode
+        and 'applyDisplayGamma(splitLinear, displayGamma)' in split_mode,
+        'V2.37 SPLIT must visibly consume user-owned manual Brightness/Gamma')
+require('displayDehaze' not in split_mode
+        and 'displayMicroContrast' not in split_mode
+        and 'applyAdaptiveClarity' not in split_mode
+        and 'applySplitAdaptiveClarity' not in split_mode,
+        'V2.37 SPLIT must not introduce Dehaze/Micro or clarity processing')
+require('applyPhotographicBodyTone' not in split_mode
+        and 'adaptiveHdrToneMap' not in split_mode
+        and 'savedContinuousHdrToneMap' not in split_mode,
+        'V2.37 SPLIT preview must not import FUSED tone/fusion architecture')
+require('splitPresentationGuideLumaAt' not in hdr_shader
+        and 'applySplitAdaptiveClarity' not in hdr_shader,
+        'V2.37 approved scope forbids a new per-half SPLIT clarity authority')
+
+# Exact successful V2.36 FUSED rendering remains byte-frozen while SPLIT gains preview controls.
+mode6_start = hdr_shader.index('    if (mode == 6) {')
+mode6_end = hdr_shader.index('        // IRIS_V217_TOPOLOGY_SAFE_PRESENTATION_END\n        return;\n    }', mode6_start) + len('        // IRIS_V217_TOPOLOGY_SAFE_PRESENTATION_END\n        return;\n    }')
+require(sha_text(hdr_shader[mode6_start:mode6_end])
+        == 'beefb67f773372e4011359b34f7d8a9b2f711a74bb7c36ffc7e4a30b4902f0c5',
+        'V2.37 may not change successful V2.36 mode-6 saved post-fusion presentation')
+mode5_start = hdr_shader.index('    if (mode == 5) {')
+mode5_end = hdr_shader.index('        return;\n    }\n\n    // V2.27 live parity', mode5_start) + len('        return;\n    }')
+require(sha_text(hdr_shader[mode5_start:mode5_end])
+        == '2abf93c31853d6b0093dca2ca003ea0cb77798f190920e1e98c3c917f61dbb34',
+        'V2.37 may not change successful V2.36 saved FUSED source/tone path')
+live_start = hdr_shader.index('    // V2.27 live parity:')
+require(sha_text(hdr_shader[live_start:])
+        == 'd6e7a12c86e37fbe25fdf5b8a607c57f38329c5f19051c2f5fe7034d98f8ca43',
+        'V2.37 may not change successful V2.36 live FUSED shader math')
+
+require('IRIS_V237_EXTREME_EMITTER_PRESENTATION_BEGIN' in camera
+        and 'EXTREME_EMITTER_BRIGHTNESS_EV = -1.40f' in camera
+        and 'EXTREME_EMITTER_GAMMA = 1.15f' in camera
+        and 'extremeEmitterPressureLocked(stats, physicalRatio)' in camera,
+        'V2.37 direct-sun style gate/presentation anchors missing')
+
+# Device-derived 32x24 fixture. The direct-sun set is the only provided sample with
+# a real 3EV bracket, >20% LONG clip population, and SHORT P99 still above ~0.52.
+# Costco/restaurant/bright-car negatives remain exactly zero: no global daylight style.
+def extreme_emitter_pressure(short_p99, short_near_clip, long_near_clip, ratio):
+    bracket_stops = math.log(max(ratio, 1.0), 2.0)
+    short_survival = max(
+        smoothstep_math(0.38, 0.52, short_p99),
+        smoothstep_math(0.0005, 0.0025, short_near_clip))
+    long_clip_mass = smoothstep_math(0.08, 0.20, long_near_clip)
+    real_bracket = smoothstep_math(2.60, 3.00, bracket_stops)
+    return max(0.0, min(1.0, short_survival * long_clip_mass * real_bracket))
+
+sun_pressure = extreme_emitter_pressure(0.528529, 1.0/768.0, 0.308594, 8.0)
+car_pressure = extreme_emitter_pressure(0.361987, 0.0, 0.072917, 8.0)
+costco_pressure = extreme_emitter_pressure(0.083083, 0.0, 0.0, 2.2)
+restaurant_pressure = extreme_emitter_pressure(0.093853, 0.0, 0.0, 2.4)
+require(sun_pressure > 0.99,
+        f'V2.37 direct-sun fixture must fully engage extreme-emitter style: {sun_pressure}')
+require(car_pressure == 0.0 and costco_pressure == 0.0 and restaurant_pressure == 0.0,
+        'V2.37 extreme-emitter style leaked into provided non-sun scene fixtures')
+
+normal_brightness = -3.0
+normal_gamma = 1.45
+sun_brightness = normal_brightness + (-1.40 - normal_brightness) * sun_pressure
+sun_gamma = normal_gamma + (1.15 - normal_gamma) * sun_pressure
+require(abs(sun_brightness + 1.40) < 1e-6 and abs(sun_gamma - 1.15) < 1e-6,
+        'V2.37 full direct-sun pressure must reproduce validated -1.4EV/gamma1.15 style')
+require(normal_brightness + (-1.40 - normal_brightness) * car_pressure == normal_brightness
+        and normal_gamma + (1.15 - normal_gamma) * car_pressure == normal_gamma,
+        'V2.37 non-sun fixture must preserve V2.36 AUTO target exactly')
+
 # V2.34 redistributes the SAME RGBA8 RGB carrier; no extra full-resolution texture is
 # permitted.  The exact 1..8 recovered-highlight interval must receive at least twice
 # V2.33's distinct code levels while shadows and explicit sigma/saturation alpha remain.
@@ -2825,4 +3025,4 @@ require(v234_hdr_peak(4.0) < 0.91 and v234_hdr_peak(5.6) <= 0.931,
 require(v234_hdr_peak(16.0) < 0.99,
         "V2.34 must reserve smooth headroom above the ceiling gradient for true lamp cores")
 
-print("V1.4.11 V2.36 REGRESSION PASS: V2.35 Claude saturated-highlight correction preserved; calculation-WB edge/opponent domain completed; stale distant hue donor removed; phase-smooth censored fallback active; AUTO neutral presentation ceilings enforced; fusion/registration/acquisition remain protected")
+print("V1.4.11 V2.37 REGRESSION PASS: exact successful V2.36 CFA/fusion/saved-FUSED mechanics preserved; manual Brightness/Gamma ownership is live and non-echoing; SPLIT previews only manual B/G while auto Dehaze/Micro remain FUSED-owned; direct-sun extreme-emitter style is physically gated and zero for provided negative scenes")

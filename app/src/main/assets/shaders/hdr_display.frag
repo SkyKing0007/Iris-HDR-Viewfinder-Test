@@ -971,9 +971,20 @@ void main() {
             outColor = vec4(0.0, 0.0, 0.0, 1.0);
             return;
         }
-        outColor = vec4(
-            leftHalf ? texture(shortTex, splitUv).rgb : texture(longTex, splitUv).rgb,
-            1.0);
+        // IRIS_V237_SPLIT_MANUAL_BG_PREVIEW_BEGIN
+        // SPLIT remains the direct SHORT/LONG diagnostic view. It previews only the
+        // user-owned Manual Safe Brightness/Gamma controls; automatic Dehaze/Micro
+        // continues to be solved/stored by the controller for FUSED output but is not
+        // introduced into this diagnostic branch.
+        vec3 splitEncoded = leftHalf
+            ? texture(shortTex, splitUv).rgb
+            : texture(longTex, splitUv).rgb;
+        vec3 splitLinear = srgbToLinear(splitEncoded);
+        float splitBrightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
+        splitLinear *= splitBrightnessGain;
+        splitLinear = applyDisplayGamma(splitLinear, displayGamma);
+        outColor = vec4(clamp(linearToSrgb(splitLinear), 0.0, 1.0), 1.0);
+        // IRIS_V237_SPLIT_MANUAL_BG_PREVIEW_END
         return;
     }
 

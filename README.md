@@ -1,14 +1,13 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.36
+# Iris HDR Viewfinder Test V1.4.11 V2.37
 
-V2.36 is the full artifact-correction build on the exact successful V2.35 compiled candidate: commit `265e2ace3212e559f5020c62354875b4853ce2fe`, tree `acc4948b05fc7d60dc5246f6d3dcafb50f3331ba`, Actions run `34358340770`, artifact `10106804351`.
+V2.37 is a localized presentation-control correction on the exact successful V2.36 compiled candidate: commit `1268c56ae19bcff6a8c9bec42fdc9c911a8436d4`, tree `9665c112f2ab7c0aa0cc6d05cbce77894cacda24`, Actions run `34477638919`, artifact `10152261992`.
 
-V2.35 device testing proved the Claude saturated-highlight correction because the prior magenta highlight failure disappeared. V2.36 therefore preserves that common-quad physical clipping / power-3 highlight guide unchanged in purpose while correcting the separate Viewfinder failures exposed by the same samples:
+V2.36 remains the image-quality authority. Its CFA/highlight reconstruction, fusion/registration, acquisition, denoise and saved FUSED output are protected. V2.37 corrects only two device-proven presentation problems:
 
-- ordinary green reconstruction now uses the audited old-Iris `edgeGreen` +/-1 / +/-2 directional second-order geometry inside the current Viewfinder CFA owner only; Sabre/VGN topology is not imported;
-- R-G/B-G are formed in one normalized calculation-WB domain and the common Camera2 green scale is restored exactly once, eliminating V2.35's mixed-domain edge-color path;
-- strict 2x2 clipping still controls opponent-color permission, but terminal neutral fallback uses a phase-invariant censored fraction so the binary CFA decision cannot become a hard 2x2 RGB pattern;
-- `raw_chroma_dealias` no longer performs the inherited fixed-distance boundary-hue search and remains only a local luminance-preserving chroma/periodic-alias cleanup;
-- AUTO remains scene-adaptive and keeps its physical capture/SNR policy, while saved presentation cannot add positive brightness above +0.0 EV or gamma above 1.65. These are neutral ceilings, not a restaurant/Costco histogram match;
-- NAFNet, registration/fusion, SHORT/LONG ownership/acquisition, DNG/media ownership, GPU lifetime and `hdr_display.frag` remain successful V2.35 behavior.
+- In HDR MANUAL SAFE, Brightness/Gamma become the sole user-owned live controls. Their labels and renderer update immediately from the sliders; asynchronous automatic presentation callbacks may update Dehaze/Microcontrast but may not move or overwrite manual Brightness/Gamma.
+- SPLIT gains a preview-only manual presentation branch: both halves consume the same user-owned Brightness/Gamma values. Automatic Dehaze/Micro continues to be solved and stored for FUSED output but is deliberately not applied in SPLIT, preserving SPLIT as a direct SHORT/LONG diagnostic comparison with no FUSED clarity/body-tone/HDR-shoulder logic.
+- Live FUSED and saved FUSED shader bodies remain byte-identical to V2.36. CameraController continues to freeze the exact selected manual Brightness/Gamma/Dehaze/Micro values at shutter time, preserving the final FUSED JPEG behavior already validated on device.
+- AUTO gains a narrowly scoped extreme-emitter presentation pressure. It requires a real ~3EV physical bracket, substantial LONG clipping, and strong highlight survival in SHORT. At full pressure it blends toward the user-proven direct-sun presentation (`-1.4 EV`, `gamma 1.15`) and reuses the existing MANUAL SAFE automatic Dehaze/Micro formula. Supplied Costco, restaurant and bright-car fixtures remain zero-pressure V2.36 AUTO.
+- No sun/daylight/object classifier or cross-scene histogram normalization is used; ordinary scenes retain V2.36 AUTO unchanged.
 
-Build mechanics remain the exact successful V2.35 style: exact Actions-artifact authority reconstruction, strict changed-file allowlist, deterministic full-index forward/rollback proof at core.abbrev 7/12/40 plus fuzz=0 text replay, pinned real GLSL, real project Java, full `:app:assembleDebug`, post-build candidate/protected invariance and a flat vscode.dev handoff containing only the actual changed files.
+Build mechanics retain the successful V2.36 sequence: exact Actions-artifact authority reconstruction, strict changed-file allowlist, deterministic full-index forward/rollback proof at `core.abbrev` 7/12/40 plus GNU `fuzz=0` text replay, pinned real GLSL, real project Java, full `:app:assembleDebug`, post-build candidate/protected invariance and final compiled-candidate artifact export.

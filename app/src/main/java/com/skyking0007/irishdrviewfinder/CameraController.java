@@ -144,6 +144,19 @@ final class CameraController {
     private static final float AUTO_PRESENT_PENDING_GAMMA_TOLERANCE = 0.075f;
     private static final float AUTO_PRESENT_BRIGHTNESS_DEADBAND_EV = 0.10f;
     private static final float AUTO_PRESENT_GAMMA_DEADBAND = 0.075f;
+    // V2.37 extreme-emitter presentation is a narrowly gated AUTO style learned from
+    // the user-validated direct-sun Manual Safe result. It is not a daylight/global
+    // histogram target: the gate requires a real >=~3EV bracket, a materially clipped
+    // LONG population, and highlight energy that still survives into the dedicated
+    // SHORT. Ordinary bright scenes therefore remain on the V2.36 AUTO optimizer.
+    private static final float EXTREME_EMITTER_SHORT_P99_START = 0.38f;
+    private static final float EXTREME_EMITTER_SHORT_P99_FULL = 0.52f;
+    private static final float EXTREME_EMITTER_LONG_CLIP_START = 0.08f;
+    private static final float EXTREME_EMITTER_LONG_CLIP_FULL = 0.20f;
+    private static final float EXTREME_EMITTER_BRACKET_START_EV = 2.60f;
+    private static final float EXTREME_EMITTER_BRACKET_FULL_EV = 3.00f;
+    private static final float EXTREME_EMITTER_BRIGHTNESS_EV = -1.40f;
+    private static final float EXTREME_EMITTER_GAMMA = 1.15f;
     private static final float PRESENT_ENHANCEMENT_STEP = 0.06f;
     private static final int DEFAULT_POST_RAW_BOOST = 100;
     private static final int MAX_SRGB_CURVE_POINTS = 64;
@@ -2161,6 +2174,19 @@ final class CameraController {
             targetGamma = clampFloat(
                     bestGamma, AUTO_PRESENT_GAMMA_MIN, AUTO_PRESENT_GAMMA_MAX);
 
+            // IRIS_V237_EXTREME_EMITTER_PRESENTATION_BEGIN
+            // A direct sun / equivalently intense compact emitter is the unusual case
+            // where LONG clips a large population while the 3EV SHORT still carries a
+            // very bright P99. Only that physical condition blends toward the proven
+            // Manual Safe presentation (-1.4EV, gamma 1.15). No scene name, daylight
+            // flag, or cross-scene histogram target participates.
+            float extremeEmitterPressure = extremeEmitterPressureLocked(stats, physicalRatio);
+            targetBrightness = lerpFloat(
+                    targetBrightness, EXTREME_EMITTER_BRIGHTNESS_EV, extremeEmitterPressure);
+            targetGamma = lerpFloat(
+                    targetGamma, EXTREME_EMITTER_GAMMA, extremeEmitterPressure);
+            // IRIS_V237_EXTREME_EMITTER_PRESENTATION_END
+
             if (immediate) {
                 autoPresentationPendingValid = false;
                 autoPresentationPendingPairs = 0;
@@ -2205,12 +2231,43 @@ final class CameraController {
                     displayGamma, targetGamma,
                     immediate ? 2.0f : AUTO_PRESENT_GAMMA_STEP);
 
-            // Keep mode-6 enhancement neutral in AUTO. V2.21 restores contrast in
-            // the actual scene-key fit rather than by adding a second hidden exponent.
+            // V2.37 leaves V2.36 AUTO enhancement neutral for every ordinary scene.
+            // Only the physically proven extreme-emitter gate may reuse Manual Safe's
+            // existing automatic Dehaze/Micro calculation, blended by the same gate.
+            float extremeTargetDehaze = 0.0f;
+            float extremeTargetMicro = 0.0f;
+            if (extremeEmitterPressure > 0.0f) {
+                float shadowDeficit = 1.0f - smoothstepFloat(
+                        0.18f, 0.34f, stats.shadowLocalContrast);
+                float midDeficit = 1.0f - smoothstepFloat(
+                        0.20f, 0.36f, stats.midLocalContrast);
+                float shadowSpreadStops = (float) (Math.log(
+                        Math.max(0.001f, stats.fusedP50Linear)
+                                / Math.max(0.001f, stats.fusedP10Linear)) / Math.log(2.0));
+                float compressedShadows = 1.0f - smoothstepFloat(2.5f, 4.2f, shadowSpreadStops);
+                float sliderLift = 0.55f * smoothstepFloat(1.05f, 1.55f, displayGamma)
+                        + 0.45f * smoothstepFloat(0.05f, 0.70f, displayBrightnessEv);
+                extremeTargetDehaze = clampFloat(
+                        0.24f + 0.24f * shadowDeficit + 0.12f * midDeficit
+                                + 0.10f * compressedShadows + 0.10f * sliderLift,
+                        0.12f, 0.68f);
+                float usefulShadowSignal = smoothstepFloat(0.006f, 0.030f, stats.fusedP25Linear);
+                extremeTargetMicro = clampFloat(
+                        0.18f + 0.16f * midDeficit
+                                + 0.09f * shadowDeficit * usefulShadowSignal
+                                + 0.07f * sliderLift,
+                        0.10f, 0.48f);
+                if (collapsedBracket) {
+                    extremeTargetDehaze = Math.min(extremeTargetDehaze, 0.30f);
+                    extremeTargetMicro = Math.min(extremeTargetMicro, 0.22f);
+                }
+            }
             displayDehaze = stepToward(
-                    displayDehaze, 0.0f, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
+                    displayDehaze, extremeEmitterPressure * extremeTargetDehaze,
+                    immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
             displayMicroContrast = stepToward(
-                    displayMicroContrast, 0.0f, immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
+                    displayMicroContrast, extremeEmitterPressure * extremeTargetMicro,
+                    immediate ? 1.0f : PRESENT_ENHANCEMENT_STEP);
         } else {
             float shadowDeficit = 1.0f - smoothstepFloat(
                     0.18f, 0.34f, stats.shadowLocalContrast);
@@ -2267,12 +2324,40 @@ final class CameraController {
 
     private void publishPresentationLocked(boolean automatic) {
         if (stillFusionView != null) {
-            stillFusionView.setDisplayBrightnessEv(displayBrightnessEv);
-            stillFusionView.setDisplayGamma(displayGamma);
+            // IRIS_V237_MANUAL_PRESENTATION_OWNERSHIP_BEGIN
+            // In AUTO the controller owns all presentation values. In Manual Safe the
+            // UI sliders own Brightness/Gamma live; the controller owns only automatic
+            // Dehaze/Micro and stores B/G for the shutter-time saved-fusion freeze.
+            // Never echo queued manual B/G back into GL and overwrite the user's thumb.
+            if (automatic) {
+                stillFusionView.setDisplayBrightnessEv(displayBrightnessEv);
+                stillFusionView.setDisplayGamma(displayGamma);
+            }
             stillFusionView.setDisplayEnhancement(displayDehaze, displayMicroContrast);
+            // IRIS_V237_MANUAL_PRESENTATION_OWNERSHIP_END
         }
         listener.onPresentationSettings(
                 displayBrightnessEv, displayGamma, displayDehaze, displayMicroContrast, automatic);
+    }
+
+    private static float extremeEmitterPressureLocked(
+            HdrGlView.SceneStats stats, double physicalRatio) {
+        float bracketStops = (float) (Math.log(Math.max(physicalRatio, 1.0)) / Math.log(2.0));
+        float shortSurvival = Math.max(
+                smoothstepFloat(
+                        EXTREME_EMITTER_SHORT_P99_START,
+                        EXTREME_EMITTER_SHORT_P99_FULL,
+                        stats.shortP99Linear),
+                smoothstepFloat(0.0005f, 0.0025f, stats.shortNearClipFraction));
+        float longClipMass = smoothstepFloat(
+                EXTREME_EMITTER_LONG_CLIP_START,
+                EXTREME_EMITTER_LONG_CLIP_FULL,
+                stats.longNearClipFraction);
+        float realBracket = smoothstepFloat(
+                EXTREME_EMITTER_BRACKET_START_EV,
+                EXTREME_EMITTER_BRACKET_FULL_EV,
+                bracketStops);
+        return clampFloat(shortSurvival * longClipMass * realBracket, 0.0f, 1.0f);
     }
 
     private static float predictAutoPresentedLuma(

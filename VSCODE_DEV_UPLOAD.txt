@@ -1,13 +1,12 @@
-V1.4.11 V2.36 R1 — STALE ALLOWLIST AUTHORITY REPAIR
+V1.4.11 V2.37 — MANUAL LIVE PRESENTATION + EXTREME-EMITTER AUTO
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required current parent: 6ecefdaf1a76f9bc2798adf54d70478e890c3607 (failed V2.36 allowlist-only attempt)
-Successful runtime authority remains: V2.35 commit 265e2ace3212e559f5020c62354875b4853ce2fe / Actions 34358340770 / artifact 10106804351
+Required current parent / runtime authority:
+1268c56ae19bcff6a8c9bec42fdc9c911a8436d4
+Successful Actions run: 34477638919
+Successful artifact: 10152261992 / Iris-HDR-Viewfinder-Test-V1.4.11-V2.36
 
-THIS IS INFRASTRUCTURE-ONLY.
-Do NOT replace any runtime shader/Java file. The V2.36 runtime bytes already committed in 6ecefdaf... remain unchanged.
-
-UPLOAD THESE 6 FLAT FILES
+UPLOAD / REPLACE THESE 11 FLAT FILES
 
 1. build.yml
    -> .github/workflows/build.yml
@@ -17,16 +16,31 @@ UPLOAD THESE 6 FLAT FILES
    -> PACKAGE_INFO.txt
 4. PACKAGE_MANIFEST_SHA256.txt
    -> PACKAGE_MANIFEST_SHA256.txt
-5. VSCODE_DEV_UPLOAD.txt
+5. README.md
+   -> README.md
+6. VSCODE_DEV_UPLOAD.txt
    -> VSCODE_DEV_UPLOAD.txt
-6. verify_orientation.py
+7. app_build.gradle.kts
+   -> app/build.gradle.kts
+8. hdr_display.frag
+   -> app/src/main/assets/shaders/hdr_display.frag
+9. CameraController.java
+   -> app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
+10. MainActivity.java
+   -> app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+11. verify_orientation.py
    -> scripts/verify_orientation.py
 
 BEFORE COMMIT
-Source Control must show exactly 6 modified files and no added/deleted files.
-No app/src/** file may appear.
+Source Control must show exactly 11 modified files, 0 added files and 0 deleted files.
+No other app/src/** file may appear.
+In particular, raw_green.frag, raw_reconstruct.frag, raw_chroma_dealias.frag, HdrGlView.java, JpegFusion.java and NafNetDenoiser.java must NOT appear.
+
+TARGET VERSION
+versionCode 55
+versionName 1.0-v1.4.11-v2.37
 
 Suggested commit message:
-V1.4.11 V2.36 R1 repair stale allowlist authority
+V1.4.11 V2.37 manual live presentation and extreme-emitter AUTO
 
-GitHub Actions remains authoritative for pinned real GLSL, real Java and full :app:assembleDebug.
+GitHub Actions is authoritative for pinned real GLSL, real Java and full :app:assembleDebug proof.

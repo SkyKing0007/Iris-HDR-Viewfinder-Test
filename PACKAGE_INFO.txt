@@ -1,9 +1,6 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.36 — FULL V2.35 ARTIFACT CORRECTION
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.37 — MANUAL LIVE PRESENTATION + EXTREME-EMITTER AUTO
 
 STATUS
-
-V2.36 R1 INFRASTRUCTURE REPAIR
-The first V2.36 Actions attempt stopped before compilers because one embedded changed-file allowlist block compared HEAD against stale V2.34 commit 3ff48aa5... instead of successful V2.35 commit 265e2ace.... The V2.36 runtime candidate itself is unchanged. R1 corrects only that authority identity, proves the failed V2.36 commit 6ecefdaf... is the direct child of successful V2.35, and adds the exact failure as a permanent verifier regression. Compiler/build/patch/assemble/invariance ordering is unchanged.
 PREPARED / UPLOAD-READY only after final clean-extract replay passes.
 NOT BUILD-PROVEN until GitHub Actions runs the pinned real GLSL compiler, real project Java compiler and full :app:assembleDebug.
 No backup requested or created. No source commit or push is performed by this handoff preparation.
@@ -11,83 +8,75 @@ No backup requested or created. No source commit or push is performed by this ha
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 54
-Target versionName: 1.0-v1.4.11-v2.36
+Target versionCode: 55
+Target versionName: 1.0-v1.4.11-v2.37
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL ACTIONS COMPILED CANDIDATE
-Commit: 265e2ace3212e559f5020c62354875b4853ce2fe
-Compiled candidate tree: acc4948b05fc7d60dc5246f6d3dcafb50f3331ba
-GitHub Actions run: 34358340770 — SUCCESS
-Artifact ID: 10106804351
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.35
-Artifact ZIP digest: sha256:13ada0cd7e7f73c222e741ead8f116877d7c8dcfd631d448844ec128db57a8c0
-APK SHA-256: e25f8027477b55ff45c95928b2472672f83fb3a7014cdea326ef4d7cec96d2ec
-Source-candidate TAR SHA-256: 9b4f09a4b00ea2a535a2422a7663ef479ce5183993bc38edd8d253d0b54b776c
-Runtime manifest SHA-256: f8ec47369e4172cf34f54ec40512444098000f80a2bc23a6846dcc82af7fcedc
-Repository manifest SHA-256: 580062f8fa41f03a7332136a3be28b1dbb09bcb45ce93820fb4075ee091e9f1f
-Regressions SHA-256: 526bff98d5321960a30fbe979d0059cea91cd9294bf4a0cd641bfd0595a91068
+Commit: 1268c56ae19bcff6a8c9bec42fdc9c911a8436d4
+Compiled candidate tree: 9665c112f2ab7c0aa0cc6d05cbce77894cacda24
+GitHub Actions run: 34477638919 — SUCCESS
+Artifact ID: 10152261992
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.36
+Artifact ZIP digest: sha256:91da5132cdf6766a64f9b29fb2553a9c9b42038a17f3508c7b60ae13424796c5
+APK SHA-256: 6626baf42af57719522a64d697a4ba057d3ea18efd9aaf75f7cf30cbdb891b6b
+Source-candidate TAR SHA-256: 4dcf3279320979b631e5c1e30f2ccada1ff505abb6f502d6134d745708c47e3d
+Runtime manifest SHA-256: 8e6f7d232a9723fb6a5dc26806e8694878e4547ece03771f2329e68a00690df1
+Repository manifest SHA-256: e715221fad0ae1a3d5a35adc88fbd5cc03e483526b97a3492bd2883b5c4a6fb9
+Regressions SHA-256: e95ce080b0fcdeb725553c2314d10c4f7e57aa8ee449a0809038b6fa279dc5c5
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.35 procedure from Actions run 34358340770. Authority-artifact reconstruction, exact changed-file allowlist, deterministic full-index forward/rollback proof at core.abbrev 7/12/40, GNU fuzz=0 text-patch proof, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, complete GLSL reserved-identifier scan, real runtime GLSL compile, real project Java compile, regression replay, full :app:assembleDebug, post-build candidate/protected invariance, exactly-one-APK/model proof and final artifact export retain the successful V2.35 ordering. V2.36 does not redesign, simplify, substitute or reorder these mechanics.
+Exact successful V2.36 procedure from Actions run 34477638919. The V2.36 R1 repair-only two-parent lineage check is no longer active because V2.36 itself is now the successful direct-parent authority. All other authority-artifact reconstruction, exact changed-file allowlist, deterministic full-index forward/rollback proof at core.abbrev 7/12/40, GNU fuzz=0 text-patch proof, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, complete GLSL reserved-identifier scan, real runtime GLSL compile, real project Java compile, regression replay, full :app:assembleDebug, post-build candidate/protected invariance, exactly-one-APK/model proof and final artifact export retain the successful V2.36 ordering/mechanics.
 
-DEVICE-EVIDENCE BOUNDARY
-V2.35 device samples proved the Claude saturated-highlight correction: the prior magenta highlight failure is gone. The same samples exposed separate Viewfinder-native defects: cyan/green/yellow/blue edge zipper/dot artifacts, broader edge chroma contamination, a hard 2x2-like censored transition, a later distant-hue chroma owner capable of recoloring reconstructed edges, and AUTO saved presentation that is too bright/washed. No new duplicate-subject/registration failure was observed in these samples, so fusion/registration stays protected.
+DEVICE RESULT / PROBLEM BOUNDARY
+V2.36 is the most stable device result so far and its CFA/highlight/fusion behavior is protected. Two localized presentation problems remain:
+1. In HDR MANUAL SAFE, Brightness/Gamma slider thumbs move but SPLIT live view ignores them and asynchronous controller callbacks can overwrite or lag the user-owned values/labels. The final FUSED JPEG already freezes the selected values correctly and must not be redesigned.
+2. In an extreme direct-sun-through-windshield scene, the user obtained a true-to-life final FUSED result manually with SHORT 1/8000s ISO50, LONG 1/2000s ISO100, Brightness -1.4EV, Gamma 1.15, Dehaze auto 68%, Micro auto 43%. AUTO should reproduce that presentation family only for physically equivalent extreme-emitter scenes, not normalize ordinary scenes to that sample.
 
-REFERENCE / IMPLEMENTATION AUTHORITY BOUNDARY
-Claude analyzed the older Iris Camera app, whose Sabre/Resolve/VGN topology is different from Iris HDR Viewfinder Camera. V2.36 does NOT import Sabre, VGN or old-app ownership. The old-Iris edgeGreen implementation is used only as an algorithm reference inside the current Viewfinder CFA owner after producer/carrier/consumer compatibility was audited. The proven V2.35 Claude common-quad clipping and power-3 highlight guide remain the active saturated-highlight contract.
+V2.37 CORRECTION CONTRACT
+1. MANUAL SAFE Brightness and Gamma are user-owned live controls. MainActivity updates their state, labels and HdrGlView immediately from the thumb. Manual controller presentation callbacks may not move those thumbs or echo Brightness/Gamma back into HdrGlView.
+2. CameraController still stores the exact user-selected manual Brightness/Gamma on its serial camera thread and freezes them at shutter time exactly as V2.36 does, preserving the already-correct final FUSED JPEG capture contract.
+3. Automatic Dehaze and Microcontrast remain active in MANUAL SAFE using the existing V2.36 scene-stat formula. Controller callbacks may update their displayed percentages and HdrGlView enhancement values without taking ownership of manual Brightness/Gamma.
+4. SPLIT remains a direct SHORT-versus-LONG diagnostic preview. It gains only user-owned manual Brightness/Gamma previewing. Automatic Dehaze/Micro remains controller-owned for FUSED output and is not applied inside SPLIT. SPLIT does not enter FUSED clarity, body tone, HDR shoulder, registration or fusion math.
+5. Live FUSED and saved FUSED presentation/tone bodies remain byte-identical to successful V2.36. The V2.37 manual ownership repair changes state routing, not the validated FUSED rendering architecture.
+6. Extreme-emitter AUTO is physical and continuous, not semantic. Pressure requires all three: a real ~3EV physical SHORT/LONG bracket, substantial LONG near-clipping, and unusually strong highlight survival in SHORT P99/near-clip evidence.
+7. At full extreme-emitter pressure, AUTO presentation blends to Brightness -1.4EV and Gamma 1.15 and reuses the existing MANUAL SAFE automatic Dehaze/Micro formula. Partial pressure blends continuously. At zero pressure, ordinary AUTO presentation is exactly V2.36.
+8. The supplied direct-sun fixture reaches full pressure. Supplied Costco, restaurant and bright-car fixtures reach zero pressure. No sun/daylight/object name, scene classifier, or cross-scene histogram target is encoded.
+9. V2.36 CFA reconstruction, Claude highlight correction, raw_chroma_dealias, fusion/registration, SHORT/LONG acquisition, DNG/media ownership, NAFNet, HdrGlView GPU allocation/lifetime and saved capture freeze remain protected unless explicitly listed above.
 
-V2.36 COMPLETE CORRECTION CONTRACT
-1. Preserve the successful V2.35 Claude saturated-highlight root correction: common parent-2x2 physical clipping permission, pre-WB physical 0.985 clipping domain, absolute opponent support, and power-3 highlightCalculationSample remain in purpose and ownership.
-2. Complete ordinary CFA green reconstruction in the same calculation-WB domain used by old Iris: edgeGreen uses +/-1 green observations, +/-2 same-phase curvature, directional second-order correction, gradient selection and immediate-green-envelope clamping. This is the first Viewfinder build to test that exact edge geometry; no Sabre/VGN topology is imported.
-3. Form R-G/B-G opponent observations only after normalized calculation WB (R=wbR/commonGreen, B=wbB/commonGreen, G=1). Reconstruct RGB in that common calculation domain, then restore Camera2's absolute common green scale exactly once before the unchanged color transform. This prevents the V2.35 mixed-domain edge failure from manufacturing cyan/yellow color at luminance edges.
-4. Keep strict 2x2 clipping as COLOR permission but do not print the binary permission as a hard 2x2 RGB fallback. Each physically censored Bayer phase contributes 0.25 to a phase-invariant bilinearly expanded censored fraction used only for the terminal neutral rolloff.
-5. Retire the stale downstream distant hue authority: raw_chroma_dealias no longer searches fixed +/-4..10 pixel distances for boundary chromaticity. It remains only a local sigma-normalized, luminance-preserving chroma/periodic-alias cleanup and may not become a second highlight-color owner.
-6. AUTO brightness remains scene-adaptive. Physical SHORT/LONG capture/exposure and SNR ownership are unchanged. Saved presentation may choose negative brightness/gamma correction from the current scene, but software brightness rescue is capped at +0.0 EV and gamma at 1.65. No restaurant, Costco or other cross-scene histogram/luminance target is encoded.
-7. No denoise redesign in this build. The V2.35 samples contain both genuine grain and reconstruction-manufactured chroma noise; NAFNet remains protected so residual noise can be judged only after CFA color corruption is removed.
-8. No registration/fusion redesign. JpegFusion, SHORT/LONG source ownership, 3-EV acquisition, DNG/media ownership, GPU allocation/lifetime and saved highlight transfer remain successful V2.35 mechanics.
+PERMANENT REGRESSIONS ADDED
+- Manual Brightness/Gamma slider is the sole MANUAL SAFE live B/G owner; controller callback may not overwrite it.
+- Automatic Dehaze/Micro remain independent and may update while manual B/G remains user-owned.
+- SPLIT applies only user-owned manual B/G and must not introduce Dehaze/Micro or any FUSED clarity/tone/fusion architecture.
+- Exact successful V2.36 live FUSED and saved FUSED shader blocks remain byte-identical.
+- Extreme-emitter fixture requires real bracket + LONG clip mass + SHORT highlight survival; the supplied direct-sun fixture activates while supplied negative fixtures remain zero.
+- Generic daylight/sun/object/scene-name or cross-scene histogram matching remains forbidden.
 
-PERMANENT DEVICE-SAMPLE REGRESSIONS
-- V2.35 magenta-highlight regression remains permanent: common-quad clipping must continue to prevent the old green_acc=0.962 / rg=bg=+0.519 failure.
-- Neutral-edge WB-domain regression: a neutral R observation whose local green and target green straddle an edge must remain neutral when opponent color is transported to the target; V2.35's mixed-domain ordering must remain forbidden.
-- EdgeGreen regression: exact +/-1 / +/-2 directional second-order geometry and immediate-green clamping must remain present in the active Viewfinder green owner.
-- Censored-phase continuity regression: one clipped Bayer phase equals 0.25 censored fraction for terminal rolloff while strict opponent permission is still zero for the whole parent quad.
-- Chroma-owner regression: fixed-distance boundary hue donation after CFA reconstruction is forbidden.
-- AUTO regression: no positive saved-presentation EV rescue above 0.0 EV and no gamma above 1.65; this is a policy ceiling, not a cross-scene brightness target.
-
-INTENDED V2.35 -> V2.36 RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 4
-- app/src/main/assets/shaders/raw_chroma_dealias.frag [MODIFY]
-- app/src/main/assets/shaders/raw_green.frag [MODIFY]
-- app/src/main/assets/shaders/raw_reconstruct.frag [MODIFY]
+INTENDED V2.36 -> V2.37 RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 3
+- app/src/main/assets/shaders/hdr_display.frag [MODIFY]
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java [MODIFY]
+- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java [MODIFY]
 
-PROTECTED V2.35 RUNTIME — EXACTLY 18 BYTE-IDENTICAL FILES
+PROTECTED V2.36 RUNTIME — EXACTLY 19 BYTE-IDENTICAL FILES
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/licenses/NAFNet_LICENSE.txt
 - app/src/main/assets/nafnet_sidd_width32_fp16.tflite
 - app/src/main/assets/shaders/copy_2d.frag
 - app/src/main/assets/shaders/fullscreen.vert
-- app/src/main/assets/shaders/hdr_display.frag
 - app/src/main/assets/shaders/oes_to_rgb.frag
+- app/src/main/assets/shaders/raw_chroma_dealias.frag
+- app/src/main/assets/shaders/raw_green.frag
 - app/src/main/assets/shaders/raw_preprocess.frag
 - app/src/main/assets/shaders/raw_proxy.frag
+- app/src/main/assets/shaders/raw_reconstruct.frag
 - app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
-- app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java
-
-PROTECTED SUCCESSFUL V2.35 IMAGE/PIPELINE MECHANICS
-- hdr_display.frag remains byte-identical: no ceiling/highlight-presentation rewrite in V2.36.
-- raw_preprocess.frag remains byte-identical: physical saturation, lens shading, noise and hot/CFA outlier ownership are unchanged.
-- HdrGlView.java remains byte-identical: V2.35 physical RAW/WB/clip/ceiling guide bindings and all GL allocation/lifetime mechanics are unchanged.
-- JpegFusion.java remains byte-identical: registration/fusion, LONG geometry, SHORT displacement/source selection and acquisition are unchanged.
-- NAFNet remains byte-identical: no attempt to hide CFA artifacts by increasing denoise.
-- DNG/media ownership and model packaging remain unchanged.
 
 BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - .github/workflows/build.yml
@@ -96,7 +85,7 @@ BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-Yes, only for V2.36 authority/version/hash/allowlist/regression/output identities and the new four-file runtime semantic contracts. The V2.35 authority reconstruction, compiler, patch, assemble, post-build invariance and artifact-export mechanics/order remain unchanged.
+Yes, only for V2.37 authority/version/hash/allowlist/regression/output identities and the three-file runtime semantic contracts. The one lineage identity returns from the V2.36 R1 repair-only HEAD^^ proof to the normal direct-parent successful-V2.36 proof. Compiler, GLSL, Java, patch, assemble, invariance and artifact-export step ordering/mechanics remain unchanged.
 
 DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - PACKAGE_INFO.txt
@@ -104,15 +93,15 @@ DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-TOTAL EXPECTED V2.35 -> V2.36 TRACKED CHANGESET — EXACTLY 12 PATHS
-Runtime: 4. Infrastructure: 4. Delivery documents: 4.
+TOTAL EXPECTED V2.36 -> V2.37 TRACKED CHANGESET — EXACTLY 11 PATHS
+Runtime: 3. Infrastructure: 4. Delivery documents: 4.
 Candidate tracked universe: exactly 35 files.
 Runtime universe: exactly 22 app/src files.
-V2.36 runtime manifest digest: 8e6f7d232a9723fb6a5dc26806e8694878e4547ece03771f2329e68a00690df1
+V2.37 runtime manifest digest: 1c655d9486d75a038fbc8c531431861f8cd23d1ccf6205c2b9b92775d17730a3
 
 COMPILER STATUS BEFORE ACTIONS
 REAL PINNED GLSL COMPILE: NOT RUN locally; mandatory Actions gate.
 REAL KOTLIN COMPILE: N/A.
-REAL PROJECT JAVA COMPILE: NOT RUN locally; CameraController.java is modified and the mandatory Actions gate must compile it.
+REAL PROJECT JAVA COMPILE: NOT RUN locally; CameraController.java and MainActivity.java are modified and the mandatory Actions gate must compile them.
 FULL ANDROID :app:assembleDebug: NOT RUN locally; mandatory Actions gate.
-FINAL ACTIONS AUTHORITY: successful V2.35 run 34358340770 until V2.36 passes.
+FINAL ACTIONS AUTHORITY: successful V2.36 run 34477638919 until V2.37 passes.
