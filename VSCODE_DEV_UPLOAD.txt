@@ -1,10 +1,10 @@
-V1.4.11 V2.37 — MANUAL LIVE PRESENTATION + EXTREME-EMITTER AUTO
+V1.4.11 V2.38 — MOTION ROBUSTNESS + UNIVERSAL MICRODETAIL + SATURATED-EDGE CHROMA
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
 Required current parent / runtime authority:
-1268c56ae19bcff6a8c9bec42fdc9c911a8436d4
-Successful Actions run: 34477638919
-Successful artifact: 10152261992 / Iris-HDR-Viewfinder-Test-V1.4.11-V2.36
+020975e80802560a25c4aaa39c2b6aab93f1dcc0
+Successful Actions run: 34507561872
+Successful artifact: 10164509321 / Iris-HDR-Viewfinder-Test-V1.4.11-V2.37
 
 UPLOAD / REPLACE THESE 11 FLAT FILES
 
@@ -24,23 +24,23 @@ UPLOAD / REPLACE THESE 11 FLAT FILES
    -> app/build.gradle.kts
 8. hdr_display.frag
    -> app/src/main/assets/shaders/hdr_display.frag
-9. CameraController.java
-   -> app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-10. MainActivity.java
-   -> app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
+9. raw_chroma_dealias.frag
+   -> app/src/main/assets/shaders/raw_chroma_dealias.frag
+10. JpegFusion.java
+   -> app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 11. verify_orientation.py
    -> scripts/verify_orientation.py
 
 BEFORE COMMIT
 Source Control must show exactly 11 modified files, 0 added files and 0 deleted files.
 No other app/src/** file may appear.
-In particular, raw_green.frag, raw_reconstruct.frag, raw_chroma_dealias.frag, HdrGlView.java, JpegFusion.java and NafNetDenoiser.java must NOT appear.
+In particular, CameraController.java, MainActivity.java, HdrGlView.java, raw_green.frag, raw_reconstruct.frag, RawFusion.java and NafNetDenoiser.java must NOT appear.
 
 TARGET VERSION
-versionCode 55
-versionName 1.0-v1.4.11-v2.37
+versionCode 56
+versionName 1.0-v1.4.11-v2.38
 
 Suggested commit message:
-V1.4.11 V2.37 manual live presentation and extreme-emitter AUTO
+V1.4.11 V2.38 motion robustness microdetail and saturated-edge chroma
 
 GitHub Actions is authoritative for pinned real GLSL, real Java and full :app:assembleDebug proof.

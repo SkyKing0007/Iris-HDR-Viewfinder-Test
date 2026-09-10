@@ -113,6 +113,36 @@ final class JpegFusion {
         }
     }
 
+    // IRIS_V238_TILED_GLOBAL_CONSENSUS_BEGIN
+    // Whole-frame correlation can be dominated by one independently moving foreground
+    // object.  Keep V2.37's proven gradient matcher, but validate/replace its coarse
+    // translation with a spatially distributed tile consensus when enough independent
+    // regions agree.  No optical-flow model or semantic object detector is introduced.
+    private static final class TileConsensus {
+        final float dx;
+        final float dy;
+        final float confidence;
+        final int inliers;
+        final float supportFraction;
+        final boolean valid;
+
+        TileConsensus(
+                float dx,
+                float dy,
+                float confidence,
+                int inliers,
+                float supportFraction,
+                boolean valid) {
+            this.dx = dx;
+            this.dy = dy;
+            this.confidence = confidence;
+            this.inliers = inliers;
+            this.supportFraction = supportFraction;
+            this.valid = valid;
+        }
+    }
+    // IRIS_V238_TILED_GLOBAL_CONSENSUS_END
+
     private static final class OneWayRegistration {
         final float sampleDx;
         final float sampleDy;
@@ -250,16 +280,171 @@ final class JpegFusion {
             float uniqueness = smoothstep(0.002f, 0.012f, margin);
             float boundary = (Math.abs(bestX) < radius && Math.abs(bestY) < radius) ? 1.0f : 0.0f;
             float confidence = quality * uniqueness * boundary;
+
+            // V2.38 motion robustness: a single moving person/car must not become the
+            // whole-frame camera-motion authority.  Use the old whole-frame solution
+            // unchanged when it agrees with a distributed tile consensus.  Only when a
+            // strong consensus exists AND materially disagrees do we replace the coarse
+            // anchor with the spatially distributed background hypothesis.
+            TileConsensus consensus = estimateTileConsensus(
+                    referenceGx, referenceGy, movingGx, movingGy,
+                    smallWidth, smallHeight, radius);
+            float selectedX = subX;
+            float selectedY = subY;
+            float selectedCoarseX = bestX;
+            float selectedCoarseY = bestY;
+            float selectedConfidence = confidence;
+            if (consensus.valid) {
+                float disagreement = (float) Math.hypot(
+                        consensus.dx - subX, consensus.dy - subY);
+                if (disagreement > 0.85f) {
+                    selectedX = consensus.dx;
+                    selectedY = consensus.dy;
+                    selectedCoarseX = consensus.dx;
+                    selectedCoarseY = consensus.dy;
+                    selectedConfidence = consensus.confidence;
+                } else {
+                    // Agreement is evidence, not a new transform. Preserve V2.37's
+                    // subpixel solution and only prevent an anomalously weak global
+                    // uniqueness score from discarding a distributed static consensus.
+                    selectedConfidence = Math.max(
+                            selectedConfidence, 0.85f * consensus.confidence);
+                }
+            }
+
             float invScale = 1.0f / scale;
             return new OneWayRegistration(
-                    subX * invScale, subY * invScale,
-                    bestX * invScale, bestY * invScale,
-                    bestScore, margin, confidence);
+                    selectedX * invScale, selectedY * invScale,
+                    selectedCoarseX * invScale, selectedCoarseY * invScale,
+                    bestScore, margin, selectedConfidence);
         } finally {
             if (movingSmall != movingBitmap) recycle(movingSmall);
             if (referenceSmall != referenceBitmap) recycle(referenceSmall);
         }
     }
+
+    // IRIS_V238_TILED_GLOBAL_CONSENSUS_HELPER_BEGIN
+    private static TileConsensus estimateTileConsensus(
+            float[] referenceGx,
+            float[] referenceGy,
+            float[] movingGx,
+            float[] movingGy,
+            int width,
+            int height,
+            int searchRadius) {
+        final int tilesX = 5;
+        final int tilesY = 4;
+        final int maxTiles = tilesX * tilesY;
+        final float inlierRadius = 1.35f;
+        int windowRadius = Math.max(8, Math.min(18, Math.min(width, height) / 12));
+        int border = windowRadius + searchRadius + 3;
+        if (width <= 2 * border + 1 || height <= 2 * border + 1) {
+            return new TileConsensus(0.0f, 0.0f, 0.0f, 0, 0.0f, false);
+        }
+
+        float[] dx = new float[maxTiles];
+        float[] dy = new float[maxTiles];
+        float[] weight = new float[maxTiles];
+        float[] centerX = new float[maxTiles];
+        float[] centerY = new float[maxTiles];
+        int count = 0;
+        float totalWeight = 0.0f;
+        for (int ty = 0; ty < tilesY; ty++) {
+            int cy = Math.round((ty + 0.5f) * height / tilesY);
+            cy = Math.max(border, Math.min(height - border - 1, cy));
+            for (int tx = 0; tx < tilesX; tx++) {
+                int cx = Math.round((tx + 0.5f) * width / tilesX);
+                cx = Math.max(border, Math.min(width - border - 1, cx));
+                LocalMatch match = localGradientMatch(
+                        referenceGx, referenceGy, movingGx, movingGy,
+                        width, height, cx, cy, searchRadius, windowRadius);
+                if (match.confidence < 0.12f || match.score < 0.28f) continue;
+                float w = 0.20f + match.confidence;
+                dx[count] = match.dx;
+                dy[count] = match.dy;
+                weight[count] = w;
+                centerX[count] = cx;
+                centerY[count] = cy;
+                totalWeight += w;
+                count++;
+            }
+        }
+        if (count < 5 || totalWeight <= 0.0f) {
+            return new TileConsensus(0.0f, 0.0f, 0.0f, 0, 0.0f, false);
+        }
+
+        int bestHypothesis = -1;
+        float bestSupport = 0.0f;
+        for (int h = 0; h < count; h++) {
+            float support = 0.0f;
+            for (int i = 0; i < count; i++) {
+                float distance = (float) Math.hypot(dx[i] - dx[h], dy[i] - dy[h]);
+                if (distance <= inlierRadius) support += weight[i];
+            }
+            if (support > bestSupport) {
+                bestSupport = support;
+                bestHypothesis = h;
+            }
+        }
+        if (bestHypothesis < 0) {
+            return new TileConsensus(0.0f, 0.0f, 0.0f, 0, 0.0f, false);
+        }
+
+        float sumWeight = 0.0f;
+        float sumDx = 0.0f;
+        float sumDy = 0.0f;
+        int inliers = 0;
+        float minX = width;
+        float maxX = 0.0f;
+        float minY = height;
+        float maxY = 0.0f;
+        for (int i = 0; i < count; i++) {
+            float distance = (float) Math.hypot(
+                    dx[i] - dx[bestHypothesis], dy[i] - dy[bestHypothesis]);
+            if (distance > inlierRadius) continue;
+            float w = weight[i];
+            sumDx += dx[i] * w;
+            sumDy += dy[i] * w;
+            sumWeight += w;
+            inliers++;
+            minX = Math.min(minX, centerX[i]);
+            maxX = Math.max(maxX, centerX[i]);
+            minY = Math.min(minY, centerY[i]);
+            maxY = Math.max(maxY, centerY[i]);
+        }
+        if (inliers < 4 || sumWeight <= 0.0f) {
+            return new TileConsensus(0.0f, 0.0f, 0.0f, inliers, 0.0f, false);
+        }
+
+        float meanDx = sumDx / sumWeight;
+        float meanDy = sumDy / sumWeight;
+        float variance = 0.0f;
+        for (int i = 0; i < count; i++) {
+            float distance = (float) Math.hypot(
+                    dx[i] - dx[bestHypothesis], dy[i] - dy[bestHypothesis]);
+            if (distance > inlierRadius) continue;
+            float ddx = dx[i] - meanDx;
+            float ddy = dy[i] - meanDy;
+            variance += weight[i] * (ddx * ddx + ddy * ddy);
+        }
+        float rms = (float) Math.sqrt(variance / Math.max(sumWeight, 0.0001f));
+        float supportFraction = sumWeight / Math.max(totalWeight, 0.0001f);
+        float spanX = (maxX - minX) / Math.max(width, 1.0f);
+        float spanY = (maxY - minY) / Math.max(height, 1.0f);
+        float distributed = smoothstep(0.38f, 0.72f, spanX + spanY);
+        float supportConfidence = smoothstep(0.48f, 0.72f, supportFraction);
+        float countConfidence = smoothstep(3.0f, 7.0f, inliers);
+        float residualConfidence = 1.0f - smoothstep(0.55f, 1.10f, rms);
+        float confidence = distributed * supportConfidence
+                * countConfidence * residualConfidence;
+        boolean valid = inliers >= 4
+                && supportFraction >= 0.50f
+                && distributed >= 0.35f
+                && confidence >= 0.14f;
+        return new TileConsensus(
+                meanDx, meanDy, confidence, inliers, supportFraction, valid);
+    }
+    // IRIS_V238_TILED_GLOBAL_CONSENSUS_HELPER_END
 
     static Bitmap alignLongToShort(Bitmap longBitmap, Registration registration) {
         Bitmap aligned = Bitmap.createBitmap(
@@ -322,6 +507,10 @@ final class JpegFusion {
             float[] rawDx = new float[count];
             float[] rawDy = new float[count];
             float[] rawConfidence = new float[count];
+            // V2.38 alpha authority distinguishes a directly cycle-validated local
+            // match from a hole merely filled by coherent neighboring camera motion.
+            // Inferred cells may help topology continuity, but may never warp final RGB.
+            boolean[] directSupport = new boolean[count];
             float invScale = 1.0f / scale;
 
             for (int gy = 0; gy < gridHeight; gy++) {
@@ -363,6 +552,7 @@ final class JpegFusion {
                     rawDx[i] = dx;
                     rawDy[i] = dy;
                     rawConfidence[i] = confidence;
+                    directSupport[i] = confidence > 0.0f;
                 }
             }
 
@@ -516,7 +706,9 @@ final class JpegFusion {
                             255.0f * (0.5f + 0.5f * dy / maxResidualPixels));
                     rgba[o + 2] = (byte) Math.round(
                             255.0f * clamp(centerConfidence, 0.0f, 1.0f));
-                    rgba[o + 3] = (byte) 255;
+                    // Alpha is V2.38 final-warp authority: 255 only for cells whose
+                    // own forward/backward local measurement survived the strict gate.
+                    rgba[o + 3] = directSupport[i] ? (byte) 255 : (byte) 0;
                     confidenceSum += centerConfidence;
                     if (centerConfidence >= 0.30f) supported++;
                     observedMax = Math.max(observedMax, (float) Math.hypot(dx, dy));
@@ -539,7 +731,7 @@ final class JpegFusion {
     private static LocalRegistrationField neutralLocalRegistration(float maxResidualPixels) {
         return new LocalRegistrationField(
                 1, 1,
-                new byte[] {(byte) 128, (byte) 128, 0, (byte) 255},
+                new byte[] {(byte) 128, (byte) 128, 0, 0},
                 0.0f, 0.0f, maxResidualPixels, 0.0f);
     }
 

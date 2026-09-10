@@ -1,13 +1,15 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.37
+# Iris HDR Viewfinder Test V1.4.11 V2.38
 
-V2.37 is a localized presentation-control correction on the exact successful V2.36 compiled candidate: commit `1268c56ae19bcff6a8c9bec42fdc9c911a8436d4`, tree `9665c112f2ab7c0aa0cc6d05cbce77894cacda24`, Actions run `34477638919`, artifact `10152261992`.
+V2.38 is an architectural fusion/alignment robustness correction on the exact successful V2.37 compiled candidate: commit `020975e80802560a25c4aaa39c2b6aab93f1dcc0`, tree `6f4c94ae1c6eaadbaa78dcac50e04cccbdf9dc57`, Actions run `34507561872`, artifact `10164509321`.
 
-V2.36 remains the image-quality authority. Its CFA/highlight reconstruction, fusion/registration, acquisition, denoise and saved FUSED output are protected. V2.37 corrects only two device-proven presentation problems:
+V2.37 remains the presentation/color/highlight authority. V2.38 changes exactly three runtime files to address three device-proven failures without adding sharpening, semantic scene logic or a second fusion pipeline:
 
-- In HDR MANUAL SAFE, Brightness/Gamma become the sole user-owned live controls. Their labels and renderer update immediately from the sliders; asynchronous automatic presentation callbacks may update Dehaze/Microcontrast but may not move or overwrite manual Brightness/Gamma.
-- SPLIT gains a preview-only manual presentation branch: both halves consume the same user-owned Brightness/Gamma values. Automatic Dehaze/Micro continues to be solved and stored for FUSED output but is deliberately not applied in SPLIT, preserving SPLIT as a direct SHORT/LONG diagnostic comparison with no FUSED clarity/body-tone/HDR-shoulder logic.
-- Live FUSED and saved FUSED shader bodies remain byte-identical to V2.36. CameraController continues to freeze the exact selected manual Brightness/Gamma/Dehaze/Micro values at shutter time, preserving the final FUSED JPEG behavior already validated on device.
-- AUTO gains a narrowly scoped extreme-emitter presentation pressure. It requires a real ~3EV physical bracket, substantial LONG clipping, and strong highlight survival in SHORT. At full pressure it blends toward the user-proven direct-sun presentation (`-1.4 EV`, `gamma 1.15`) and reuses the existing MANUAL SAFE automatic Dehaze/Micro formula. Supplied Costco, restaurant and bright-car fixtures remain zero-pressure V2.36 AUTO.
-- No sun/daylight/object classifier or cross-scene histogram normalization is used; ordinary scenes retain V2.36 AUTO unchanged.
+- `JpegFusion.java`: whole-frame registration is audited by a spatially distributed 5x4 tile consensus so a moving foreground cannot easily become global camera-motion authority. Local-flow alpha distinguishes direct cycle-validated measurements from inferred/fill cells.
+- `hdr_display.frag`: only direct confident local residuals may warp final SHORT; pre-clamp source bounds are mandatory; non-clipped effective recovery requires full-resolution static correspondence; saved RAW fusion adds a noise-normalized 1.5px microstructure class so genuine SHORT grass/pine-needle/hair/fabric/text/mesh detail can own complete RGB when LONG demonstrably lost it.
+- `raw_chroma_dealias.frag`: the existing physical RAW saturation bit enables a strictly local saturated-edge chroma reliability correction using unsaturated same-luminance-side support while preserving center luminance. Distant hue donors and blanket desaturation remain forbidden.
 
-Build mechanics retain the successful V2.36 sequence: exact Actions-artifact authority reconstruction, strict changed-file allowlist, deterministic full-index forward/rollback proof at `core.abbrev` 7/12/40 plus GNU `fuzz=0` text replay, pinned real GLSL, real project Java, full `:app:assembleDebug`, post-build candidate/protected invariance and final compiled-candidate artifact export.
+Motion/disocclusion is deliberately fail-closed: where temporal correspondence is not trustworthy, immutable LONG remains the source instead of forcing alignment. Physical hard clipping can still use bounded SHORT HDR recovery when real source bounds exist; V2.38 does not invent correspondence between two genuinely different moving moments.
+
+V2.37 manual Brightness/Gamma ownership, SPLIT preview behavior, extreme-emitter AUTO rendering, FUSED presentation/tone, CFA common-quad highlight reconstruction, RAW color matrices, acquisition, DNG/media ownership, NAFNet and GPU lifetime/allocation are protected.
+
+Build mechanics retain the successful V2.37 15-step sequence: exact Actions-artifact authority reconstruction, strict allowlist, deterministic full-index forward/rollback proof at `core.abbrev` 7/12/40 plus GNU `fuzz=0` replay, pinned real GLSL, real project Java, full `:app:assembleDebug`, post-build candidate/protected invariance and final compiled-candidate artifact export.

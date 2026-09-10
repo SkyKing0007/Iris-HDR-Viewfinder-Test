@@ -32,7 +32,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.37 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.38 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -62,7 +62,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.37 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.38 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -86,8 +86,8 @@ require(sha_text(frozen_shader_section(
             hdr_shader,
             '// IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN',
             '// IRIS_V217_REVERSED_V215_LONG_TRUTH_END'))
-        == '4e0741c2882ae3c326ee113387bff056eed06f3ebf463866dfc585173f75dcd7',
-        'V2.34 must not modify successful V2.33 registration/evidence/physical-loss fusion math')
+        == '89f964f23b570ce4b992489b9aed513945315b78a8287c71892c9360c571cd03',
+        'V2.38 fusion evidence/physical-loss section must equal the reviewed motion+microdetail candidate bytes')
 require(sha_text(frozen_shader_section(
             hdr_shader,
             '// IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_BEGIN',
@@ -98,8 +98,8 @@ require(sha_text(frozen_shader_prefix(
             hdr_shader,
             '    if (mode == 5) {',
             '        vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;'))
-        == 'b212d64c45a9cafd70b3da2dd4c2d6e6a18d33b028a4ad9fe54ce9e69a6931cf',
-        'V2.34 must not modify successful V2.33 mode-5 SHORT/LONG source ownership or geometry')
+        == '83865324af3cc09bda7ad27c197b45588e2d75fc3a18b307752e59993ec40e3b',
+        'V2.38 mode-5 SHORT/LONG source-selection prefix must equal the reviewed fail-closed candidate bytes')
 require(sha_text(frozen_shader_prefix(
             hdr_shader,
             'vec3 adaptiveHdrToneMap(',
@@ -120,8 +120,44 @@ require(sha_text(normalized_v235_hdrgl(gl))
         == 'b6be39e9d6cbe6c3fe22cbf2dfc7d74ebe3eb2a098c5964ed330fca6ccfdce9c',
         'V2.35 may change only renderRawGreen calls/bindings inside V2.34 HdrGlView; allocation/lifetime/registration plumbing is frozen')
 require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java').read_bytes()).hexdigest()
-        == '569754e8043928cf86b1f1d34f2ad6b2885e3bf7948789725d4c2092129d4782',
-        'V2.34 must not modify V2.33 JpegFusion registration mechanics')
+        == '1338ca1e5dd08d80c06a844edb012fc4920fd6f9099792c437eb95bf7f344d36',
+        'V2.38 JpegFusion must equal the reviewed tiled-consensus/direct-support candidate bytes')
+
+# V2.38 exact runtime freeze. The three intended runtime owners are pinned to the
+# reviewed candidate bytes; all other 19 app/src files are pinned byte-for-byte to
+# successful V2.37. This is intentionally stronger than a changed-file allowlist.
+V238_RUNTIME_SHA256 = {
+    'app/src/main/AndroidManifest.xml': 'e1299d6cf61cfcb79cbfe3e1e7d46f3ab2a11b65ba116d7f2d328b51d4180a92',
+    'app/src/main/assets/licenses/NAFNet_LICENSE.txt': '71e12b4b6218af984e66cca1c3be81c6774828bc14c6eadde42007e317784e4f',
+    'app/src/main/assets/nafnet_sidd_width32_fp16.tflite': 'f8fbaa422411683c53e802cf7cc7cf9be0a0de00886ad4af057232e26b172a0c',
+    'app/src/main/assets/shaders/copy_2d.frag': 'b6b890e3be034a0d4980fd324fe0f469c7a2b0a126e958607bc8c4b9fbf97a55',
+    'app/src/main/assets/shaders/fullscreen.vert': '7d8ee58c4500a46dd9614404a17ea4c7e104a6bf43976ecb85795799fdcd7fb4',
+    'app/src/main/assets/shaders/hdr_display.frag': '8041fe6433d639430872202c469f813bfbe447f2cfac512add6ad86cdc8d121c',
+    'app/src/main/assets/shaders/oes_to_rgb.frag': '388d49929564efba24900794e035f88b461485f4da4f2e12caf71e3531ab6443',
+    'app/src/main/assets/shaders/raw_chroma_dealias.frag': '927bd790856c604d3289fbc07f68ed81960b3ecb9631905bf6be38e717a6e0a7',
+    'app/src/main/assets/shaders/raw_green.frag': '2e10f434b527041b4a499cc943b08b2e217c714f6cc3696ff6ca89bdf57e89cb',
+    'app/src/main/assets/shaders/raw_preprocess.frag': '87f11cdd5f678977648cefadd181d21813c3bf23ee1107a3688772a4d46a3982',
+    'app/src/main/assets/shaders/raw_proxy.frag': 'ec1ce9e4acd78f68d20a9ca54784f0ccb6006eff80fdb3a1277e7bc44f4a768d',
+    'app/src/main/assets/shaders/raw_reconstruct.frag': '01594852fe05aa1f35676d99d0c26b3ec7523823e11ad3a880a62250c3a20427',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'ec0ecc32485b14fe5e41baf4796e6a16ce6895a1f8f5d27adad71e52f7315662',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': '5d8fcc04bba01fcf9625922421a338f187c0897e0c84f131a1fc343db7e487ce',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': 'e05484de966351424d3a5399eb159daccba766ed177c973b4b7529af014a60c5',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': 'd3450b99b9737236ba61abd1f0c3f56ce1a2f220e858ce87878625eefc69046a',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java': '28fce3e4f8450d7579c1622ff832b3073a4707a181578e69a8b6a32ee90f5f8e',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': '1338ca1e5dd08d80c06a844edb012fc4920fd6f9099792c437eb95bf7f344d36',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java': '5438003b339291a2999c214e86927ccda324eaee0d08cfe798c0d4eb366498df',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java': 'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java': '2969216e4032d4845160db7940d612d18738f0731b612a035deebeb97aaad731',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java': 'd70c676456dc6083ff3fa8b8dc8edd19bbfa6f6b0b5515ba6c492e3784b33e0f',
+}
+runtime_files = sorted(p for p in (ROOT / 'app/src').rglob('*') if p.is_file())
+require(len(runtime_files) == 22, f'V2.38 exact runtime universe must contain 22 files, found {len(runtime_files)}')
+require(set(V238_RUNTIME_SHA256) == {p.relative_to(ROOT).as_posix() for p in runtime_files},
+        'V2.38 runtime SHA pin set must exactly equal the 22-file runtime universe')
+for rel, expected_sha in V238_RUNTIME_SHA256.items():
+    actual_sha = hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
+    require(actual_sha == expected_sha, f'V2.38 runtime byte freeze mismatch: {rel}')
+
 # V2.37 is a localized presentation-control change on exact successful V2.36.
 # Normalize ONLY the three agreed V2.37 runtime owners back to their V2.36 bytes and
 # hash the result. This prevents a UI repair or extreme-emitter style from silently
@@ -244,8 +280,8 @@ def normalized_v237_hdr_shader(text):
     return text.replace(new_split, old_split, 1)
 
 require(sha_text(normalized_v237_hdr_shader(hdr_shader))
-        == 'f0b24371e0a063a492f3602798e39f5e447c29534f336b779d5fc4bb6e1fa96e',
-        'V2.37 hdr_display changes escaped the SPLIT-only presentation allowlist')
+        == '0943c71b31a3a19542c46ed40c0651171a5f34fd4a1b87d036679d2c08edbf1a',
+        'V2.38 hdr_display escaped the reviewed V2.37 SPLIT plus V2.38 fusion/geometry candidate bytes')
 
 require(hashlib.sha256((ROOT / 'app/src/main/assets/shaders/raw_preprocess.frag').read_bytes()).hexdigest()
         == '87f11cdd5f678977648cefadd181d21813c3bf23ee1107a3688772a4d46a3982',
@@ -920,13 +956,13 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# V2.37 runtime authority is the exact last successful compiler-tested V2.36 R1
+# V2.38 runtime authority is the exact last successful compiler-tested V2.37
 # candidate/artifact. Older versions remain behavioral/reference evidence only.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.36' in workflow
-        and 'run-id: 34477638919' in workflow
-        and "authority='1268c56ae19bcff6a8c9bec42fdc9c911a8436d4'" in workflow
-        and "authority_tree='9665c112f2ab7c0aa0cc6d05cbce77894cacda24'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.36 Actions authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.37' in workflow
+        and 'run-id: 34507561872' in workflow
+        and "authority='020975e80802560a25c4aaa39c2b6aab93f1dcc0'" in workflow
+        and "authority_tree='6f4c94ae1c6eaadbaa78dcac50e04cccbdf9dc57'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.37 Actions authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1638,8 +1674,8 @@ require('if (confidence < 0.28f)' in fusion
 local_registration_slice = fusion[fusion.index('    static LocalRegistrationField estimateLocalRegistration('):
                                   fusion.index('    private static LocalRegistrationField neutralLocalRegistration')]
 require(hashlib.sha256(local_registration_slice.encode()).hexdigest() ==
-        'ef711f360d9d5c65ad95af2f81a6862ecefbd3c555ac225faa87bf3cc5c7b525',
-        "V2.28 must not redesign the proven V2.27 local bidirectional residual field")
+        'c1d94cff2d84c8f3525b4112e0b429547794de653d8ae62e2e35c8e3002ef8f8',
+        "V2.38 local bidirectional residual field must equal the reviewed direct-support candidate bytes")
 require('GPU_STILL_RAW_LOCAL_REGISTRATION' in gl
         and 'uploadRgba8Texture(' in gl
         and 'localRegistration.rgba);' in gl
@@ -1745,7 +1781,7 @@ require('meanFlowPixels' in v222_recon
 # globally registered SHORT bitmap through stillShortRgbAt().
 require('IRIS_V229_FULL_RES_FINAL_SHORT_OWNERSHIP_BEGIN' in hdr_shader
         and 'float connectedRecovery = step(0.50, support.r);' in hdr_shader
-        and 'float fullResolutionLoss = longLossRecoveryDomainAt(uv);' in hdr_shader
+        and 'float fullResolutionLoss = finalLongLossRecoveryAt(uv);' in hdr_shader
         and 'float shortOwns = connectedRecovery * step(0.08, fullResolutionLoss);' in hdr_shader
         and 'vec4 shortRaw = savedShortLinearAt(uv);' in hdr_shader
         and 'vec4 longRaw = savedLongLinearAt(uv);' in hdr_shader,
@@ -1756,9 +1792,10 @@ require('support.ba' not in v217_mode5
         and 'propagatedResidualPixels' not in v217_mode5
         and 'shortOwnedUv' not in v217_mode5,
         "V2.29 final raster must not consume path-propagated atlas flow")
-require(v217_mode5.count('longLossRecoveryDomainAt(uv)') == 1
+require(v217_mode5.count('finalLongLossRecoveryAt(uv)') == 1
+        and 'longLossRecoveryDomainAt(uv)' not in v217_mode5
         and 'shortRecoveryEvidenceAt(uv)' not in v217_mode5,
-        "V2.32 final raster must prove physical source domain exactly once at the output pixel")
+        "V2.38 final raster must prove physical/effective source domain exactly once behind the full-resolution motion barrier")
 require('vec3 temporalBody = mix(longScene, bodyShortScene, bodyShortWeight);' in v217_mode5
         and 'vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;' in v217_mode5,
         "V2.29 must preserve binary SHORT highlight ownership over LONG-default temporal body")
@@ -1865,8 +1902,8 @@ require('registration.sampleDx, registration.sampleDy' in saved_fusion_slice
         and 'setTextureFilter(longTexture, GLES30.GL_NEAREST);' in saved_fusion_slice,
         "V2.30 must align only SHORT while retaining immutable LONG output geometry")
 require(hashlib.sha256(fusion.encode()).hexdigest() ==
-        '569754e8043928cf86b1f1d34f2ad6b2885e3bf7948789725d4c2092129d4782',
-        "V2.30 must not reopen successful V2.29 JpegFusion registration math")
+        '1338ca1e5dd08d80c06a844edb012fc4920fd6f9099792c437eb95bf7f344d36',
+        "V2.38 JpegFusion registration bytes must equal the reviewed motion-robust candidate")
 v226_mode4 = hdr_shader[hdr_shader.index('    if (mode == 4) {'):
                           hdr_shader.index('    // IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_END')]
 v226_mode4_code = ' '.join(
@@ -2114,9 +2151,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 55' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.37"' in build_gradle,
-        "V2.37 version/build marker must be exact")
+require('versionCode = 56' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.38"' in build_gradle,
+        "V2.38 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2502,24 +2539,30 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillRaws(' not in service
         and 'fuseStillRaws(' not in nafnet,
         "V2.30 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.36_to_V1.4.11-V2.37.forward.patch' in workflow
-        and 'V1.4.11-V2.37_to_V1.4.11-V2.36.rollback.patch' in workflow,
-        "V2.37 final artifact must export correctly named V2.36<->V2.37 patches")
-require("authority='1268c56ae19bcff6a8c9bec42fdc9c911a8436d4'" in workflow
-        and "authority_tree='9665c112f2ab7c0aa0cc6d05cbce77894cacda24'" in workflow
-        and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow
-        and "failed_v236='" not in workflow,
-        "V2.37 must prove exact successful V2.36 direct-parent authority; repair-only V2.36 lineage mechanics may not remain active")
-require("authority = '1268c56ae19bcff6a8c9bec42fdc9c911a8436d4'" in workflow,
-        "V2.37 changed-file allowlist must compare against successful V2.36")
+require('V1.4.11-V2.37_to_V1.4.11-V2.38.forward.patch' in workflow
+        and 'V1.4.11-V2.38_to_V1.4.11-V2.37.rollback.patch' in workflow,
+        "V2.38 final artifact must export correctly named V2.37<->V2.38 patches")
+require('sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.38-debug.apk' in workflow
+        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.38-source-candidate.tar' in workflow
+        and 'sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.37-debug.apk' not in workflow
+        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.37-source-candidate.tar \\' not in workflow,
+        "V2.38 final SHA256SUMS export must use V2.38 APK/source identities, never stale V2.37 output names")
+require("authority='020975e80802560a25c4aaa39c2b6aab93f1dcc0'" in workflow
+        and "authority_tree='6f4c94ae1c6eaadbaa78dcac50e04cccbdf9dc57'" in workflow
+        and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow,
+        "V2.38 must prove exact successful V2.37 direct-parent authority")
+require("authority = '020975e80802560a25c4aaa39c2b6aab93f1dcc0'" in workflow,
+        "V2.38 changed-file allowlist must compare against successful V2.37")
 require('273 - Exact V2.36 R1 allowlist regression:' in workflow,
         "V2.36 R1 exact stale-allowlist-authority failure must remain a permanent regression")
 require('274 - V2.37 runtime authority is exactly successful V2.36 R1 commit 1268c56ae19bcff6a8c9bec42fdc9c911a8436d4' in workflow,
         "V2.37 exact successful-authority regression missing")
+require('280 - V2.38 runtime authority is exactly successful V2.37 commit 020975e80802560a25c4aaa39c2b6aab93f1dcc0' in workflow,
+        "V2.38 exact successful-authority regression missing")
 require("if len(tracked) != 35:" in workflow
-        and "V1.4.11 V2.36 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "V1.4.11 V2.37 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.37 must prove the 35-file V2.36 authority and exact 35-file candidate universe")
+        "V2.38 must prove the 35-file V2.37 authority and exact 35-file candidate universe")
 
 require('uniform vec2 stillGlobalShortOffsetPixels;' in hdr_shader
         and 'sampleUv + stillGlobalShortOffsetPixels / imageSize' in hdr_shader
@@ -2876,8 +2919,13 @@ require(sha_text(hdr_shader[mode6_start:mode6_end])
 mode5_start = hdr_shader.index('    if (mode == 5) {')
 mode5_end = hdr_shader.index('        return;\n    }\n\n    // V2.27 live parity', mode5_start) + len('        return;\n    }')
 require(sha_text(hdr_shader[mode5_start:mode5_end])
-        == '2abf93c31853d6b0093dca2ca003ea0cb77798f190920e1e98c3c917f61dbb34',
-        'V2.37 may not change successful V2.36 saved FUSED source/tone path')
+        == '7d2e4b08ab7f36390161573f532821b969b21290edcbf7d2d647cedadff5a8cf',
+        'V2.38 saved FUSED mode-5 path must equal the reviewed motion-safe candidate')
+mode5_merged_start = hdr_shader.index(
+    '        vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;', mode5_start)
+require(sha_text(hdr_shader[mode5_merged_start:mode5_end])
+        == 'd39ed4e8cd9c7c848f7bead3b1b7467f71663a19a937944279cce9a51046f771',
+        'V2.38 may not change V2.37 saved FUSED presentation after source selection')
 live_start = hdr_shader.index('    // V2.27 live parity:')
 require(sha_text(hdr_shader[live_start:])
         == 'd6e7a12c86e37fbe25fdf5b8a607c57f38329c5f19051c2f5fe7034d98f8ca43',
@@ -2919,6 +2967,147 @@ require(abs(sun_brightness + 1.40) < 1e-6 and abs(sun_gamma - 1.15) < 1e-6,
 require(normal_brightness + (-1.40 - normal_brightness) * car_pressure == normal_brightness
         and normal_gamma + (1.15 - normal_gamma) * car_pressure == normal_gamma,
         'V2.37 non-sun fixture must preserve V2.36 AUTO target exactly')
+
+# V2.38 motion robustness, universal microdetail, and physical saturation-edge regressions.
+require('IRIS_V238_TILED_GLOBAL_CONSENSUS_BEGIN' in fusion
+        and 'IRIS_V238_TILED_GLOBAL_CONSENSUS_HELPER_BEGIN' in fusion
+        and 'final int tilesX = 5;' in fusion
+        and 'final int tilesY = 4;' in fusion
+        and 'supportFraction >= 0.50f' in fusion
+        and 'disagreement > 0.85f' in fusion,
+        'V2.38 distributed global registration consensus owner missing')
+require('boolean[] directSupport = new boolean[count];' in fusion
+        and 'directSupport[i] = confidence > 0.0f;' in fusion
+        and 'rgba[o + 3] = directSupport[i] ? (byte) 255 : (byte) 0;' in fusion
+        and 'new byte[] {(byte) 128, (byte) 128, 0, 0}' in fusion,
+        'V2.38 local-flow direct-vs-inferred authority contract missing')
+require('IRIS_V238_FAIL_CLOSED_SHORT_GEOMETRY_BEGIN' in hdr_shader
+        and 'stillShortUvUnclampedAt' in hdr_shader
+        and 'stillShortSourceBoundsValidityAt' in hdr_shader
+        and 'float directAuthority = smoothstep(0.80, 0.98, flowValue.a);' in hdr_shader
+        and 'float residualAuthority = step(0.16, directConfidence);' in hdr_shader,
+        'V2.38 inferred-flow/OOB fail-closed SHORT geometry missing')
+require('IRIS_V238_FULL_RES_CORRESPONDENCE_BARRIER_BEGIN' in hdr_shader
+        and 'stillStaticCorrespondenceAt' in hdr_shader
+        and 'IRIS_V238_FINAL_MOTION_DISOCCLUSION_BARRIER_BEGIN' in hdr_shader
+        and 'finalLongLossRecoveryAt' in hdr_shader,
+        'V2.38 final full-resolution motion/disocclusion barrier missing')
+require('localLinearRangeAtRadius(sampleUv, 1.5)' in hdr_shader
+        and 'shortMicroRange - 5.0 * microNoise.x' in hdr_shader
+        and 'longMicroRange - 5.0 * microNoise.y' in hdr_shader
+        and 'stillLocalDirectRegistrationConfidenceAt(sampleUv)' in hdr_shader,
+        'V2.38 universal 1-2px noise-normalized microstructure recovery missing')
+require('IRIS_V238_SATURATION_TRANSITION_CHROMA_RELIABILITY_BEGIN' in raw_chroma_shader
+        and 'float localSaturation = saturationValues[0];' in raw_chroma_shader
+        and 'if (i == 0 || saturationValues[i] > 0.5) continue;' in raw_chroma_shader
+        and 'vec2 correctedC = mix(baseCorrectedC, unsaturatedC, saturationStrength);' in raw_chroma_shader,
+        'V2.38 physical saturation-transition chroma reliability owner missing')
+require('wideOffsets[16]' not in raw_chroma_shader
+        and 'boundaryRepair' not in raw_chroma_shader
+        and '+ ivec2(4' not in raw_chroma_shader
+        and '+ ivec2(10' not in raw_chroma_shader,
+        'V2.38 may not revive a distant hue donor')
+
+# Synthetic distributed-consensus fixture: a spatially distributed static-background
+# translation must beat a smaller central moving-foreground translation.
+def v238_tile_consensus(candidates, width=1000.0, height=800.0):
+    # candidates: (dx, dy, weight, center_x, center_y)
+    if len(candidates) < 5:
+        return (0.0, 0.0, 0.0, False)
+    inlier_radius = 1.35
+    total_weight = sum(c[2] for c in candidates)
+    best = max(range(len(candidates)), key=lambda h: sum(
+        c[2] for c in candidates
+        if math.hypot(c[0]-candidates[h][0], c[1]-candidates[h][1]) <= inlier_radius))
+    inliers = [c for c in candidates
+        if math.hypot(c[0]-candidates[best][0], c[1]-candidates[best][1]) <= inlier_radius]
+    sw = sum(c[2] for c in inliers)
+    mean_dx = sum(c[0]*c[2] for c in inliers) / max(sw, 1e-9)
+    mean_dy = sum(c[1]*c[2] for c in inliers) / max(sw, 1e-9)
+    rms = math.sqrt(sum(c[2]*((c[0]-mean_dx)**2 + (c[1]-mean_dy)**2) for c in inliers) / max(sw, 1e-9))
+    support = sw / max(total_weight, 1e-9)
+    span_x = (max(c[3] for c in inliers) - min(c[3] for c in inliers)) / width
+    span_y = (max(c[4] for c in inliers) - min(c[4] for c in inliers)) / height
+    distributed = smoothstep_math(0.38, 0.72, span_x + span_y)
+    confidence = (distributed * smoothstep_math(0.48, 0.72, support)
+        * smoothstep_math(3.0, 7.0, len(inliers))
+        * (1.0 - smoothstep_math(0.55, 1.10, rms)))
+    valid = len(inliers) >= 4 and support >= 0.50 and distributed >= 0.35 and confidence >= 0.14
+    return (mean_dx, mean_dy, confidence, valid)
+
+background = [
+    (2.02,-1.02,1.0,100,100),(1.96,-0.97,1.0,300,100),(2.05,-1.01,1.0,500,100),
+    (2.01,-0.95,1.0,700,100),(1.98,-1.03,1.0,900,100),(2.03,-0.99,1.0,100,350),
+    (1.95,-1.04,1.0,300,350),(2.04,-0.96,1.0,700,350),(2.00,-1.02,1.0,900,350),
+    (2.01,-0.98,1.0,100,650),(1.97,-1.01,1.0,300,650),(2.06,-0.97,1.0,500,650),
+    (1.99,-1.04,1.0,700,650),(2.02,-0.99,1.0,900,650),
+]
+moving = [
+    (-4.02,3.03,1.15,400,250),(-3.96,2.98,1.15,500,250),(-4.04,3.01,1.15,600,250),
+    (-3.99,2.96,1.15,400,450),(-4.01,3.04,1.15,500,450),(-3.95,3.00,1.15,600,450),
+]
+cx, cy, cconf, cvalid = v238_tile_consensus(background + moving)
+require(cvalid and abs(cx - 2.0) < 0.12 and abs(cy + 1.0) < 0.12 and cconf > 0.70,
+        f'V2.38 moving-foreground global-consensus fixture failed: {(cx, cy, cconf, cvalid)}')
+_, _, weak_conf, weak_valid = v238_tile_consensus(background[:3] + moving[:2])
+require(not weak_valid and weak_conf < 0.14,
+        'V2.38 weak/non-distributed tile evidence must preserve V2.37 whole-frame fallback')
+
+# Low direct-support alpha must eliminate local residual authority, and OOB source
+# requests must fail rather than turn into clamped edge pixels.
+def v238_residual_authority(global_conf, flow_conf, alpha):
+    direct = global_conf * flow_conf * smoothstep_math(0.80, 0.98, alpha)
+    return 1.0 if direct >= 0.16 else 0.0
+require(v238_residual_authority(0.9, 0.8, 0.0) == 0.0,
+        'V2.38 inferred local-flow cell acquired final warp authority')
+require(v238_residual_authority(0.9, 0.8, 1.0) == 1.0,
+        'V2.38 direct high-confidence local-flow cell lost final warp authority')
+
+def v238_bounds(uvx, uvy, width=4000.0, height=3000.0):
+    mx, my = 1.25/width, 1.25/height
+    return 1.0 if mx <= uvx <= 1.0-mx and my <= uvy <= 1.0-my else 0.0
+require(v238_bounds(-0.001, 0.5) == 0.0 and v238_bounds(0.5, 1.001) == 0.0
+        and v238_bounds(0.5, 0.5) == 1.0,
+        'V2.38 source-bounds validity must reject pre-clamp OOB requests')
+
+# Universal microstructure proof: 5-sigma-supported SHORT detail absent from LONG can
+# recover only with direct geometry. Equal/noise-only texture must not trigger.
+def v238_micro_dominance(short_range, long_range, short_sigma, long_sigma, direct_conf):
+    sm = max(short_range - 5.0 * 1.12 * short_sigma, 0.0)
+    lm = max(long_range - 5.0 * 1.12 * long_sigma, 0.0)
+    structure = smoothstep_math(0.0012, 0.010, sm)
+    relative = smoothstep_math(1.08, 1.32, sm / max(lm, 0.0010))
+    absolute = smoothstep_math(0.00055, 0.0060, sm - lm)
+    geometry = smoothstep_math(0.14, 0.34, direct_conf)
+    return structure * max(0.72 * relative, absolute) * geometry
+require(v238_micro_dominance(0.025, 0.009, 0.0012, 0.0009, 0.50) > 0.90,
+        'V2.38 real SHORT-only high-frequency fixture must gain recovery authority')
+require(v238_micro_dominance(0.0060, 0.0055, 0.0012, 0.0010, 0.50) == 0.0,
+        'V2.38 noise-only microtexture fixture must not gain SHORT ownership')
+require(v238_micro_dominance(0.025, 0.009, 0.0012, 0.0009, 0.05) == 0.0,
+        'V2.38 microdetail may not bypass direct local-geometry proof')
+
+# Saturated coherent false-color fringe: special correction activates only with the
+# physical saturation bit and local unsaturated support. No saturation => zero special
+# correction. Fixed-luma RGB reconstruction keeps luma exactly.
+def v238_saturation_strength(excursion_sigma, support_weight, saturation, fine_structure=1.0):
+    transition = (saturation * smoothstep_math(2.5, 6.0, excursion_sigma)
+        * smoothstep_math(1.2, 3.5, support_weight) * fine_structure)
+    return max(0.0, min(0.94, 0.90 * transition))
+require(v238_saturation_strength(12.0, 6.0, 1.0) >= 0.89,
+        'V2.38 saturated strip-light false-fringe fixture must receive strong local correction')
+require(v238_saturation_strength(12.0, 6.0, 0.0) == 0.0,
+        'V2.38 ordinary unsaturated bright edge must not receive special saturation cleanup')
+
+def v238_rgb_from_yc(y, cb, cr):
+    b = y + cb
+    r = y + cr
+    g = (y - 0.2126*r - 0.0722*b) / 0.7152
+    return (r,g,b)
+for y, cb, cr in ((0.72,0.04,-0.03),(0.35,-0.02,0.05),(0.90,0.01,0.00)):
+    r,g,b = v238_rgb_from_yc(y,cb,cr)
+    restored = 0.2126*r + 0.7152*g + 0.0722*b
+    require(abs(restored-y) < 1e-9, 'V2.38 saturation-edge chroma correction changed center luma')
 
 # V2.34 redistributes the SAME RGBA8 RGB carrier; no extra full-resolution texture is
 # permitted.  The exact 1..8 recovered-highlight interval must receive at least twice
@@ -3025,4 +3214,4 @@ require(v234_hdr_peak(4.0) < 0.91 and v234_hdr_peak(5.6) <= 0.931,
 require(v234_hdr_peak(16.0) < 0.99,
         "V2.34 must reserve smooth headroom above the ceiling gradient for true lamp cores")
 
-print("V1.4.11 V2.37 REGRESSION PASS: exact successful V2.36 CFA/fusion/saved-FUSED mechanics preserved; manual Brightness/Gamma ownership is live and non-echoing; SPLIT previews only manual B/G while auto Dehaze/Micro remain FUSED-owned; direct-sun extreme-emitter style is physically gated and zero for provided negative scenes")
+print("V1.4.11 V2.38 REGRESSION PASS: exact successful V2.37 presentation/CFA/color/acquisition owners preserved; tiled global consensus rejects moving-foreground takeover; only direct local flow may warp SHORT; OOB/disocclusion fails closed; 1-2px noise-proven microdetail can recover from SHORT; saturated strip-light chroma cleanup is physical/local/luma-preserving")

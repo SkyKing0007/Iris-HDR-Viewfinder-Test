@@ -305,7 +305,7 @@ vec3 applyDisplayGamma(vec3 rgb, float gammaValue) {
 // RGB/detail only inside coherent regions where LONG has lost highlight information.
 vec4 stillLocalFlowAt(vec2 sampleUv) {
     if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) {
-        return vec4(0.5, 0.5, 0.0, 1.0);
+        return vec4(0.5, 0.5, 0.0, 0.0);
     }
     return texture(localFlowTex, clamp(sampleUv, vec2(0.0), vec2(1.0)));
 }
@@ -315,16 +315,45 @@ float stillLocalRegistrationConfidenceAt(vec2 sampleUv) {
     return clamp(stillRegistrationConfidence * flowValue.b, 0.0, 1.0);
 }
 
-vec2 stillShortUvAt(vec2 sampleUv) {
+// IRIS_V238_FAIL_CLOSED_SHORT_GEOMETRY_BEGIN
+float stillLocalDirectRegistrationConfidenceAt(vec2 sampleUv) {
+    vec4 flowValue = stillLocalFlowAt(sampleUv);
+    // localFlowTex.a is 1 only for a cell with its own cycle-validated measurement.
+    // Bilinear interpolation intentionally fades authority before a measured/inferred
+    // boundary instead of letting an inferred cell warp final SHORT RGB.
+    float directAuthority = smoothstep(0.80, 0.98, flowValue.a);
+    return clamp(stillRegistrationConfidence * flowValue.b * directAuthority, 0.0, 1.0);
+}
+
+vec2 stillShortUvUnclampedAt(vec2 sampleUv) {
     vec2 imageSize = max(stillImageSize, vec2(1.0));
     vec2 globalUv = sampleUv + stillGlobalShortOffsetPixels / imageSize;
     if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) {
-        return clamp(globalUv, vec2(0.0), vec2(1.0));
+        return globalUv;
     }
     vec4 flowValue = stillLocalFlowAt(sampleUv);
     vec2 residualPixels = (flowValue.rg * 2.0 - vec2(1.0)) * localFlowMaxPixels;
-    return clamp(globalUv + residualPixels / imageSize, vec2(0.0), vec2(1.0));
+    float directConfidence = stillLocalDirectRegistrationConfidenceAt(sampleUv);
+    // A low-confidence/inferred residual has exactly zero final warp authority.
+    float residualAuthority = step(0.16, directConfidence);
+    return globalUv + residualAuthority * residualPixels / imageSize;
 }
+
+float stillShortSourceBoundsValidityAt(vec2 sampleUv) {
+    vec2 imageSize = max(stillImageSize, vec2(1.0));
+    vec2 sourceUv = stillShortUvUnclampedAt(sampleUv);
+    // Four-tap linear decode needs a real source neighborhood. Never manufacture
+    // border pixels by clamping an out-of-frame registration request to the edge.
+    vec2 margin = vec2(1.25) / imageSize;
+    vec2 lower = step(margin, sourceUv);
+    vec2 upper = step(sourceUv, vec2(1.0) - margin);
+    return lower.x * lower.y * upper.x * upper.y;
+}
+
+vec2 stillShortUvAt(vec2 sampleUv) {
+    return clamp(stillShortUvUnclampedAt(sampleUv), vec2(0.0), vec2(1.0));
+}
+// IRIS_V238_FAIL_CLOSED_SHORT_GEOMETRY_END
 
 vec3 stillShortRgbAt(vec2 sampleUv) {
     // Live preview keeps the inherited sRGB source contract. Saved RAW modes never
@@ -457,6 +486,7 @@ float shortRecoveryValidityAt(vec2 sampleUv) {
         return signal * max(relativeAdvantage, max(retainedStructure, channelRetention * 0.55));
     }
 
+    if (stillShortSourceBoundsValidityAt(sampleUv) < 0.5) return 0.0;
     vec4 shortRaw = savedShortEvidenceAt(sampleUv);
     vec3 shortScene = shortRaw.rgb * stillShortScalarGain;
     float shortSigma = shortRaw.a * stillShortScalarGain;
@@ -464,7 +494,12 @@ float shortRecoveryValidityAt(vec2 sampleUv) {
     vec2 localRanges = localLinearRangeAtRadius(sampleUv, 4.0);
     vec2 localNoise = localNoiseSigmaAtRadius(sampleUv, 4.0);
     float retainedExcess = max(localRanges.x - 4.0 * localNoise.x, 0.0);
-    float retainedStructure = smoothstep(0.0025, 0.018, retainedExcess);
+    vec2 microRanges = localLinearRangeAtRadius(sampleUv, 1.5);
+    vec2 microNoise = localNoiseSigmaAtRadius(sampleUv, 1.5);
+    float retainedMicroExcess = max(microRanges.x - 5.0 * microNoise.x, 0.0);
+    float retainedStructure = max(
+        smoothstep(0.0025, 0.018, retainedExcess),
+        smoothstep(0.0012, 0.010, retainedMicroExcess));
     float signalSnr = smoothstep(2.0, 6.0,
         linearLuma(shortScene) / max(shortSigma, 0.000001));
     float headroomValidity = (1.0 - savedShortEvidenceSaturationAt(sampleUv))
@@ -482,6 +517,7 @@ float shortRecoveryDomainValidityAt(vec2 sampleUv) {
         vec3 shortRgb = stillShortRgbAt(sampleUv);
         return smoothstep(0.004, 0.020, encodedLuma(shortRgb));
     }
+    if (stillShortSourceBoundsValidityAt(sampleUv) < 0.5) return 0.0;
     vec4 shortRaw = savedShortEvidenceAt(sampleUv);
     float mappedY = linearLuma(shortRaw.rgb * stillShortScalarGain);
     float mappedSigma = shortRaw.a * stillShortScalarGain;
@@ -569,10 +605,10 @@ vec2 localLinearRangeAtRadius(vec2 sampleUv, float radiusPixels) {
 
 vec2 localNoiseSigmaAtRadius(vec2 sampleUv, float radiusPixels) {
     if (!savedRawSourceMode()) return vec2(0.0);
-    // Lens shading and the S*x+O profile vary smoothly compared with the 4/12-pixel
-    // structure probes. Use center sigma with a radius-dependent safety margin instead
-    // of another 9 texture reads per scale; this keeps full-res ownership bounded.
-    float safety = radiusPixels <= 4.0 ? 1.20 : 1.35;
+    // Lens shading and the S*x+O profile vary smoothly compared with these local
+    // structure probes. V2.38 adds a 1.5px microstructure scale; use a slightly
+    // smaller spatial safety inflation there but a stricter sigma multiple below.
+    float safety = radiusPixels <= 2.0 ? 1.12 : (radiusPixels <= 4.0 ? 1.20 : 1.35);
     return vec2(mappedShortSigmaAt(sampleUv), longSigmaAt(sampleUv)) * safety;
 }
 
@@ -582,6 +618,25 @@ float radiometricAgreementAt(vec2 sampleUv) {
     float errorEv = abs(log2(shortY / longY));
     return 1.0 - smoothstep(0.20, 0.65, errorEv);
 }
+
+// IRIS_V238_FULL_RES_CORRESPONDENCE_BARRIER_BEGIN
+float stillStaticCorrespondenceAt(vec2 sampleUv) {
+    float bounds = stillShortSourceBoundsValidityAt(sampleUv);
+    if (bounds < 0.5) return 0.0;
+    // Effective-loss replacement is permitted only where this atlas location has its
+    // own cycle-validated local match. This is deliberately stricter than topology
+    // connectivity: a moving/disoccluded cell may not inherit a neighbor's warp.
+    float directGeometry = smoothstep(
+        0.10, 0.30, stillLocalDirectRegistrationConfidenceAt(sampleUv));
+    float shortY = max(mappedShortLinearLumaAt(sampleUv), 0.00001);
+    float longY = max(longLinearLumaAt(sampleUv), 0.00001);
+    float errorEv = abs(log2(shortY / longY));
+    // Leave enough pointwise tolerance for the very microdetail difference we are
+    // trying to recover; geometry + same-scene luminance remain mandatory.
+    float radiometry = 1.0 - smoothstep(0.35, 1.05, errorEv);
+    return bounds * directGeometry * radiometry;
+}
+// IRIS_V238_FULL_RES_CORRESPONDENCE_BARRIER_END
 
 // IRIS_V227_TEMPORAL_BODY_SNR_BEGIN
 float temporalExposureOverlap(float ratio) {
@@ -619,7 +674,8 @@ float stillTemporalBodySupportAt(vec2 sampleUv, float ratio) {
     float shortSigma = shortRaw.a * stillShortScalarGain;
     float shortSignal = smoothstep(0.00045, 0.0023, shortY)
         * smoothstep(1.5, 4.0, shortY / max(shortSigma, 0.000001));
-    return overlap * body * geometry * radiometry * rgbAgreement * shortSignal;
+    float sourceBounds = stillShortSourceBoundsValidityAt(sampleUv);
+    return overlap * body * geometry * radiometry * rgbAgreement * shortSignal * sourceBounds;
 }
 
 float liveTemporalBodySupportAt(
@@ -712,8 +768,18 @@ float longEffectiveLossAt(vec2 sampleUv) {
     // The V2.31 bathroom completion remains, but only structure above each frame's
     // physical RAW uncertainty may contribute. This prevents amplified SHORT CFA/noise
     // from masquerading as detail while preserving real house/tree recovery.
+    vec2 microRanges = localLinearRangeAtRadius(sampleUv, 1.5);
+    float shortMicroRange = microRanges.x;
+    float longMicroRange = microRanges.y;
+    vec2 microNoise = localNoiseSigmaAtRadius(sampleUv, 1.5);
     vec2 mediumNoise = localNoiseSigmaAtRadius(sampleUv, 4.0);
     vec2 broadNoise = localNoiseSigmaAtRadius(sampleUv, 12.0);
+    // The universal V2.38 microstructure class covers grass, pine needles, hair,
+    // fabric weave, text, mesh, thin branches and any similarly coherent 1-2px
+    // signal. Five-sigma rejection prevents amplified SHORT noise/CFA residue from
+    // masquerading as detail, and direct local geometry is mandatory at this scale.
+    float shortMicroExcess = max(shortMicroRange - 5.0 * microNoise.x, 0.0);
+    float longMicroExcess = max(longMicroRange - 5.0 * microNoise.y, 0.0);
     float shortMediumExcess = max(shortMediumRange - 4.0 * mediumNoise.x, 0.0);
     float longMediumExcess = max(longMediumRange - 4.0 * mediumNoise.y, 0.0);
     float shortBroadExcess = max(shortBroadRange - 4.0 * broadNoise.x, 0.0);
@@ -721,6 +787,17 @@ float longEffectiveLossAt(vec2 sampleUv) {
 
     vec3 longScene = savedLongLinearAt(sampleUv).rgb;
     float observableContext = smoothstep(0.007, 0.033, max3(longScene));
+    float microStructure = smoothstep(0.0012, 0.010, shortMicroExcess);
+    float microRelativeDominance = smoothstep(
+        1.08, 1.32, shortMicroExcess / max(longMicroExcess, 0.0010));
+    float microAbsoluteDominance = smoothstep(
+        0.00055, 0.0060, shortMicroExcess - longMicroExcess);
+    float directMicroGeometry = smoothstep(
+        0.14, 0.34, stillLocalDirectRegistrationConfidenceAt(sampleUv));
+    float microDominance = microStructure
+        * max(0.72 * microRelativeDominance, microAbsoluteDominance)
+        * directMicroGeometry;
+
     float mediumStructure = smoothstep(0.003, 0.020, shortMediumExcess);
     float mediumRelativeDominance = smoothstep(
         1.03, 1.18, shortMediumExcess / max(longMediumExcess, 0.0025));
@@ -741,8 +818,9 @@ float longEffectiveLossAt(vec2 sampleUv) {
     float errorEv = abs(log2(shortY / longY));
     float radiometricPlausibility = 1.0 - smoothstep(1.25, 2.75, errorEv);
     float informationDominance = max(
-        mediumStructure * mediumDominance,
-        broadStructure * broadDominance);
+        microDominance,
+        max(mediumStructure * mediumDominance,
+            broadStructure * broadDominance));
     return observableContext * informationDominance * radiometricPlausibility;
     // IRIS_V232_NOISE_NORMALIZED_EFFECTIVE_LOSS_END
 }
@@ -779,6 +857,34 @@ float longLossRecoveryDomainAt(vec2 sampleUv) {
     float physicalLoss = max(hardLoss, max(nearHardInterior, effectiveLoss));
     return shortUsable * physicalLoss;
 }
+
+// IRIS_V238_FINAL_MOTION_DISOCCLUSION_BARRIER_BEGIN
+float finalLongLossRecoveryAt(vec2 sampleUv) {
+    float sourceBounds = stillShortSourceBoundsValidityAt(sampleUv);
+    if (sourceBounds < 0.5) return 0.0;
+    float shortUsable = shortRecoveryDomainValidityAt(sampleUv);
+    float hardLoss = longHardLossBaseAt(sampleUv);
+    float hardSupport = compactHardLossSupportAt(sampleUv);
+    vec3 longScene = savedRawSourceMode()
+        ? savedLongLinearAt(sampleUv).rgb
+        : srgbToLinear(stillLongRgbAt(sampleUv));
+    float nearHardInterior = savedRawSourceMode()
+        ? max(savedLongSaturationAt(sampleUv), smoothstep(0.78, 1.00, max3(longScene)))
+            * smoothstep(0.05, 0.24, hardSupport)
+        : smoothstep(0.86, 0.965, max3(stillLongRgbAt(sampleUv)))
+            * smoothstep(0.05, 0.24, hardSupport);
+    float hardPhysicalLoss = max(hardLoss, nearHardInterior);
+
+    // Literal/connected clipping may legitimately destroy LONG correspondence, so it
+    // keeps the V2.37 physical-loss authority (with real-source bounds). Non-clipped
+    // effective/microdetail replacement is temporal and therefore additionally needs
+    // full-resolution static RGB/radiometric correspondence. Moving/disoccluded
+    // content fails closed to immutable LONG instead of printing a warped SHORT block.
+    float staticCorrespondence = stillStaticCorrespondenceAt(sampleUv);
+    float effectiveLoss = longEffectiveLossAt(sampleUv) * staticCorrespondence;
+    return shortUsable * max(hardPhysicalLoss, effectiveLoss) * sourceBounds;
+}
+// IRIS_V238_FINAL_MOTION_DISOCCLUSION_BARRIER_END
 
 vec3 broadRecoverySeedStatsAt(vec2 sampleUv) {
     // A seed remains deliberately strict: real LONG loss, valid SHORT and locally
@@ -1146,7 +1252,7 @@ void main() {
         // Strict seed/geometry proof already belongs to the connected mode-3/4 atlas;
         // recomputing shortRecoveryEvidence here duplicated the expensive multi-scale
         // RAW probes and could not create a new connected owner by itself.
-        float fullResolutionLoss = longLossRecoveryDomainAt(uv);
+        float fullResolutionLoss = finalLongLossRecoveryAt(uv);
         // V2.31 completes the connected exterior component at native resolution.
         // The V2.29 0.16 re-test left house/siding/tree holes even after a valid sky
         // seed had proven the component. Connectivity + physical loss remain mandatory;

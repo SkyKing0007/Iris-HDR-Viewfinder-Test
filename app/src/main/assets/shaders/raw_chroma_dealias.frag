@@ -147,11 +147,13 @@ void main() {
     float yValues[9];
     vec2 cValues[9];
     float sigmaValues[9];
+    float saturationValues[9];
     for (int i = 0; i < 9; ++i) {
         rgbValues[i] = sceneAt(p + offsets[i]);
         yValues[i] = linearLuma(rgbValues[i]);
         cValues[i] = chromaAt(rgbValues[i], yValues[i]);
         sigmaValues[i] = sigmaAt(p + offsets[i]);
+        saturationValues[i] = saturationAt(p + offsets[i]);
     }
 
     float centerY = yValues[0];
@@ -221,15 +223,62 @@ void main() {
         * smoothstep(3.0, 7.0, normalizedChromaExcursion)
         * (1.0 - smoothstep(3.0, 6.0, coherentVotes));
 
+    // IRIS_V238_SATURATION_TRANSITION_CHROMA_RELIABILITY_BEGIN
+    // V2.36 removed distant hue donors, but a false pink/green CFA fringe can be
+    // spatially coherent along a long saturated strip light and therefore look like
+    // legitimate color to coherentVotes. Physical RAW saturation is independent
+    // evidence. Only its immediate 3x3 transition halo may use this correction.
+    // raw_reconstruct already expands literal RAW saturation over the immediate 3x3
+    // neighborhood. Use the center evidence here; taking another 3x3 maximum would
+    // unnecessarily grow the special chroma authority to roughly a 5x5 halo.
+    float localSaturation = saturationValues[0];
+    float unsaturatedWeight = 0.0;
+    vec2 unsaturatedChromaSum = vec2(0.0);
+    float centerSide = centerY >= medianY ? 1.0 : -1.0;
+    for (int i = 0; i < 9; ++i) {
+        if (i == 0 || saturationValues[i] > 0.5) continue;
+        float neighborSide = (yValues[i] - medianY) * centerSide;
+        float sameSide = smoothstep(
+            -2.0 * chromaNoise - 0.002,
+             2.0 * chromaNoise + 0.002,
+            neighborSide);
+        float lumaDistance = abs(yValues[i] - centerY);
+        float lumaCompatible = 1.0 - smoothstep(
+            0.018 + 3.0 * chromaNoise,
+            0.090 + 8.0 * chromaNoise,
+            lumaDistance);
+        float weight = sameSide * lumaCompatible;
+        unsaturatedChromaSum += cValues[i] * weight;
+        unsaturatedWeight += weight;
+    }
+    vec2 unsaturatedC = unsaturatedWeight > 0.0001
+        ? unsaturatedChromaSum / unsaturatedWeight
+        : medianC;
+    float unsaturatedSupport = smoothstep(1.2, 3.5, unsaturatedWeight);
+    float transitionExcursion = length(centerC - unsaturatedC) / chromaNoise;
+    float saturationTransition = localSaturation
+        * smoothstep(2.5, 6.0, transitionExcursion)
+        * unsaturatedSupport
+        * fineStructure;
+    // Strong correction is confined to a physical saturation halo. Ordinary bright
+    // colored edges retain the existing V2.36 local chroma authority.
+    float saturationStrength = clamp(0.90 * saturationTransition, 0.0, 0.94);
+    // IRIS_V238_SATURATION_TRANSITION_CHROMA_RELIABILITY_END
+
     float baseStrength = max(flatFalseColor, max(0.88 * periodicAlias, 0.78 * brightEdge));
     baseStrength = clamp(baseStrength, 0.0, 0.92);
+
+    // Saturation-transition cleanup owns only its immediate physical halo and uses
+    // the unsaturated same-side estimate. The inherited local median remains the
+    // owner for isolated/periodic non-saturation CFA aliases.
+    vec2 baseCorrectedC = mix(centerC, medianC, baseStrength);
+    vec2 correctedC = mix(baseCorrectedC, unsaturatedC, saturationStrength);
 
     // IRIS_V236_SINGLE_CHROMA_AUTHORITY:
     // CFA reconstruction now owns highlight/edge chroma. This stage may suppress
     // only local, noise-proven single-pixel/periodic aliases; it may not search
     // distant +/-4..10 pixels and borrow an unrelated hue across foliage, signs,
     // shelves, skin, or architectural edges.
-    vec2 correctedC = mix(centerC, medianC, baseStrength);
     vec3 correctedRgb = rgbFromLumaChroma(centerY, correctedC);
     correctedRgb = projectNonNegativeAtFixedLuma(correctedRgb, centerY);
 
