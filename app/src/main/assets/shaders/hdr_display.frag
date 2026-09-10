@@ -172,6 +172,61 @@ vec4 shortCarrierLinearAt(vec2 sourceUv) {
     return vec4(rgb, sigma);
 }
 
+// IRIS_V239_DETAIL_PRESERVING_SHORT_RECONSTRUCTION_BEGIN
+float catmullRomWeight(float x) {
+    float a = abs(x);
+    if (a <= 1.0) {
+        return ((1.5 * a - 2.5) * a) * a + 1.0;
+    }
+    if (a < 2.0) {
+        return ((-0.5 * a + 2.5) * a - 4.0) * a + 2.0;
+    }
+    return 0.0;
+}
+
+vec4 shortCarrierDetailAt(vec2 sourceUv) {
+    ivec2 size = textureSize(shortTex, 0);
+    vec2 pixel = sourceUv * vec2(size) - vec2(0.5);
+    ivec2 basePixel = ivec2(floor(pixel));
+    vec2 f = fract(pixel);
+    ivec2 maxPixel = size - ivec2(1);
+
+    // Bound the cubic reconstruction to the four actual source samples surrounding
+    // the requested subpixel location. Catmull-Rom may restore high-frequency MTF,
+    // but it may never ring beyond real SHORT radiance extrema.
+    ivec2 p00 = clamp(basePixel, ivec2(0), maxPixel);
+    ivec2 p10 = clamp(basePixel + ivec2(1, 0), ivec2(0), maxPixel);
+    ivec2 p01 = clamp(basePixel + ivec2(0, 1), ivec2(0), maxPixel);
+    ivec2 p11 = clamp(basePixel + ivec2(1, 1), ivec2(0), maxPixel);
+    vec4 c00 = decodeRawCarrier(texelFetch(shortTex, p00, 0));
+    vec4 c10 = decodeRawCarrier(texelFetch(shortTex, p10, 0));
+    vec4 c01 = decodeRawCarrier(texelFetch(shortTex, p01, 0));
+    vec4 c11 = decodeRawCarrier(texelFetch(shortTex, p11, 0));
+    vec3 localMinimum = min(min(c00.rgb, c10.rgb), min(c01.rgb, c11.rgb));
+    vec3 localMaximum = max(max(c00.rgb, c10.rgb), max(c01.rgb, c11.rgb));
+
+    vec3 cubicSum = vec3(0.0);
+    float weightSum = 0.0;
+    for (int oy = -1; oy <= 2; ++oy) {
+        float wy = catmullRomWeight(float(oy) - f.y);
+        for (int ox = -1; ox <= 2; ++ox) {
+            float wx = catmullRomWeight(float(ox) - f.x);
+            float weight = wx * wy;
+            ivec2 q = clamp(basePixel + ivec2(ox, oy), ivec2(0), maxPixel);
+            vec3 decoded = decodeRawCarrier(texelFetch(shortTex, q, 0)).rgb;
+            cubicSum += decoded * weight;
+            weightSum += weight;
+        }
+    }
+    vec3 cubicRgb = cubicSum / max(abs(weightSum), 0.000001);
+    cubicRgb = clamp(cubicRgb, localMinimum, localMaximum);
+    // Keep the conservative bilinear sigma authority. This path improves only source
+    // reconstruction MTF after ownership is proven; it may not claim lower noise.
+    float sigma = shortCarrierLinearAt(sourceUv).a;
+    return vec4(cubicRgb, sigma);
+}
+// IRIS_V239_DETAIL_PRESERVING_SHORT_RECONSTRUCTION_END
+
 vec4 longCarrierLinearAt(vec2 sourceUv) {
     ivec2 size = textureSize(longTex, 0);
     ivec2 p = clamp(ivec2(clamp(sourceUv, vec2(0.0), vec2(0.99999994)) * vec2(size)),
@@ -350,6 +405,17 @@ float stillShortSourceBoundsValidityAt(vec2 sampleUv) {
     return lower.x * lower.y * upper.x * upper.y;
 }
 
+float stillShortDetailSourceBoundsValidityAt(vec2 sampleUv) {
+    vec2 imageSize = max(stillImageSize, vec2(1.0));
+    vec2 sourceUv = stillShortUvUnclampedAt(sampleUv);
+    // The bounded Catmull-Rom detail sampler needs a complete 4x4 source support.
+    // Do not let its internal safety clamp turn an out-of-bounds warp into a border.
+    vec2 margin = vec2(2.25) / imageSize;
+    vec2 lower = step(margin, sourceUv);
+    vec2 upper = step(sourceUv, vec2(1.0) - margin);
+    return lower.x * lower.y * upper.x * upper.y;
+}
+
 vec2 stillShortUvAt(vec2 sampleUv) {
     return clamp(stillShortUvUnclampedAt(sampleUv), vec2(0.0), vec2(1.0));
 }
@@ -369,6 +435,10 @@ vec3 stillLongRgbAt(vec2 sampleUv) {
 vec4 savedShortLinearAt(vec2 sampleUv) {
     // Final source sampling uses explicit four-tap interpolation after linear decode.
     return shortCarrierLinearAt(stillShortUvAt(sampleUv));
+}
+
+vec4 savedShortDetailLinearAt(vec2 sampleUv) {
+    return shortCarrierDetailAt(stillShortUvAt(sampleUv));
 }
 
 vec4 savedShortEvidenceAt(vec2 sampleUv) {
@@ -612,6 +682,137 @@ vec2 localNoiseSigmaAtRadius(vec2 sampleUv, float radiusPixels) {
     return vec2(mappedShortSigmaAt(sampleUv), longSigmaAt(sampleUv)) * safety;
 }
 
+// IRIS_V239_DIRECT_COHERENT_MICRODETAIL_BEGIN
+float microdetailGradientVote(
+        float shortGradient, float longGradient,
+        float shortDifferenceSigma, float longDifferenceSigma) {
+    float shortSnr = shortGradient / max(shortDifferenceSigma, 0.00005);
+    float longSnr = longGradient / max(longDifferenceSigma, 0.00005);
+    float structure = smoothstep(2.10, 3.40, shortSnr)
+        * smoothstep(0.00035, 0.0035, shortGradient);
+    float snrAdvantage = smoothstep(0.55, 1.65, shortSnr - longSnr);
+    float absoluteAdvantage = smoothstep(
+        0.00025, 0.0045, shortGradient - longGradient);
+    return structure * max(snrAdvantage, absoluteAdvantage);
+}
+
+float microdetailLowFrequencyCorrespondenceAt(vec2 sampleUv) {
+    float detailBounds = stillShortDetailSourceBoundsValidityAt(sampleUv);
+    if (detailBounds < 0.5) return 0.0;
+    float directGeometry = smoothstep(
+        0.10, 0.30, stillLocalDirectRegistrationConfidenceAt(sampleUv));
+    float neighborhoodGeometry = smoothstep(
+        0.14, 0.38, registrationNeighborhoodConfidenceAt(sampleUv));
+
+    // V2.38 already moved final SHORT only with direct cycle-validated residual flow.
+    // V2.39 is even stricter for its new atlas-independent microdetail authority:
+    // after global background registration, a large local residual is much more likely
+    // to be independently moving content/parallax than stationary source microtexture.
+    // Fail closed before the new path can create a SHORT/LONG seam around motion.
+    vec4 localFlow = stillLocalFlowAt(sampleUv);
+    vec2 residualPixels = (localFlow.rg * 2.0 - vec2(1.0)) * localFlowMaxPixels;
+    float residualMotionConsistency = 1.0 - smoothstep(1.00, 2.50, length(residualPixels));
+
+    vec2 texel = 1.0 / vec2(textureSize(longTex, 0));
+    vec2 offsets[5] = vec2[5](
+        vec2(0.0), vec2(2.0 * texel.x, 0.0), vec2(-2.0 * texel.x, 0.0),
+        vec2(0.0, 2.0 * texel.y), vec2(0.0, -2.0 * texel.y));
+    float shortMean = 0.0;
+    float longMean = 0.0;
+    for (int i = 0; i < 5; ++i) {
+        vec2 q = clamp(sampleUv + offsets[i], vec2(0.0), vec2(1.0));
+        shortMean += mappedShortLinearLumaAt(q);
+        longMean += longLinearLumaAt(q);
+    }
+    shortMean /= 5.0;
+    longMean /= 5.0;
+    float meanErrorEv = abs(log2(
+        max(shortMean, 0.00001) / max(longMean, 0.00001)));
+    float lowFrequencyRadiometry = 1.0 - smoothstep(0.65, 1.85, meanErrorEv);
+
+    vec3 longScene = savedLongLinearAt(sampleUv).rgb;
+    float longPressure = max(savedLongSaturationAt(sampleUv),
+        smoothstep(0.80, 1.08, max3(longScene)));
+    // A physically flattened LONG sample cannot be required to match SHORT pointwise.
+    // Direct local geometry remains mandatory; LONG pressure merely relaxes the
+    // low-frequency radiometric test, never the motion/disocclusion barrier.
+    float radiometricSupport = max(lowFrequencyRadiometry, 0.65 * longPressure);
+    return detailBounds * directGeometry * neighborhoodGeometry
+        * residualMotionConsistency * radiometricSupport;
+}
+
+float directMicrodetailRecoveryAt(vec2 sampleUv) {
+    if (!savedRawSourceMode()) return 0.0;
+    float correspondence = microdetailLowFrequencyCorrespondenceAt(sampleUv);
+    if (correspondence <= 0.0) return 0.0;
+    float shortUsable = shortRecoveryDomainValidityAt(sampleUv);
+    float shortHeadroom = 1.0 - savedShortEvidenceSaturationAt(sampleUv);
+    if (shortUsable <= 0.0 || shortHeadroom <= 0.0) return 0.0;
+
+    vec2 texel = 1.0 / vec2(textureSize(longTex, 0));
+    vec2 ringOffsets[8] = vec2[8](
+        vec2(-texel.x, -texel.y), vec2(0.0, -texel.y),
+        vec2( texel.x, -texel.y), vec2( texel.x, 0.0),
+        vec2( texel.x,  texel.y), vec2(0.0,  texel.y),
+        vec2(-texel.x,  texel.y), vec2(-texel.x, 0.0));
+
+    float centerShortY = mappedShortLinearLumaAt(sampleUv);
+    float centerLongY = longLinearLumaAt(sampleUv);
+    float centerShortSigma = mappedShortSigmaAt(sampleUv);
+    float centerLongSigma = longSigmaAt(sampleUv);
+    float shortRingY[8];
+    float longRingY[8];
+    float shortRingSigma[8];
+    float longRingSigma[8];
+    float centerVoteSum = 0.0;
+    float strongestVote = 0.0;
+
+    for (int i = 0; i < 8; ++i) {
+        vec2 q = clamp(sampleUv + ringOffsets[i], vec2(0.0), vec2(1.0));
+        shortRingY[i] = mappedShortLinearLumaAt(q);
+        longRingY[i] = longLinearLumaAt(q);
+        shortRingSigma[i] = mappedShortSigmaAt(q);
+        longRingSigma[i] = longSigmaAt(q);
+        float shortGradient = abs(shortRingY[i] - centerShortY);
+        float longGradient = abs(longRingY[i] - centerLongY);
+        float shortDifferenceSigma = 1.10 * sqrt(
+            centerShortSigma * centerShortSigma
+            + shortRingSigma[i] * shortRingSigma[i]);
+        float longDifferenceSigma = 1.10 * sqrt(
+            centerLongSigma * centerLongSigma
+            + longRingSigma[i] * longRingSigma[i]);
+        float vote = microdetailGradientVote(
+            shortGradient, longGradient, shortDifferenceSigma, longDifferenceSigma);
+        centerVoteSum += vote;
+        strongestVote = max(strongestVote, vote);
+    }
+
+    // Reject the classic false-positive of one noisy center pixel: genuine thin lines,
+    // needles, weave and text also create structure around the surrounding ring, while
+    // a center-only noise excursion leaves that ring mutually flat/noise-like.
+    float ringVoteSum = 0.0;
+    for (int i = 0; i < 8; ++i) {
+        int j = (i + 1) % 8;
+        float shortGradient = abs(shortRingY[j] - shortRingY[i]);
+        float longGradient = abs(longRingY[j] - longRingY[i]);
+        float shortDifferenceSigma = 1.10 * sqrt(
+            shortRingSigma[i] * shortRingSigma[i]
+            + shortRingSigma[j] * shortRingSigma[j]);
+        float longDifferenceSigma = 1.10 * sqrt(
+            longRingSigma[i] * longRingSigma[i]
+            + longRingSigma[j] * longRingSigma[j]);
+        ringVoteSum += microdetailGradientVote(
+            shortGradient, longGradient, shortDifferenceSigma, longDifferenceSigma);
+    }
+
+    float centerSupport = smoothstep(1.20, 2.80, centerVoteSum);
+    float ringSupport = smoothstep(0.80, 2.20, ringVoteSum);
+    float strongSourceEvidence = smoothstep(0.30, 0.72, strongestVote);
+    float coherentInformation = centerSupport * ringSupport * strongSourceEvidence;
+    return coherentInformation * correspondence * shortUsable * shortHeadroom;
+}
+// IRIS_V239_DIRECT_COHERENT_MICRODETAIL_END
+
 float radiometricAgreementAt(vec2 sampleUv) {
     float shortY = max(mappedShortLinearLumaAt(sampleUv), 0.00001);
     float longY = max(longLinearLumaAt(sampleUv), 0.00001);
@@ -765,21 +966,12 @@ float longEffectiveLossAt(vec2 sampleUv) {
     // IRIS_V229_INFORMATION_LOSS_NOT_WHITE_GATED_END
 
     // IRIS_V232_NOISE_NORMALIZED_EFFECTIVE_LOSS_BEGIN
-    // The V2.31 bathroom completion remains, but only structure above each frame's
-    // physical RAW uncertainty may contribute. This prevents amplified SHORT CFA/noise
-    // from masquerading as detail while preserving real house/tree recovery.
-    vec2 microRanges = localLinearRangeAtRadius(sampleUv, 1.5);
-    float shortMicroRange = microRanges.x;
-    float longMicroRange = microRanges.y;
-    vec2 microNoise = localNoiseSigmaAtRadius(sampleUv, 1.5);
+    // Medium/broad effective-loss ownership remains noise-normalized exactly in the
+    // V2.38 spirit. V2.39 removes 1-2px microdetail from this coarse connected-domain
+    // function: direct coherent microdetail is now proven independently at native
+    // resolution so the 16x16 atlas can no longer suppress valid grass/needle/weave.
     vec2 mediumNoise = localNoiseSigmaAtRadius(sampleUv, 4.0);
     vec2 broadNoise = localNoiseSigmaAtRadius(sampleUv, 12.0);
-    // The universal V2.38 microstructure class covers grass, pine needles, hair,
-    // fabric weave, text, mesh, thin branches and any similarly coherent 1-2px
-    // signal. Five-sigma rejection prevents amplified SHORT noise/CFA residue from
-    // masquerading as detail, and direct local geometry is mandatory at this scale.
-    float shortMicroExcess = max(shortMicroRange - 5.0 * microNoise.x, 0.0);
-    float longMicroExcess = max(longMicroRange - 5.0 * microNoise.y, 0.0);
     float shortMediumExcess = max(shortMediumRange - 4.0 * mediumNoise.x, 0.0);
     float longMediumExcess = max(longMediumRange - 4.0 * mediumNoise.y, 0.0);
     float shortBroadExcess = max(shortBroadRange - 4.0 * broadNoise.x, 0.0);
@@ -787,17 +979,6 @@ float longEffectiveLossAt(vec2 sampleUv) {
 
     vec3 longScene = savedLongLinearAt(sampleUv).rgb;
     float observableContext = smoothstep(0.007, 0.033, max3(longScene));
-    float microStructure = smoothstep(0.0012, 0.010, shortMicroExcess);
-    float microRelativeDominance = smoothstep(
-        1.08, 1.32, shortMicroExcess / max(longMicroExcess, 0.0010));
-    float microAbsoluteDominance = smoothstep(
-        0.00055, 0.0060, shortMicroExcess - longMicroExcess);
-    float directMicroGeometry = smoothstep(
-        0.14, 0.34, stillLocalDirectRegistrationConfidenceAt(sampleUv));
-    float microDominance = microStructure
-        * max(0.72 * microRelativeDominance, microAbsoluteDominance)
-        * directMicroGeometry;
-
     float mediumStructure = smoothstep(0.003, 0.020, shortMediumExcess);
     float mediumRelativeDominance = smoothstep(
         1.03, 1.18, shortMediumExcess / max(longMediumExcess, 0.0025));
@@ -818,9 +999,8 @@ float longEffectiveLossAt(vec2 sampleUv) {
     float errorEv = abs(log2(shortY / longY));
     float radiometricPlausibility = 1.0 - smoothstep(1.25, 2.75, errorEv);
     float informationDominance = max(
-        microDominance,
-        max(mediumStructure * mediumDominance,
-            broadStructure * broadDominance));
+        mediumStructure * mediumDominance,
+        broadStructure * broadDominance);
     return observableContext * informationDominance * radiometricPlausibility;
     // IRIS_V232_NOISE_NORMALIZED_EFFECTIVE_LOSS_END
 }
@@ -1248,22 +1428,28 @@ void main() {
         // it may not turn the entire atlas cell into SHORT. Re-evaluate the physical
         // LONG-loss/usable-SHORT domain at the actual output pixel.
         float connectedRecovery = step(0.50, support.r);
-        // V2.32 evaluates the physical recovery domain once at native resolution.
-        // Strict seed/geometry proof already belongs to the connected mode-3/4 atlas;
-        // recomputing shortRecoveryEvidence here duplicated the expensive multi-scale
-        // RAW probes and could not create a new connected owner by itself.
+        // Broad/connected highlight loss keeps the proven V2.38 topology route.
         float fullResolutionLoss = finalLongLossRecoveryAt(uv);
-        // V2.31 completes the connected exterior component at native resolution.
-        // The V2.29 0.16 re-test left house/siding/tree holes even after a valid sky
-        // seed had proven the component. Connectivity + physical loss remain mandatory;
-        // this lower final threshold cannot grant SHORT ownership to unrelated body.
-        float shortOwns = connectedRecovery * step(0.08, fullResolutionLoss);
+        float connectedShortOwns = connectedRecovery * step(0.08, fullResolutionLoss);
 
-        // The globally registered SHORT bitmap is already in immutable LONG geometry.
-        // Use the proven local residual field only where that field itself supplies it;
-        // unsupported panes therefore fall back to the stable global registration.
-        // Never warp a pane with a residual merely propagated along an atlas path.
-        vec4 shortRaw = savedShortLinearAt(uv);
+        // IRIS_V239_INDEPENDENT_FULL_RES_MICRODETAIL_OWNERSHIP_BEGIN
+        // Fine 1-2px information is not a broad HDR component and therefore must not
+        // depend on the 16x16 connectivity atlas. It may select complete SHORT RGB only
+        // after independent native-resolution proof: multiple coherent SHORT gradients
+        // above the Camera2 noise model, weaker/missing LONG gradients, direct local
+        // cycle-validated geometry, real source bounds and static low-frequency support.
+        // Every V2.38 motion/disocclusion barrier remains upstream of this authority.
+        float directMicrodetail = directMicrodetailRecoveryAt(uv);
+        float directMicroOwns = step(0.18, directMicrodetail);
+        float shortOwns = max(connectedShortOwns, directMicroOwns);
+
+        // Normal SHORT recovery retains V2.38's conservative four-tap interpolation.
+        // Only directly proven microdetail may use the bounded 4x4 Catmull-Rom source
+        // reconstruction, whose output is clamped to real surrounding SHORT samples.
+        vec4 shortRaw = directMicroOwns > 0.5
+            ? savedShortDetailLinearAt(uv)
+            : savedShortLinearAt(uv);
+        // IRIS_V239_INDEPENDENT_FULL_RES_MICRODETAIL_OWNERSHIP_END
         // IRIS_V229_FULL_RES_FINAL_SHORT_OWNERSHIP_END
         vec4 longRaw = savedLongLinearAt(uv);
         vec3 shortScene = shortRaw.rgb * stillShortScalarGain;

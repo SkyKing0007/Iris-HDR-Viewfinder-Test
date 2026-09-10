@@ -274,13 +274,105 @@ void main() {
     vec2 baseCorrectedC = mix(centerC, medianC, baseStrength);
     vec2 correctedC = mix(baseCorrectedC, unsaturatedC, saturationStrength);
 
+    // IRIS_V239_RAW_NOISE_MODEL_CLEANUP_BEGIN
+    // The RAW carrier already contains the conservative Camera2 S*x+O scene sigma.
+    // Use that uncertainty before tone/gamma amplification to suppress only noise-like
+    // smooth interiors. Luma and chroma have separate strengths: chroma receives the
+    // stronger reduction needed for green/magenta RAW grain while luma retains more
+    // source texture. Range weights make this a local bilateral estimator rather than
+    // blur, and coherent 1-2px luminance structure universally protects grass, pine
+    // needles, hair, fabric, text, foliage, carpet fibers, mesh and equivalent detail.
+    float sceneNoise = max(0.00008, max(sigmaValues[0], medianSigma));
+    float lumaNoiseScale = max(0.00010, 1.18 * sceneNoise);
+    float chromaNoiseScale = max(0.00016, 1.70 * sceneNoise);
+
+    float lumaDifferenceEnergy = 0.0;
+    for (int i = 1; i < 9; ++i) {
+        float deltaY = yValues[i] - centerY;
+        lumaDifferenceEnergy += deltaY * deltaY;
+    }
+    float lumaDifferenceRms = sqrt(lumaDifferenceEnergy / 8.0);
+    // Pure independent noise has center-to-neighbor RMS near sqrt(2)*sigma.
+    // Real coherent structure rises beyond that envelope and fades denoise authority.
+    float coherentStructure = smoothstep(
+        1.70, 3.35, lumaDifferenceRms / lumaNoiseScale);
+    float smoothNoiseInterior = 1.0 - coherentStructure;
+
+    float lumaWeightSum = 1.0;
+    float lumaSum = centerY;
+    float chromaWeightSum = 1.0;
+    vec2 chromaSum = correctedC;
+    for (int i = 1; i < 9; ++i) {
+        float lumaDistance = abs(yValues[i] - centerY);
+        float chromaDistance = length(cValues[i] - correctedC);
+        float lumaCompatible = 1.0 - smoothstep(
+            2.0 * lumaNoiseScale + 0.0005,
+            5.5 * lumaNoiseScale + 0.0050,
+            lumaDistance);
+        float chromaCompatible = 1.0 - smoothstep(
+            2.2 * chromaNoiseScale + 0.0008,
+            6.5 * chromaNoiseScale + 0.0080,
+            chromaDistance);
+        float unsaturatedNeighbor = 1.0 - 0.90 * saturationValues[i];
+        float weight = lumaCompatible * chromaCompatible * unsaturatedNeighbor;
+        lumaSum += yValues[i] * weight;
+        lumaWeightSum += weight;
+        chromaSum += cValues[i] * weight;
+        chromaWeightSum += weight;
+    }
+
+    // Four same-domain radius-2 samples increase Gaussian-noise averaging without
+    // crossing edges because they pass the same luma/chroma range test. This reaches
+    // a materially lower chroma floor in walls/ceilings while remaining local.
+    ivec2 farOffsets[4] = ivec2[4](
+        ivec2(-2, 0), ivec2(2, 0), ivec2(0, -2), ivec2(0, 2));
+    for (int i = 0; i < 4; ++i) {
+        ivec2 q = p + farOffsets[i];
+        vec3 farRgb = sceneAt(q);
+        float farY = linearLuma(farRgb);
+        vec2 farC = chromaAt(farRgb, farY);
+        float farSaturation = saturationAt(q);
+        float lumaDistance = abs(farY - centerY);
+        float chromaDistance = length(farC - correctedC);
+        float lumaCompatible = 1.0 - smoothstep(
+            2.0 * lumaNoiseScale + 0.0005,
+            5.0 * lumaNoiseScale + 0.0045,
+            lumaDistance);
+        float chromaCompatible = 1.0 - smoothstep(
+            2.2 * chromaNoiseScale + 0.0008,
+            6.0 * chromaNoiseScale + 0.0070,
+            chromaDistance);
+        float weight = lumaCompatible * chromaCompatible * (1.0 - 0.90 * farSaturation);
+        lumaSum += farY * weight;
+        lumaWeightSum += weight;
+        chromaSum += farC * weight;
+        chromaWeightSum += weight;
+    }
+
+    float filteredY = lumaSum / max(lumaWeightSum, 1.0);
+    vec2 filteredC = chromaSum / max(chromaWeightSum, 1.0);
+    // Physical saturation/highlight-transition color stays with the existing V2.38
+    // owner. Ordinary smooth RAW interiors can receive strong chroma and moderate
+    // luma cleanup; coherent source structure drives both strengths toward zero.
+    float ordinaryNoiseDomain = 1.0 - localSaturation;
+    float lumaDenoiseStrength = clamp(
+        0.52 * smoothNoiseInterior * ordinaryNoiseDomain, 0.0, 0.52);
+    float chromaDenoiseStrength = clamp(
+        0.92 * smoothNoiseInterior * ordinaryNoiseDomain, 0.0, 0.92);
+    float cleanedY = mix(centerY, filteredY, lumaDenoiseStrength);
+    correctedC = mix(correctedC, filteredC, chromaDenoiseStrength);
+    // Alpha intentionally remains the original conservative physical sigma+saturation
+    // upper bound. Denoise may lower residual noise, but it may never make subsequent
+    // fusion believe the sensor was more certain than the timestamp-matched S*x+O model.
+    // IRIS_V239_RAW_NOISE_MODEL_CLEANUP_END
+
     // IRIS_V236_SINGLE_CHROMA_AUTHORITY:
     // CFA reconstruction now owns highlight/edge chroma. This stage may suppress
     // only local, noise-proven single-pixel/periodic aliases; it may not search
     // distant +/-4..10 pixels and borrow an unrelated hue across foliage, signs,
     // shelves, skin, or architectural edges.
-    vec3 correctedRgb = rgbFromLumaChroma(centerY, correctedC);
-    correctedRgb = projectNonNegativeAtFixedLuma(correctedRgb, centerY);
+    vec3 correctedRgb = rgbFromLumaChroma(cleanedY, correctedC);
+    correctedRgb = projectNonNegativeAtFixedLuma(correctedRgb, cleanedY);
 
     vec3 encodedScene = vec3(
         encodeSceneChannel(correctedRgb.r),

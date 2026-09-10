@@ -1,12 +1,12 @@
-V1.4.11 V2.38 — MOTION ROBUSTNESS + UNIVERSAL MICRODETAIL + SATURATED-EDGE CHROMA
+V1.4.11 V2.39 — RAW NOISE CLEANUP + DIRECT COHERENT MICRODETAIL
 
 Branch: experiment-v1.4.11-v2-brightness-4ev
 Required current parent / runtime authority:
-020975e80802560a25c4aaa39c2b6aab93f1dcc0
-Successful Actions run: 34507561872
-Successful artifact: 10164509321 / Iris-HDR-Viewfinder-Test-V1.4.11-V2.37
+5c8f6d73fd071c5728f2e5d5d49a9c34c6498538
+Successful Actions run: 34523350151
+Successful artifact: 10170612070 / Iris-HDR-Viewfinder-Test-V1.4.11-V2.38
 
-UPLOAD / REPLACE THESE 11 FLAT FILES
+UPLOAD / REPLACE THESE 10 FLAT FILES
 
 1. build.yml
    -> .github/workflows/build.yml
@@ -26,21 +26,19 @@ UPLOAD / REPLACE THESE 11 FLAT FILES
    -> app/src/main/assets/shaders/hdr_display.frag
 9. raw_chroma_dealias.frag
    -> app/src/main/assets/shaders/raw_chroma_dealias.frag
-10. JpegFusion.java
-   -> app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
-11. verify_orientation.py
+10. verify_orientation.py
    -> scripts/verify_orientation.py
 
 BEFORE COMMIT
-Source Control must show exactly 11 modified files, 0 added files and 0 deleted files.
+Source Control must show exactly 10 modified files, 0 added files and 0 deleted files.
 No other app/src/** file may appear.
-In particular, CameraController.java, MainActivity.java, HdrGlView.java, raw_green.frag, raw_reconstruct.frag, RawFusion.java and NafNetDenoiser.java must NOT appear.
+In particular JpegFusion.java, HdrGlView.java, RawFusion.java, CameraController.java, MainActivity.java, raw_green.frag, raw_preprocess.frag, raw_reconstruct.frag and NafNetDenoiser.java must NOT appear.
 
 TARGET VERSION
-versionCode 56
-versionName 1.0-v1.4.11-v2.38
+versionCode 57
+versionName 1.0-v1.4.11-v2.39
 
 Suggested commit message:
-V1.4.11 V2.38 motion robustness microdetail and saturated-edge chroma
+V1.4.11 V2.39 RAW noise cleanup and direct coherent microdetail
 
 GitHub Actions is authoritative for pinned real GLSL, real Java and full :app:assembleDebug proof.

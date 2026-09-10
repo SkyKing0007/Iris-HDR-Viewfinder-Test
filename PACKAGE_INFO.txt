@@ -1,4 +1,4 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.38 — MOTION ROBUSTNESS + UNIVERSAL MICRODETAIL + SATURATED-EDGE CHROMA
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.39 — RAW NOISE CLEANUP + DIRECT COHERENT MICRODETAIL
 
 STATUS
 PREPARED / UPLOAD-READY only after final clean-extract replay passes.
@@ -8,61 +8,59 @@ No backup requested or created. No source commit or push is performed by this ha
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 56
-Target versionName: 1.0-v1.4.11-v2.38
+Target versionCode: 57
+Target versionName: 1.0-v1.4.11-v2.39
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL ACTIONS COMPILED CANDIDATE
-Commit: 020975e80802560a25c4aaa39c2b6aab93f1dcc0
-Compiled candidate tree: 6f4c94ae1c6eaadbaa78dcac50e04cccbdf9dc57
-GitHub Actions run: 34507561872 — SUCCESS
-Artifact ID: 10164509321
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.37
-Artifact ZIP digest: sha256:b5695bdd5d9b9a930235dcf8e1728bcb1e87ed08ca82ee77016f331f743892b1
-APK SHA-256: 3f58ec6bef68cabf328751c1220a37d1cef3283e1b2e367287bb74aa155cefdf
-Source-candidate TAR SHA-256: 3e3179caf27d8d2c3d5270851673e16483ac2e497e83370cec382ca41b23f40f
-Runtime manifest SHA-256: 1c655d9486d75a038fbc8c531431861f8cd23d1ccf6205c2b9b92775d17730a3
-Repository manifest SHA-256: 63c0ca43b83dcf76dda8f237034f48cf13754787fae5ad5920bc979012ac2f3c
-Regressions SHA-256: b0a6e79a191667f47fbfc14339cc1b74c781585299eb8c4b001b15e14e969d76
+Commit: 5c8f6d73fd071c5728f2e5d5d49a9c34c6498538
+Compiled candidate tree: 3f6c779866d5db75d25847d2ffbd9c6955c57546
+GitHub Actions run: 34523350151 — SUCCESS
+Artifact ID: 10170612070
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.38
+Artifact ZIP digest: sha256:475ca86393c94f2e7c37f5e5c586f626d61df3befc492bdc34f5abc7a299053b
+APK SHA-256: b15416f93af45917e27258702c16d239f138189b71145f6ae19027c3841b8971
+Source-candidate TAR SHA-256: d30aa1104e478ea7a3f0e7e7fd76a1795fb30e51d6ceb41fe39b10b043fc3967
+Runtime manifest SHA-256: 56b52f744d8e260fb71b63eb8169a7427028546290d817f9fb86696c37a10d9e
+Repository manifest SHA-256: 37816742f922d51aab897e8535f76590cccb7335944f0a3220965a94e006e66c
+Regressions SHA-256: 6238d0a7b4d6d6a62e1bfd25a73b571bf14ecaa382a788b364de7d3822ade91a
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.37 procedure from Actions run 34507561872. The same 15 workflow steps, action versions, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, complete GLSL reserved-identifier scan, exact runtime GLSL compile, real project Java compile, deterministic full-index forward/rollback proof at core.abbrev 7/12/40, GNU fuzz=0 replay, PRE-BUILD proof, full :app:assembleDebug, exactly-one-APK/model proof, post-build candidate/protected invariance and final artifact export are retained. Infrastructure changes only authority/version/allowlist/hash/regression/output identities plus the V2.38 semantic verifier.
+Exact successful V2.38 procedure from Actions run 34523350151. The same workflow ordering, action versions, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, complete GLSL reserved-identifier scan, exact runtime GLSL compile, real project Java compile, deterministic full-index forward/rollback proof at core.abbrev 7/12/40, GNU fuzz=0 replay, PRE-BUILD proof, full :app:assembleDebug, exactly-one-APK/model proof, post-build candidate/protected invariance and final artifact export are retained. Infrastructure changes only V2.39 authority/version/hash/allowlist/regression/output identities and semantic verification; compiler/build mechanics are unchanged.
 
 DEVICE RESULT / PROBLEM BOUNDARY
-V2.37 is the current stable visual/presentation authority and all unrelated behavior is protected. The remaining device-proven problems are:
-1. Fine high-frequency structure visible in SHORT (grass, pine needles, dirt microtexture and the same universal class such as hair/fabric/text/mesh) can be lost because final fusion primarily judged LONG information loss at coarser 4px/12px scales.
-2. Very bright saturated linear ceiling lights can retain a narrow coherent pink/green CFA fringe because ordinary local chroma coherence can incorrectly treat a spatially coherent false fringe as real color.
-3. Real scene motion can corrupt registration/fusion, including black/grey borders, repeated edge pixels, square/block corruption and gross misalignment, because a moving foreground can influence whole-frame registration, inferred local-flow cells can still shape the sampled warp, and out-of-bounds SHORT requests were clamped back to image edges.
+The V2.38 office/window capture used a roughly 16.67x / 4.06 EV SHORT-LONG exposure-product separation. At that separation the existing temporal body average intentionally contributes zero SHORT to ordinary LONG-owned body, so two captured RAW frames do not imply universal two-frame denoising. The device result exposed two remaining problems:
+1. Noise is materially stronger than Photon, especially chroma grain on smooth walls/carpet, because the still RAW source is intentionally NR-OFF and ordinary body can be one LONG RAW observation before presentation amplification. Optional NAFNet runs only after the completed fused JPEG and cannot substitute for linear RAW-derived cleanup.
+2. Real grass/pine-needle/dirt microtexture is visibly present in SHORT but V2.38 can remain LONG-dominated. Its 1.5px detector was still too conservative and final fine-detail ownership remained coupled to the coarse 16x16 connected HDR atlas; bilinear SHORT resampling also attenuated 1-2px detail.
 
-V2.38 CORRECTION CONTRACT
-1. JpegFusion keeps the successful V2.37 whole-frame gradient registration as the normal solution but audits it against a 5x4 spatially distributed tile consensus. A valid distributed consensus can replace a materially disagreeing whole-frame hypothesis; weak/non-distributed consensus leaves V2.37 unchanged.
-2. Local-flow alpha now records direct ownership: alpha=255 only where that cell's own forward/backward cycle-validated residual survived the strict existing gate. Filled/inferred cells remain available for coarse topology continuity but carry alpha=0 and cannot warp final SHORT RGB.
-3. hdr_display validates the unclamped SHORT coordinate before sampling. A 1.25-pixel interpolation-safe source margin is mandatory; invalid requests fail closed instead of clamping an off-frame warp to border pixels.
-4. Local residual displacement is applied only when direct local confidence is strong. Unsupported/inferred locations use exactly the stable global registration residual of zero rather than borrowing a neighboring local warp.
-5. Final non-clipped effective-loss recovery requires full-resolution static correspondence: real source bounds, direct local geometry and loose same-scene radiometric agreement. Moving/disoccluded content therefore fails closed to immutable LONG.
-6. Physical hard clipping remains eligible for HDR recovery because LONG has genuinely lost information, but real SHORT source bounds remain mandatory. V2.38 does not claim that two different moving moments can be perfectly reconstructed; it prevents uncertain geometry from becoming a general source owner.
-7. Saved RAW effective-loss analysis adds a universal 1.5px microstructure class. SHORT structure must exceed five times its physical local sigma, materially exceed LONG at the same location, and have direct local geometry. This is source-evidence based and semantic-independent; no sharpening or frequency blending is introduced.
-8. Source ownership remains complete RGB from one real frame per final highlight/detail pixel. LONG remains the default clean body; SHORT only owns where physical/effective information loss is proven under the above geometry rules.
-9. raw_chroma_dealias uses the existing physical RAW saturation bit to identify only the immediate saturation transition halo. In that halo, unsupported chroma can move toward a local unsaturated, same-luminance-side estimate; ordinary unsaturated colored edges retain the V2.36/V2.37 local chroma behavior.
-10. Saturation-edge cleanup preserves center luminance, uses no distant hue donor and introduces no blanket/global desaturation.
-11. V2.37 manual Brightness/Gamma ownership, SPLIT behavior, extreme-emitter AUTO, FUSED presentation/tone, CFA common-quad highlight reconstruction, RAW color matrices, SHORT/LONG acquisition, DNG/media ownership, NAFNet and HdrGlView GPU allocation/lifetime are protected byte-for-byte unless one of the three runtime files below explicitly implements the stated fusion/alignment correction.
+V2.39 CORRECTION CONTRACT
+1. `raw_chroma_dealias.frag` adds linear RAW-derived noise-model-aware cleanup after CFA reconstruction but before HDR fusion/tone/presentation. It consumes the existing Camera2 physical sigma carried with each reconstructed RAW frame; no JPEG-domain or hidden ISP owner is introduced.
+2. Luma and chroma cleanup are separate. In statistically noise-like smooth interiors, luma cleanup is capped at 0.52 and chroma cleanup at 0.92. Coherent 1-2px luminance structure suppresses both; bilateral luma/chroma range compatibility prevents averaging across real colored or luminance edges.
+3. The new ordinary-noise cleanup is disabled at the physical saturation center so V2.38 common-quad/highlight and saturation-transition chroma ownership remains unchanged. The output alpha is copied from the center carrier exactly; cleanup may not advertise artificially lower physical sigma to downstream fusion.
+4. V2.39 removes the retired V2.38 isolated 5-sigma 1.5px path from coarse `longEffectiveLossAt`. Medium/broad connected HDR loss remains noise-normalized and unchanged in purpose.
+5. A new independent native-resolution microdetail owner evaluates multiple center-to-ring and ring-to-ring SHORT/LONG gradients. SHORT gradients must be above physical difference noise and materially stronger than LONG; both center and ring support are required so a single noisy center pixel cannot trigger.
+6. Direct microdetail authority requires complete 4x4 SHORT source bounds, direct cycle-validated local-flow confidence, registration-neighborhood confidence, low-frequency SHORT/LONG same-scene support, valid SHORT signal/headroom and a low-residual-motion barrier. Moving/disoccluded/OOB content fails closed.
+7. Broad clipped/effective HDR replacement continues to require the inherited 16x16 connected topology. Only directly proven 1-2px microdetail is allowed to bypass that coarse atlas. Thus a small patch of real grass/needle/weave can recover even when it is not a broad HDR component, without loosening broad highlight ownership.
+8. Final source truth remains binary complete RGB from one real frame. No sharpening and no fractional LONG+SHORT high-frequency blend is introduced.
+9. Only directly proven microdetail may use the bounded 4x4 Catmull-Rom SHORT sampler. Its result is clamped per channel to actual surrounding SHORT extrema to prevent ringing/overshoot, and downstream sigma remains the conservative bilinear sigma authority. Normal broad HDR recovery keeps the V2.38 four-tap SHORT sampler.
+10. V2.38 tiled global registration consensus, direct-vs-inferred local-flow authority, OOB protection and final motion/disocclusion barriers are protected byte-for-byte in JpegFusion and semantically in the shader. The new direct microdetail owner also rejects large local residual motion.
+11. RawFusion/HdrGlView Camera2 BlackLevel/WhiteLevel handling is unchanged. No 1/65535 normalization or artificial 16-bit expansion is introduced; the actual camera code range remains authoritative.
+12. V2.38/V2.37 presentation, Manual Safe sliders, SPLIT, extreme-emitter AUTO, FUSED tone, common-quad CFA/highlight reconstruction, saturation-edge chroma repair, exposure/acquisition, DNG/media ownership, NAFNet and GPU lifetime are protected unless explicitly touched by the two runtime shaders listed below.
 
 PERMANENT REGRESSIONS ADDED
-- Exact successful V2.37 commit/run/artifact is the only V2.38 runtime authority.
-- Distributed global consensus must select a spatially supported static-background cluster over a smaller moving-foreground cluster; weak consensus preserves V2.37.
-- Inferred local-flow cells have alpha=0 and zero final residual-warp authority.
-- Pre-clamp OOB SHORT coordinates are invalid and may not manufacture border pixels.
-- Noise-only/equal microtexture may not gain SHORT ownership; real >5-sigma SHORT-only 1-2px structure requires direct local geometry.
-- Non-clipped effective recovery without full-resolution static correspondence is forbidden.
-- Saturated coherent false-color edges can receive local physical-saturation cleanup; identical unsaturated edges receive zero special saturation correction.
-- Saturation-edge chroma correction preserves luminance and distant hue donors remain forbidden.
+- Exact successful V2.38 commit/run/artifact is the only V2.39 runtime authority.
+- Smooth RAW-noise fixture receives stronger chroma than luma cleanup; coherent high-frequency structure receives zero new cleanup authority; physical saturation remains with V2.38.
+- Direct SHORT microdetail can acquire final ownership even when connectedRecovery=0, but only with coherent center+ring evidence and direct geometry/source-bounds/static support.
+- One noisy center, equal SHORT/LONG structure, weak/inferred geometry, OOB source support, or large local residual motion cannot acquire atlas-independent SHORT authority.
+- Only directly proven microdetail may use bounded Catmull-Rom; RGB must remain inside real surrounding SHORT extrema and sigma must remain conservative.
+- V2.38 JpegFusion motion mechanics remain byte-identical and no second alignment owner may appear.
+- WhiteLevel/BlackLevel sensor-code handling remains unchanged; 65535-domain substitution is forbidden.
 
-INTENDED V2.37 -> V2.38 RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 3
+INTENDED V2.38 -> V2.39 RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 2
 - app/src/main/assets/shaders/hdr_display.frag [MODIFY]
 - app/src/main/assets/shaders/raw_chroma_dealias.frag [MODIFY]
-- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java [MODIFY]
 
-PROTECTED V2.37 RUNTIME — EXACTLY 19 BYTE-IDENTICAL FILES
+PROTECTED V2.38 RUNTIME — EXACTLY 20 BYTE-IDENTICAL FILES
 - app/src/main/AndroidManifest.xml
 - app/src/main/assets/licenses/NAFNet_LICENSE.txt
 - app/src/main/assets/nafnet_sidd_width32_fp16.tflite
@@ -78,6 +76,7 @@ PROTECTED V2.37 RUNTIME — EXACTLY 19 BYTE-IDENTICAL FILES
 - app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java
 - app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java
@@ -90,7 +89,7 @@ BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - scripts/verify_orientation.py
 
 INFRASTRUCTURE DIFFERS FROM LAST SUCCESSFUL IMPLEMENTATION
-Yes, only for V2.38 authority/version/hash/allowlist/regression/output identities and semantic validation of the three intended runtime owners. The compiler/GLSL/Java/patch/assemble/invariance ordering and mechanics are unchanged from successful V2.37.
+Yes, only for V2.39 authority/version/hash/allowlist/regression/output identities and semantic validation of the two intended runtime shader owners. The successful V2.38 GLSL/Java/patch/assemble/invariance ordering and mechanics are unchanged.
 
 DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - PACKAGE_INFO.txt
@@ -98,15 +97,15 @@ DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-TOTAL EXPECTED V2.37 -> V2.38 TRACKED CHANGESET — EXACTLY 11 PATHS
-Runtime: 3. Infrastructure: 4. Delivery documents: 4.
+TOTAL EXPECTED V2.38 -> V2.39 TRACKED CHANGESET — EXACTLY 10 PATHS
+Runtime: 2. Infrastructure: 4. Delivery documents: 4.
 Candidate tracked universe: exactly 35 files.
 Runtime universe: exactly 22 app/src files.
-V2.38 runtime manifest digest: 56b52f744d8e260fb71b63eb8169a7427028546290d817f9fb86696c37a10d9e
+V2.39 runtime manifest digest: 59e954a7bc3a0baebf79b80bcd4f2a9b9c5cc56951352ed5bdde12e2a89ec32e
 
 COMPILER STATUS BEFORE ACTIONS
 REAL PINNED GLSL COMPILE: NOT RUN locally; mandatory Actions gate.
 REAL KOTLIN COMPILE: N/A.
-REAL PROJECT JAVA COMPILE: NOT RUN locally; JpegFusion.java is modified and the mandatory Actions gate must compile it with the real Android project compiler.
+REAL PROJECT JAVA COMPILE: NOT RUN locally; no Java runtime file is modified, but the inherited mandatory Actions step remains and must compile the real project.
 FULL ANDROID :app:assembleDebug: NOT RUN locally; mandatory Actions gate.
-FINAL ACTIONS AUTHORITY: successful V2.37 run 34507561872 until V2.38 passes.
+FINAL ACTIONS AUTHORITY: successful V2.38 run 34523350151 until V2.39 passes.
