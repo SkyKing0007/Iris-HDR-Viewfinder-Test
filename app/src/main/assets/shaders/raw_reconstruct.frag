@@ -159,33 +159,6 @@ float quadHighlightAt(ivec2 p) {
     return highlighted;
 }
 
-float quadCensoredFractionAt(ivec2 base) {
-    ivec2 q = ivec2(base.x & ~1, base.y & ~1);
-    float count = 0.0;
-    for (int oy = 0; oy < 2; ++oy) {
-        for (int ox = 0; ox < 2; ++ox) {
-            count += rawSaturationAt(q + ivec2(ox, oy));
-        }
-    }
-    return 0.25 * count;
-}
-
-float smoothCensoredFractionAt(ivec2 p) {
-    // IRIS_V236_PHASE_INVARIANT_CENSORED_ROLLOFF:
-    // Keep the strict Claude 2x2 gate binary for opponent permission. Only the
-    // terminal neutral fallback is bilinearly expanded so a packed CFA decision
-    // cannot print a hard 2x2 staircase into the final RGB image.
-    vec2 quadPos = 0.5 * vec2(p) - vec2(0.5);
-    ivec2 loQuad = 2 * ivec2(floor(quadPos));
-    ivec2 hiQuad = loQuad + ivec2(2);
-    vec2 f = fract(quadPos);
-    float a = quadCensoredFractionAt(loQuad);
-    float b = quadCensoredFractionAt(ivec2(hiQuad.x, loQuad.y));
-    float c = quadCensoredFractionAt(ivec2(loQuad.x, hiQuad.y));
-    float d = quadCensoredFractionAt(hiQuad);
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
 // x=opponent difference, y=sigma, z=absolute validity.  There is deliberately no
 // support/green ratio here: Claude correction item 2 forbids confidence increasing
 // when green support collapses.  Later interpolation requires an absolute count of
@@ -359,63 +332,37 @@ float encodeSigmaAndSaturation(float sigma, float saturation) {
     return (sigmaCode + 128.0 * step(0.5, saturation)) / 255.0;
 }
 
-// IRIS_V235_CLAUDE_NEUTRAL_MISSING_SUPPORT_BEGIN
-// The old-Iris normalize path fell back to one phase-invariant brightness only when
-// opponent support was actually missing.  Reproduce that behavior without V2.34's
-// wide boundary-hue donor: take the maximum WB-balanced physical lower-bound signal
-// in this pixel's parent 2x2 Bayer quad.  No neighboring hue is invented.
-float neutralFallbackBalanced(ivec2 p, vec3 balanceGains) {
-    ivec2 q = clampPixel(p);
-    ivec2 base = ivec2(q.x & ~1, q.y & ~1);
-    float neutral = 0.0;
-    for (int oy = 0; oy < 2; ++oy) {
-        for (int ox = 0; ox < 2; ++ox) {
-            ivec2 sampleP = clampPixel(base + ivec2(ox, oy));
-            vec3 sampleValue = rawMeasurementAt(sampleP);
-            int sampleColor = colorAt(sampleP);
-            float gain = sampleColor == 0
-                ? balanceGains.r : (sampleColor == 2 ? balanceGains.b : balanceGains.g);
-            neutral = max(neutral, sampleValue.x * gain);
-        }
-    }
-    return neutral;
-}
-// IRIS_V235_CLAUDE_NEUTRAL_MISSING_SUPPORT_END
-
 void main() {
     ivec2 p = ivec2(gl_FragCoord.xy);
     vec3 sensorRgb;
     vec3 sensorSigma;
     vec3 sensorValid;
     demosaicSensorBase(p, sensorRgb, sensorSigma, sensorValid);
-    sensorRgb = max(sensorRgb, vec3(0.0));
 
-    // raw_green + opponent reconstruction are now entirely in calculation-WB
-    // coordinates (green normalized to 1). Restore Camera2's absolute common green
-    // scale exactly once before the unchanged sensor->linear-sRGB transform.
+    // IRIS_V242_OPPONENT_ONLY_MISSING_SUPPORT_BEGIN
+    // DNG replay of the chandelier regression proved that the broad V2.35/V2.36
+    // whole-RGB neutral fallback manufactured visible highlight-border color/gray
+    // structure. The existing sensorValid result already carries the physically
+    // correct per-channel authority: direct saturated R/B and interpolated opponent
+    // channels with fewer than two uncensored observations are invalid, while green
+    // remains the reconstructed luminance guide. Honor that decision directly.
+    // Missing R/B opponent information falls back only to green in calculation-WB
+    // coordinates; every valid channel is byte-for-byte numerically unchanged.
+    vec3 channelAuthority = clamp(sensorValid, vec3(0.0), vec3(1.0));
+    vec3 opponentNeutral = vec3(sensorRgb.g);
+    sensorRgb = mix(opponentNeutral, sensorRgb, channelAuthority);
+    vec3 opponentNeutralSigma = vec3(max(sensorSigma.g, 0.000001));
+    sensorSigma = mix(opponentNeutralSigma, sensorSigma, channelAuthority);
+    sensorRgb = max(sensorRgb, vec3(0.0));
+    // IRIS_V242_OPPONENT_ONLY_MISSING_SUPPORT_END
+
+    // raw_green + opponent reconstruction are entirely in calculation-WB coordinates
+    // (green normalized to 1). Restore Camera2's absolute common green scale exactly
+    // once before the unchanged sensor->linear-sRGB transform. No component-wide or
+    // whole-RGB highlight neutralization is permitted after this point.
     float commonGreenGain = greenGain();
-    vec3 balanceGains = vec3(wbGains.x, commonGreenGain, wbGains.w);
     vec3 balancedRgb = sensorRgb * commonGreenGain;
     vec3 balancedSigma = sensorSigma * abs(commonGreenGain);
-
-    // Keep Claude's strict common-quad rejection as the COLOR authority. Do not
-    // turn that binary Bayer permission bit into a hard 2x2 RGB block: smoothly
-    // expand only the physical censored fraction for the terminal neutral fallback.
-    float censoredFraction = smoothCensoredFractionAt(p);
-    float neutralMix = smoothstep(0.0, 0.75, censoredFraction);
-    if (neutralMix > 0.0) {
-        float neutral = max(
-            neutralFallbackBalanced(p, balanceGains),
-            balancedRgb.g);
-        vec3 neutralRgb = vec3(max(neutral, 0.0));
-        balancedRgb = mix(balancedRgb, neutralRgb, neutralMix);
-        float fallbackSigma = max(
-            balancedSigma.r, max(balancedSigma.g, balancedSigma.b));
-        balancedSigma = mix(
-            balancedSigma,
-            vec3(max(fallbackSigma, 0.000001)),
-            neutralMix);
-    }
 
     vec3 linearRgb = vec3(
         dot(colorRow0, balancedRgb),

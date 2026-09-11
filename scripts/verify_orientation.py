@@ -32,7 +32,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.41 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.42 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -62,7 +62,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.41 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.42 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -167,10 +167,10 @@ require(sha_text(normalized_v240_jpegfusion_to_v239(fusion))
         == '1338ca1e5dd08d80c06a844edb012fc4920fd6f9099792c437eb95bf7f344d36',
         'V2.40 JpegFusion changes escaped the static-residual-model insertion allowlist')
 
-# V2.41 exact runtime freeze. The two intended runtime owners are pinned to the
-# reviewed candidate bytes; all other 20 app/src files are pinned byte-for-byte to
-# successful V2.40. This is intentionally stronger than a changed-file allowlist.
-V241_RUNTIME_SHA256 = {
+# V2.42 exact runtime freeze. raw_reconstruct.frag is the sole intended runtime
+# owner; the other 21 app/src files are pinned byte-for-byte to successful V2.41 R2.
+# This is intentionally stronger than a changed-file allowlist.
+V242_RUNTIME_SHA256 = {
     'app/src/main/AndroidManifest.xml': 'e1299d6cf61cfcb79cbfe3e1e7d46f3ab2a11b65ba116d7f2d328b51d4180a92',
     'app/src/main/assets/licenses/NAFNet_LICENSE.txt': '71e12b4b6218af984e66cca1c3be81c6774828bc14c6eadde42007e317784e4f',
     'app/src/main/assets/nafnet_sidd_width32_fp16.tflite': 'f8fbaa422411683c53e802cf7cc7cf9be0a0de00886ad4af057232e26b172a0c',
@@ -182,7 +182,7 @@ V241_RUNTIME_SHA256 = {
     'app/src/main/assets/shaders/raw_green.frag': '2e10f434b527041b4a499cc943b08b2e217c714f6cc3696ff6ca89bdf57e89cb',
     'app/src/main/assets/shaders/raw_preprocess.frag': '87f11cdd5f678977648cefadd181d21813c3bf23ee1107a3688772a4d46a3982',
     'app/src/main/assets/shaders/raw_proxy.frag': 'ec1ce9e4acd78f68d20a9ca54784f0ccb6006eff80fdb3a1277e7bc44f4a768d',
-    'app/src/main/assets/shaders/raw_reconstruct.frag': '01594852fe05aa1f35676d99d0c26b3ec7523823e11ad3a880a62250c3a20427',
+    'app/src/main/assets/shaders/raw_reconstruct.frag': '79bfd89ab9decec3e785c21ceb4f1ef028b95ceee0b74e726b9c0c1d0555165e',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'f89c36cebf9c0f483b9e3b522607b97d00b8129181af68d341635ae084021c1f',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': '5d8fcc04bba01fcf9625922421a338f187c0897e0c84f131a1fc343db7e487ce',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': 'e05484de966351424d3a5399eb159daccba766ed177c973b4b7529af014a60c5',
@@ -195,12 +195,12 @@ V241_RUNTIME_SHA256 = {
     'app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java': 'd70c676456dc6083ff3fa8b8dc8edd19bbfa6f6b0b5515ba6c492e3784b33e0f',
 }
 runtime_files = sorted(p for p in (ROOT / 'app/src').rglob('*') if p.is_file())
-require(len(runtime_files) == 22, f'V2.41 exact runtime universe must contain 22 files, found {len(runtime_files)}')
-require(set(V241_RUNTIME_SHA256) == {p.relative_to(ROOT).as_posix() for p in runtime_files},
-        'V2.41 runtime SHA pin set must exactly equal the 22-file runtime universe')
-for rel, expected_sha in V241_RUNTIME_SHA256.items():
+require(len(runtime_files) == 22, f'V2.42 exact runtime universe must contain 22 files, found {len(runtime_files)}')
+require(set(V242_RUNTIME_SHA256) == {p.relative_to(ROOT).as_posix() for p in runtime_files},
+        'V2.42 runtime SHA pin set must exactly equal the 22-file runtime universe')
+for rel, expected_sha in V242_RUNTIME_SHA256.items():
     actual_sha = hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
-    require(actual_sha == expected_sha, f'V2.41 runtime byte freeze mismatch: {rel}')
+    require(actual_sha == expected_sha, f'V2.42 runtime byte freeze mismatch: {rel}')
 
 # V2.37 is a localized presentation-control change on exact successful V2.36.
 # Normalize ONLY the three agreed V2.37 runtime owners back to their V2.36 bytes and
@@ -1078,13 +1078,13 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# V2.41 runtime authority is the exact last successful compiler-tested V2.40
-# candidate/artifact. V2.39 remains static-behavior reference evidence only.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.40' in workflow
-        and 'run-id: 34549873022' in workflow
-        and "authority='5f178aa746c7ccffe1e0148a82df2b8018ceb737'" in workflow
-        and "authority_tree='696d34bf26725694faf5c177832a9b256e75e734'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.40 Actions authority")
+# V2.42 runtime authority is the exact last successful compiler-tested V2.41 R2
+# candidate/artifact. Earlier candidates remain regression/reference evidence only.
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.41' in workflow
+        and 'run-id: 34557568126' in workflow
+        and "authority='866665c5add2af78c75b8d159f28e2fca23dd0d3'" in workflow
+        and "authority_tree='552cd9ee43ce1c2fafaa12140798054fd2092e1c'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.41 R2 Actions authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -2285,9 +2285,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 59' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.41"' in build_gradle,
-        "V2.41 version/build marker must be exact")
+require('versionCode = 60' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.42"' in build_gradle,
+        "V2.42 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2673,30 +2673,21 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillRaws(' not in service
         and 'fuseStillRaws(' not in nafnet,
         "V2.30 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.40_to_V1.4.11-V2.41.forward.patch' in workflow
-        and 'V1.4.11-V2.41_to_V1.4.11-V2.40.rollback.patch' in workflow,
-        "V2.41 final artifact must export correctly named V2.40<->V2.41 patches")
-require('sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.41-debug.apk' in workflow
-        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.41-source-candidate.tar' in workflow
-        and 'sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.40-debug.apk' not in workflow
-        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.40-source-candidate.tar \\' not in workflow,
-        "V2.41 final SHA256SUMS export must use V2.41 APK/source identities, never stale V2.40 output names")
+require('V1.4.11-V2.41_to_V1.4.11-V2.42.forward.patch' in workflow
+        and 'V1.4.11-V2.42_to_V1.4.11-V2.41.rollback.patch' in workflow,
+        "V2.42 final artifact must export correctly named V2.41<->V2.42 patches")
+require('sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.42-debug.apk' in workflow
+        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.42-source-candidate.tar' in workflow
+        and 'sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.41-debug.apk' not in workflow,
+        "V2.42 final SHA256SUMS export must use V2.42 APK/source identities")
 require('fetch-depth: 4' in workflow
-        and "authority='5f178aa746c7ccffe1e0148a82df2b8018ceb737'" in workflow
-        and "authority_tree='696d34bf26725694faf5c177832a9b256e75e734'" in workflow
-        and "failed_v241='c6475a41e7db536a35203bcfc608f7a1b77fe3dc'" in workflow
-        and "failed_v241_tree='248338c81e5a5ab9a3bc1eeeffb20fca3469ab8b'" in workflow
-        and "failed_v241_r1='1bd678ce0cbc7d0202e6dcec332c6885651c87d5'" in workflow
-        and "failed_v241_r1_tree='d6a0d854e0cf0f7657bd2eb7b96a4fb7260b5c07'" in workflow
-        and 'test "$(git rev-parse HEAD^)" = "$failed_v241_r1"' in workflow
-        and 'test "$(git rev-parse "$failed_v241_r1^")" = "$failed_v241"' in workflow
-        and 'test "$(git rev-parse "$failed_v241^")" = "$authority"' in workflow
-        and 'test "$(git rev-parse "$failed_v241_r1^{tree}")" = "$failed_v241_r1_tree"' in workflow
-        and 'test "$(git rev-parse "$failed_v241^{tree}")" = "$failed_v241_tree"' in workflow
+        and "authority='866665c5add2af78c75b8d159f28e2fca23dd0d3'" in workflow
+        and "authority_tree='552cd9ee43ce1c2fafaa12140798054fd2092e1c'" in workflow
+        and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow
         and 'test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"' in workflow,
-        "V2.41 R2 must prove exact R2 -> failed R1 -> failed V2.41 -> successful V2.40 authority chain")
-require("authority = '5f178aa746c7ccffe1e0148a82df2b8018ceb737'" in workflow,
-        "V2.41 changed-file allowlist must compare against successful V2.40")
+        "V2.42 must prove exact successful V2.41 R2 direct-parent authority without weakening R2 mechanics")
+require("authority = '866665c5add2af78c75b8d159f28e2fca23dd0d3'" in workflow,
+        "V2.42 changed-file allowlist must compare against successful V2.41 R2")
 require('273 - Exact V2.36 R1 allowlist regression:' in workflow,
         "V2.36 R1 exact stale-allowlist-authority failure must remain a permanent regression")
 require('274 - V2.37 runtime authority is exactly successful V2.36 R1 commit 1268c56ae19bcff6a8c9bec42fdc9c911a8436d4' in workflow,
@@ -2714,6 +2705,12 @@ require('314 - Exact failed V2.41 R1 run 34556366789 regression:' in workflow
         and 'failed original V2.41 c6475a41e7db536a35203bcfc608f7a1b77fe3dc' in workflow
         and 'successful V2.40 5f178aa746c7ccffe1e0148a82df2b8018ceb737' in workflow,
         "V2.41 R2 exact failed-repair-lineage regression missing")
+require('315 - V2.42 runtime authority is exactly successful V2.41 R2 commit 866665c5add2af78c75b8d159f28e2fca23dd0d3' in workflow,
+        "V2.42 exact successful-authority regression missing")
+require('316 - Chandelier/office saturated-CFA regression:' in workflow
+        and 'sensorValid is the per-channel authority' in workflow
+        and 'whole-RGB neutral fallback is forbidden' in workflow,
+        "V2.42 opponent-only saturated-CFA regression missing")
 for regression_number, regression_text in (
         ('299', 'V2.40 high-DR acquisition may not depend solely on current digital clipping'),
         ('300', 'V2.40 direct local SHORT-warp authority requires agreement with a distributed static-background residual model'),
@@ -2732,9 +2729,9 @@ for regression_number, regression_text in (
     require(f'{regression_number} - {regression_text}' in workflow,
             f'V2.41 permanent regression {regression_number} missing')
 require("if len(tracked) != 35:" in workflow
-        and "V1.4.11 V2.40 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "V1.4.11 V2.41 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.41 must prove the 35-file V2.40 authority and exact 35-file candidate universe")
+        "V2.42 must prove the 35-file V2.41 R2 authority and exact 35-file candidate universe")
 
 require('uniform vec2 stillGlobalShortOffsetPixels;' in hdr_shader
         and 'sampleUv + stillGlobalShortOffsetPixels / imageSize' in hdr_shader
@@ -2950,8 +2947,8 @@ require('float saturation = step(0.985, normalized);' in raw_preprocess_shader
         "V2.35 clip exclusion and highlight guide must share the physical pre-WB 0.985 sensor domain")
 require('float signal = normalized * shadingGain;' in raw_preprocess_shader
         and raw_preprocess_shader.find('float signal = normalized * shadingGain;') >= 0
-        and 'neutralFallbackBalanced' in raw_shader,
-        "V2.35 must retain Viewfinder lens shading before any neutral missing-support terminal state")
+        and 'IRIS_V242_OPPONENT_ONLY_MISSING_SUPPORT_BEGIN' in raw_shader,
+        "V2.42 must retain Viewfinder lens shading before opponent-only missing-support reconstruction")
 require('recoverCensoredBalanced' not in raw_shader
         and 'boundaryChroma' not in raw_shader
         and 'wideOffsets' not in raw_shader
@@ -3006,11 +3003,28 @@ require('IRIS_V236_CALCULATION_WB_OPPONENT_DOMAIN' in raw_shader
         and 'calculationColor - greenValue.x' in raw_shader
         and 'vec3 balancedRgb = sensorRgb * commonGreenGain;' in raw_shader,
         "V2.36 must form opponent chroma in calculation-WB space and restore the common green scale exactly once")
-require('IRIS_V236_PHASE_INVARIANT_CENSORED_ROLLOFF' in raw_shader
-        and 'return 0.25 * count;' in raw_shader
-        and 'float neutralMix = smoothstep(0.0, 0.75, censoredFraction);' in raw_shader
-        and 'if (completeColorSupport < 0.5)' not in raw_shader,
-        "V2.36 terminal censored fallback must not reprint the strict 2x2 permission gate as a hard RGB block")
+require(raw_shader.count('IRIS_V242_OPPONENT_ONLY_MISSING_SUPPORT_BEGIN') == 1
+        and raw_shader.count('IRIS_V242_OPPONENT_ONLY_MISSING_SUPPORT_END') == 1
+        and 'vec3 channelAuthority = clamp(sensorValid, vec3(0.0), vec3(1.0));' in raw_shader
+        and 'vec3 opponentNeutral = vec3(sensorRgb.g);' in raw_shader
+        and 'sensorRgb = mix(opponentNeutral, sensorRgb, channelAuthority);' in raw_shader
+        and 'sensorSigma = mix(opponentNeutralSigma, sensorSigma, channelAuthority);' in raw_shader
+        and 'neutralMix' not in raw_shader
+        and 'neutralFallbackBalanced' not in raw_shader
+        and 'smoothCensoredFractionAt' not in raw_shader
+        and 'quadCensoredFractionAt' not in raw_shader,
+        "V2.42 must use per-channel sensorValid authority and forbid the broad whole-RGB neutral fallback")
+# Exact DNG-derived opponent-only fixtures: valid channels remain unchanged; invalid
+# R/B fall back to reconstructed green without changing the green/luminance guide.
+def v242_opponent_only(rgb, valid):
+    green = rgb[1]
+    return [rgb[i] if valid[i] >= 0.5 else green for i in range(3)]
+require(v242_opponent_only([1.481, 0.962, 1.481], [0.0, 1.0, 0.0])
+        == [0.962, 0.962, 0.962],
+        "V2.42 saturated neutral emitter must not retain invalid magenta opponents")
+require(v242_opponent_only([0.80, 0.50, 1.20], [1.0, 1.0, 0.0])
+        == [0.80, 0.50, 0.50],
+        "V2.42 must preserve valid red/green while replacing only invalid blue opponent information")
 require('IRIS_V236_AUTO_NEUTRAL_PRESENTATION_POLICY' in camera
         and 'AUTO_PRESENT_BRIGHTNESS_MAX_EV = 0.00f' in camera
         and 'AUTO_PRESENT_GAMMA_MAX = 1.65f' in camera,
@@ -3563,4 +3577,4 @@ require(v234_hdr_peak(4.0) < 0.91 and v234_hdr_peak(5.6) <= 0.931,
 require(v234_hdr_peak(16.0) < 0.99,
         "V2.34 must reserve smooth headroom above the ceiling gradient for true lamp cores")
 
-print("V1.4.11 V2.41 REGRESSION PASS: successful V2.40 acquisition and static 1x averaging preserved; static connected HDR final ownership restored to V2.39 coherence with no per-pixel boundary ring; only strong high-confidence distributed-residual outliers become component motion barriers; motion-rejected cells cannot seed/propagate SHORT or temporal-average; V2.39 RAW denoise/microdetail/CFA/presentation and protected owners remain unchanged")
+print("V1.4.11 V2.42 REGRESSION PASS: successful V2.41 R2 fusion/motion/registration/acquisition/presentation mechanics preserved; raw_reconstruct uses sensorValid per-channel opponent-only missing-support authority; broad whole-RGB neutral fallback is forbidden; all other runtime owners remain byte-pinned")

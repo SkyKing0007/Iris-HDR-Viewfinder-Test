@@ -1,13 +1,11 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.41
+# Iris HDR Viewfinder Test V1.4.11 V2.42
 
-V2.41 is a focused correction on the exact successful V2.40 compiled candidate: commit `5f178aa746c7ccffe1e0148a82df2b8018ceb737`, tree `696d34bf26725694faf5c177832a9b256e75e734`, Actions run `34549873022`, artifact `10180424289`.
+V2.42 is a narrow RAW highlight-color correction on the exact successful V2.41 R2 compiled candidate: commit `866665c5add2af78c75b8d159f28e2fca23dd0d3`, tree `552cd9ee43ce1c2fafaa12140798054fd2092e1c`, Actions run `34557568126`, artifact `10183167176`.
 
-The device-proven V2.40 regression was a static HDR source-ownership seam: the final per-pixel hard-highlight motion safety belt could expose LONG around a SHORT-owned clipped component, creating white borders and grey outlines. V2.41 removes that final per-pixel ring and restores V2.39 coherent connected-highlight ownership after topology formation.
+The device/DNG regression is square green/cyan/magenta color contamination around saturated chandelier/light housings. Strict SHORT+LONG DNG fusion replay isolated the sufficient correction to `raw_reconstruct.frag`: the existing per-channel `sensorValid` result becomes authoritative. Invalid/censored R/B opponent information falls back only to reconstructed green in calculation-WB coordinates; valid channels and the green/luminance guide remain unchanged.
 
-Motion protection is retained at the correct earlier owner. `JpegFusion.java` now distinguishes only decisive high-confidence distributed-residual outliers as explicit scene motion; weak or repetitive static matches are not motion barriers. `hdr_display.frag` prevents those explicit motion cells from seeding/accepting SHORT topology or equal-exposure temporal averaging, so incompatible temporal content keeps one coherent LONG source/natural blur.
+The V2.35/V2.36 broad whole-RGB neutral fallback (`smoothCensoredFractionAt` / `neutralFallbackBalanced` / `neutralMix`) is removed so a saturated Bayer neighborhood cannot repaint all RGB into a visible grey/yellow border. Existing common-quad opponent rejection and the V2.38 `raw_chroma_dealias.frag` saturation-transition cleanup remain protected unchanged.
 
-V2.40 `CameraController.java` is byte-identical, preserving stable LONG physical-SNR acquisition and prevention of low-photon 1x collapse. The V2.40 static smooth exact/near-1x 50/50 averaging path also remains unchanged. V2.39 RAW denoise, direct microdetail, CFA/highlight reconstruction, color, presentation, DNG, WhiteLevel/BlackLevel, NAFNet and HdrGlView remain protected.
-
-Runtime changes are exactly two files: `app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java` and `app/src/main/assets/shaders/hdr_display.frag`.
+Runtime change is exactly one file: `app/src/main/assets/shaders/raw_reconstruct.frag`. V2.41 R2 fusion topology, motion rejection, registration, appearance-gain normalization, exposure acquisition, presentation, DNG, NAFNet, Java owners and all other runtime files are protected byte-for-byte.
 
 Before GitHub Actions succeeds, this package is prepared/upload-ready only. GitHub Actions remains authoritative for the pinned real GLSL compiler, real project Java compiler and full `:app:assembleDebug`.
