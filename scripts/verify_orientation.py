@@ -2681,10 +2681,20 @@ require('sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.41-debug.apk' in w
         and 'sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.40-debug.apk' not in workflow
         and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.40-source-candidate.tar \\' not in workflow,
         "V2.41 final SHA256SUMS export must use V2.41 APK/source identities, never stale V2.40 output names")
-require("authority='5f178aa746c7ccffe1e0148a82df2b8018ceb737'" in workflow
+require('fetch-depth: 4' in workflow
+        and "authority='5f178aa746c7ccffe1e0148a82df2b8018ceb737'" in workflow
         and "authority_tree='696d34bf26725694faf5c177832a9b256e75e734'" in workflow
-        and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow,
-        "V2.41 must prove exact successful V2.40 direct-parent authority")
+        and "failed_v241='c6475a41e7db536a35203bcfc608f7a1b77fe3dc'" in workflow
+        and "failed_v241_tree='248338c81e5a5ab9a3bc1eeeffb20fca3469ab8b'" in workflow
+        and "failed_v241_r1='1bd678ce0cbc7d0202e6dcec332c6885651c87d5'" in workflow
+        and "failed_v241_r1_tree='d6a0d854e0cf0f7657bd2eb7b96a4fb7260b5c07'" in workflow
+        and 'test "$(git rev-parse HEAD^)" = "$failed_v241_r1"' in workflow
+        and 'test "$(git rev-parse "$failed_v241_r1^")" = "$failed_v241"' in workflow
+        and 'test "$(git rev-parse "$failed_v241^")" = "$authority"' in workflow
+        and 'test "$(git rev-parse "$failed_v241_r1^{tree}")" = "$failed_v241_r1_tree"' in workflow
+        and 'test "$(git rev-parse "$failed_v241^{tree}")" = "$failed_v241_tree"' in workflow
+        and 'test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"' in workflow,
+        "V2.41 R2 must prove exact R2 -> failed R1 -> failed V2.41 -> successful V2.40 authority chain")
 require("authority = '5f178aa746c7ccffe1e0148a82df2b8018ceb737'" in workflow,
         "V2.41 changed-file allowlist must compare against successful V2.40")
 require('273 - Exact V2.36 R1 allowlist regression:' in workflow,
@@ -2699,6 +2709,11 @@ require('298 - V2.40 runtime authority is exactly successful V2.39 commit 092b16
         "V2.40 exact successful-authority regression missing")
 require('305 - V2.41 runtime authority is exactly successful V2.40 commit 5f178aa746c7ccffe1e0148a82df2b8018ceb737' in workflow,
         "V2.41 exact successful-authority regression missing")
+require('314 - Exact failed V2.41 R1 run 34556366789 regression:' in workflow
+        and 'R2 HEAD -> failed R1 1bd678ce0cbc7d0202e6dcec332c6885651c87d5' in workflow
+        and 'failed original V2.41 c6475a41e7db536a35203bcfc608f7a1b77fe3dc' in workflow
+        and 'successful V2.40 5f178aa746c7ccffe1e0148a82df2b8018ceb737' in workflow,
+        "V2.41 R2 exact failed-repair-lineage regression missing")
 for regression_number, regression_text in (
         ('299', 'V2.40 high-DR acquisition may not depend solely on current digital clipping'),
         ('300', 'V2.40 direct local SHORT-warp authority requires agreement with a distributed static-background residual model'),

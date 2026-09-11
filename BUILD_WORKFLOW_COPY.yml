@@ -26,7 +26,7 @@ jobs:
       - name: Checkout exact candidate history
         uses: actions/checkout@v4
         with:
-          fetch-depth: 3
+          fetch-depth: 4
 
       - name: Download exact successful V1.4.11 V2.40 Actions authority artifact
         uses: actions/download-artifact@v4
@@ -45,13 +45,17 @@ jobs:
           authority_tree='696d34bf26725694faf5c177832a9b256e75e734'
           failed_v241='c6475a41e7db536a35203bcfc608f7a1b77fe3dc'
           failed_v241_tree='248338c81e5a5ab9a3bc1eeeffb20fca3469ab8b'
+          failed_v241_r1='1bd678ce0cbc7d0202e6dcec332c6885651c87d5'
+          failed_v241_r1_tree='d6a0d854e0cf0f7657bd2eb7b96a4fb7260b5c07'
           authority_dir="$RUNNER_TEMP/v1411v240-authority-artifact"
           authority_src="$RUNNER_TEMP/v1411v240-authority-source"
 
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'experiment-v1.4.11-v2-brightness-4ev'
-          test "$(git rev-parse HEAD^)" = "$failed_v241"
+          test "$(git rev-parse HEAD^)" = "$failed_v241_r1"
+          test "$(git rev-parse "$failed_v241_r1^")" = "$failed_v241"
           test "$(git rev-parse "$failed_v241^")" = "$authority"
+          test "$(git rev-parse "$failed_v241_r1^{tree}")" = "$failed_v241_r1_tree"
           test "$(git rev-parse "$failed_v241^{tree}")" = "$failed_v241_tree"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
@@ -796,6 +800,7 @@ jobs:
           311 - Exact failed V2.41 run 34555529762 regression: post-build candidate runtime digest must equal the V2.41 compiler-tested bootstrap digest 166a0f1cf38f13e64792cc8ec3a4ca173d74a6ca8d22a1c7ff33cfb3e3f35f66; the V2.40 digest 597257702945da4454577f2f059a1b34627241664b767d5ec7c741c658f4aa37 is authority-only and may not be reused as current-candidate post-build identity.
           312 - V2.41 R1 repair lineage is exact: repair HEAD parent is failed V2.41 c6475a41e7db536a35203bcfc608f7a1b77fe3dc, whose parent is successful V2.40 authority 5f178aa746c7ccffe1e0148a82df2b8018ceb737; failed-attempt lineage may not replace V2.40 runtime authority.
           313 - V2.40 CameraController.java is protected V2.41 runtime and must be hash-pinned in both pre-build and post-build protected sets; post-build protection may not omit it merely because V2.40 changed it relative to V2.39.
+          314 - Exact failed V2.41 R1 run 34556366789 regression: repair validators may not assume successful V2.40 is always HEAD^ after an infrastructure-only repair commit; R2 must prove the exact chain R2 HEAD -> failed R1 1bd678ce0cbc7d0202e6dcec332c6885651c87d5 -> failed original V2.41 c6475a41e7db536a35203bcfc608f7a1b77fe3dc -> successful V2.40 5f178aa746c7ccffe1e0148a82df2b8018ceb737, while all candidate/patch/runtime authority comparisons remain anchored directly to V2.40.
           REGRESSIONS
           sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.41-debug.apk \
                     output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.41-source-candidate.tar \
