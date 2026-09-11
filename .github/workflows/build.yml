@@ -43,12 +43,16 @@ jobs:
           IRIS_WORKFLOW_SYNTAX_ONLY=1 python3 scripts/verify_orientation.py
           authority='5f178aa746c7ccffe1e0148a82df2b8018ceb737'
           authority_tree='696d34bf26725694faf5c177832a9b256e75e734'
+          failed_v241='c6475a41e7db536a35203bcfc608f7a1b77fe3dc'
+          failed_v241_tree='248338c81e5a5ab9a3bc1eeeffb20fca3469ab8b'
           authority_dir="$RUNNER_TEMP/v1411v240-authority-artifact"
           authority_src="$RUNNER_TEMP/v1411v240-authority-source"
 
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test "$GITHUB_REF_NAME" = 'experiment-v1.4.11-v2-brightness-4ev'
-          test "$(git rev-parse HEAD^)" = "$authority"
+          test "$(git rev-parse HEAD^)" = "$failed_v241"
+          test "$(git rev-parse "$failed_v241^")" = "$authority"
+          test "$(git rev-parse "$failed_v241^{tree}")" = "$failed_v241_tree"
           test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"
           cmp -s .github/workflows/build.yml BUILD_WORKFLOW_COPY.yml
           grep -Fq 'versionCode = 59' app/build.gradle.kts
@@ -412,7 +416,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, subprocess
-          expected_runtime='597257702945da4454577f2f059a1b34627241664b767d5ec7c741c658f4aa37'
+          expected_runtime='166a0f1cf38f13e64792cc8ec3a4ca173d74a6ca8d22a1c7ff33cfb3e3f35f66'
           # Permanent exact regression from failed V2.13 V1.1 run 33903152566:
           # post-build runtime expectation must equal the compiler-tested bootstrap digest.
           bootstrap=Path('bootstrap-runtime-manifest.tsv').read_bytes()
@@ -447,6 +451,7 @@ jobs:
               'app/src/main/assets/shaders/raw_preprocess.frag': '87f11cdd5f678977648cefadd181d21813c3bf23ee1107a3688772a4d46a3982',
               'app/src/main/assets/shaders/raw_proxy.frag': 'ec1ce9e4acd78f68d20a9ca54784f0ccb6006eff80fdb3a1277e7bc44f4a768d',
               'app/src/main/assets/shaders/raw_reconstruct.frag': '01594852fe05aa1f35676d99d0c26b3ec7523823e11ad3a880a62250c3a20427',
+              'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'f89c36cebf9c0f483b9e3b522607b97d00b8129181af68d341635ae084021c1f',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': '5d8fcc04bba01fcf9625922421a338f187c0897e0c84f131a1fc343db7e487ce',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': 'e05484de966351424d3a5399eb159daccba766ed177c973b4b7529af014a60c5',
               'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': 'd3450b99b9737236ba61abd1f0c3f56ce1a2f220e858ce87878625eefc69046a',
@@ -788,6 +793,9 @@ jobs:
           308 - V2.41 explicit motion-rejected cells may not seed or accept connected SHORT topology and may not receive equal-exposure temporal averaging; one coherent LONG source / natural blur is preferred to incompatible temporal fusion.
           309 - After V2.41 motion-aware component formation, final connected HDR ownership is exactly the V2.39 coherent selector connectedRecovery * step(0.08, fullResolutionLoss); topologyWarpConsistencyAt/hardRecoveryBoundarySafetyAt per-pixel final gates are forbidden.
           310 - V2.40 CameraController stable-LONG-SNR acquisition and V2.40 static smooth exact/near-1x averaging remain protected unchanged in V2.41.
+          311 - Exact failed V2.41 run 34555529762 regression: post-build candidate runtime digest must equal the V2.41 compiler-tested bootstrap digest 166a0f1cf38f13e64792cc8ec3a4ca173d74a6ca8d22a1c7ff33cfb3e3f35f66; the V2.40 digest 597257702945da4454577f2f059a1b34627241664b767d5ec7c741c658f4aa37 is authority-only and may not be reused as current-candidate post-build identity.
+          312 - V2.41 R1 repair lineage is exact: repair HEAD parent is failed V2.41 c6475a41e7db536a35203bcfc608f7a1b77fe3dc, whose parent is successful V2.40 authority 5f178aa746c7ccffe1e0148a82df2b8018ceb737; failed-attempt lineage may not replace V2.40 runtime authority.
+          313 - V2.40 CameraController.java is protected V2.41 runtime and must be hash-pinned in both pre-build and post-build protected sets; post-build protection may not omit it merely because V2.40 changed it relative to V2.39.
           REGRESSIONS
           sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.41-debug.apk \
                     output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.41-source-candidate.tar \
