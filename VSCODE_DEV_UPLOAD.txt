@@ -1,35 +1,24 @@
-V1.4.11 V2.40 — MOTION-SAFE FUSION + STABLE LONG SNR + STATIC 1X AVERAGING
+VSCODE.DEV UPLOAD — V1.4.11 V2.41
 
+Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Required current parent / runtime authority:
-092b1659d0e28560ea355d0e1f85e36f241802b7
-Successful Actions run: 34532782246
-Successful artifact: 10174233979 / Iris-HDR-Viewfinder-Test-V1.4.11-V2.39
+Runtime authority: successful V2.40 commit 5f178aa746c7ccffe1e0148a82df2b8018ceb737 / Actions 34549873022 / artifact 10180424289.
 
-UPLOAD / REPLACE THESE 11 FLAT FILES
+Replace the files from this handoff ZIP at the repository root, preserving paths.
+Source Control must show exactly 10 modified files, 0 added, 0 deleted.
+Do not upload an APK to the repository.
 
-1. build.yml -> .github/workflows/build.yml
-2. BUILD_WORKFLOW_COPY.yml -> BUILD_WORKFLOW_COPY.yml
-3. PACKAGE_INFO.txt -> PACKAGE_INFO.txt
-4. PACKAGE_MANIFEST_SHA256.txt -> PACKAGE_MANIFEST_SHA256.txt
-5. README.md -> README.md
-6. VSCODE_DEV_UPLOAD.txt -> VSCODE_DEV_UPLOAD.txt
-7. app_build.gradle.kts -> app/build.gradle.kts
-8. hdr_display.frag -> app/src/main/assets/shaders/hdr_display.frag
-9. CameraController.java -> app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java
-10. JpegFusion.java -> app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
-11. verify_orientation.py -> scripts/verify_orientation.py
+Expected runtime modifications: exactly 2
+- app/src/main/assets/shaders/hdr_display.frag
+- app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java
 
-BEFORE COMMIT
-Source Control must show exactly 11 modified files, 0 added files and 0 deleted files.
-No other app/src/** file may appear.
-In particular HdrGlView.java, RawFusion.java, raw_chroma_dealias.frag, raw_green.frag, raw_preprocess.frag, raw_reconstruct.frag and NafNetDenoiser.java must NOT appear.
+CameraController.java must NOT appear modified in V2.41; successful V2.40 acquisition/SNR behavior is protected byte-for-byte.
+All other app/src files must also remain unchanged.
 
-TARGET VERSION
-versionCode 58
-versionName 1.0-v1.4.11-v2.40
+Target versionCode: 59
+Target versionName: 1.0-v1.4.11-v2.41
 
 Suggested commit message:
-V1.4.11 V2.40 motion-safe fusion and stable HDR acquisition
+V1.4.11 V2.41 static HDR coherence and component motion rejection
 
-GitHub Actions is authoritative for pinned real GLSL, real Java and full :app:assembleDebug proof.
+After push, GitHub Actions must prove the exact V2.40 authority, deterministic candidate, semantic regressions, all runtime GLSL with the pinned real compiler, modified Java with the real project compiler, deterministic 7/12/40 forward/rollback patches, PRE-BUILD safety, full :app:assembleDebug, exactly one APK, post-build invariance and final artifact export.

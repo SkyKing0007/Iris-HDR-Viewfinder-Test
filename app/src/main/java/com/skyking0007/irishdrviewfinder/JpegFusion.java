@@ -681,10 +681,16 @@ final class JpegFusion {
             float[] rawDx = new float[count];
             float[] rawDy = new float[count];
             float[] rawConfidence = new float[count];
+            // IRIS_V241_COMPONENT_MOTION_PROVENANCE_DECL_BEGIN
             // V2.38 alpha authority distinguishes a directly cycle-validated local
             // match from a hole merely filled by coherent neighboring camera motion.
-            // Inferred cells may help topology continuity, but may never warp final RGB.
+            // V2.41 additionally preserves a distinct marker for a STRONG measured
+            // match that the distributed static-background model rejects as motion.
+            // Unmeasured/weak cells remain ordinary topology holes; only the strong
+            // outlier marker is allowed to become a component-level motion barrier.
             boolean[] directSupport = new boolean[count];
+            boolean[] motionRejected = new boolean[count];
+            // IRIS_V241_COMPONENT_MOTION_PROVENANCE_DECL_END
             float invScale = 1.0f / scale;
 
             for (int gy = 0; gy < gridHeight; gy++) {
@@ -746,13 +752,27 @@ final class JpegFusion {
                                 rawDx[i] - staticResidual.dxAt(xn, yn),
                                 rawDy[i] - staticResidual.dyAt(xn, yn));
                         float staticAgreement = 1.0f - smoothstep(0.60f, 1.35f, modelError);
-                        rawConfidence[i] *= staticAgreement;
-                        // Alpha is final SHORT-warp authority, so a locally repeatable
-                        // but independently moving object may not keep alpha merely
-                        // because its own forward/backward match was cycle-consistent.
-                        directSupport[i] = rawConfidence[i] >= 0.16f
-                                && staticAgreement >= 0.35f;
-                        if (!directSupport[i]) rawConfidence[i] = 0.0f;
+                        float measuredConfidence = rawConfidence[i];
+                        // IRIS_V241_COMPONENT_MOTION_REJECTION_BEGIN
+                        // Do not reinterpret every weak/repetitive static match as
+                        // scene motion. V2.40's visual regression came from allowing
+                        // ordinary uncertainty near saturated static edges to punch a
+                        // LONG-owned ring through a valid SHORT highlight component.
+                        // Only a strong local measurement that is an extreme outlier
+                        // from the distributed static-background model receives the
+                        // explicit motion marker consumed by topology reconstruction.
+                        motionRejected[i] = directSupport[i]
+                                && measuredConfidence >= 0.45f
+                                && staticAgreement <= 0.10f;
+                        // IRIS_V241_COMPONENT_MOTION_REJECTION_END
+                        // Static/non-rejected cells retain V2.39 confidence and direct
+                        // authority exactly. The residual model is now a classifier for
+                        // decisive scene-motion outliers, not a continuous confidence
+                        // attenuator that could change static HDR edge behavior.
+                        if (motionRejected[i]) {
+                            directSupport[i] = false;
+                            rawConfidence[i] = 0.0f;
+                        }
                     }
                 }
             }
@@ -803,6 +823,14 @@ final class JpegFusion {
                         }
                         continue;
                     }
+
+                    // IRIS_V241_COMPONENT_MOTION_NO_INFERENCE_BEGIN
+                    // A strong measured static-model outlier is not a missing
+                    // texture cell: it is explicit temporal disagreement. Do not fill
+                    // it from neighboring camera motion; topology will keep that cell
+                    // with one coherent source instead of temporally fusing it.
+                    if (motionRejected[i]) continue;
+                    // IRIS_V241_COMPONENT_MOTION_NO_INFERENCE_END
 
                     float weightSum = 0.0f;
                     float dxSum = 0.0f;
@@ -908,9 +936,17 @@ final class JpegFusion {
                             255.0f * (0.5f + 0.5f * dy / maxResidualPixels));
                     rgba[o + 2] = (byte) Math.round(
                             255.0f * clamp(centerConfidence, 0.0f, 1.0f));
-                    // Alpha is V2.38 final-warp authority: 255 only for cells whose
-                    // own forward/backward local measurement survived the strict gate.
-                    rgba[o + 3] = directSupport[i] ? (byte) 255 : (byte) 0;
+                    // IRIS_V241_COMPONENT_MOTION_REJECTION_BEGIN
+                    // Alpha is tri-state provenance, sampled nearest by the shader:
+                    //   255 = direct static-world final-warp authority
+                    //   128 = strong direct measurement rejected as scene motion
+                    //     0 = unsupported/weak/inferred topology-only cell
+                    // Existing V2.38 direct-warp code still requires alpha near 1.0,
+                    // so the motion marker can never gain final RGB warp authority.
+                    rgba[o + 3] = directSupport[i]
+                            ? (byte) 255
+                            : (motionRejected[i] ? (byte) 128 : (byte) 0);
+                    // IRIS_V241_COMPONENT_MOTION_REJECTION_END
                     confidenceSum += centerConfidence;
                     if (centerConfidence >= 0.30f) supported++;
                     observedMax = Math.max(observedMax, (float) Math.hypot(dx, dy));

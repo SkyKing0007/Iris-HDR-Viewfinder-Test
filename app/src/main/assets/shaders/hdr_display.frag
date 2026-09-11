@@ -365,6 +365,21 @@ vec4 stillLocalFlowAt(vec2 sampleUv) {
     return texture(localFlowTex, clamp(sampleUv, vec2(0.0), vec2(1.0)));
 }
 
+// IRIS_V241_COMPONENT_MOTION_REJECTION_BEGIN
+float stillLocalMotionRejectedAt(vec2 sampleUv) {
+    if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) return 0.0;
+    // Alpha provenance is categorical. Sample it with texelFetch so GL_LINEAR
+    // interpolation of the displacement/confidence channels cannot manufacture a
+    // false motion marker between an ordinary unsupported cell and a direct cell.
+    ivec2 size = textureSize(localFlowTex, 0);
+    vec2 boundedUv = clamp(sampleUv, vec2(0.0), vec2(0.99999994));
+    ivec2 p = clamp(ivec2(boundedUv * vec2(size)), ivec2(0), size - ivec2(1));
+    float provenance = texelFetch(localFlowTex, p, 0).a;
+    // JpegFusion encodes explicit strong static-model outliers as 128/255.
+    return step(0.35, provenance) * (1.0 - step(0.75, provenance));
+}
+// IRIS_V241_COMPONENT_MOTION_REJECTION_END
+
 float stillLocalRegistrationConfidenceAt(vec2 sampleUv) {
     vec4 flowValue = stillLocalFlowAt(sampleUv);
     return clamp(stillRegistrationConfidence * flowValue.b, 0.0, 1.0);
@@ -898,7 +913,12 @@ float stillTemporalBodySupportAt(vec2 sampleUv, float ratio) {
     float shortSignal = smoothstep(0.00045, 0.0023, shortY)
         * smoothstep(1.5, 4.0, shortY / max(shortSigma, 0.000001));
     float sourceBounds = stillShortSourceBoundsValidityAt(sampleUv);
-    return overlap * body * geometry * radiometry * rgbAgreement * shortSignal * sourceBounds;
+    // V2.41: an explicit strong local motion outlier keeps one coherent source even
+    // for an otherwise smooth equal-exposure pair. Static smooth regions retain the
+    // V2.40 50/50 path unchanged because they carry no motion-rejection marker.
+    float motionSafe = 1.0 - stillLocalMotionRejectedAt(sampleUv);
+    return overlap * body * geometry * radiometry * rgbAgreement
+        * shortSignal * sourceBounds * motionSafe;
 }
 
 float liveTemporalBodySupportAt(
@@ -1034,7 +1054,12 @@ float shortRecoveryEvidenceAt(vec2 sampleUv) {
     float hardLoss = longHardLossBaseAt(sampleUv)
         * smoothstep(0.05, 0.20, compactHardLossSupportAt(sampleUv));
     float effectiveLoss = longEffectiveLossAt(sampleUv);
-    return max(hardLoss, effectiveLoss) * shortValid * geometry;
+    // IRIS_V241_COMPONENT_MOTION_REJECTION_BEGIN
+    // Motion is rejected while the connected region is being formed, not by
+    // punching individual LONG pixels through an already valid SHORT component.
+    float motionSafe = 1.0 - stillLocalMotionRejectedAt(sampleUv);
+    return max(hardLoss, effectiveLoss) * shortValid * geometry * motionSafe;
+    // IRIS_V241_COMPONENT_MOTION_REJECTION_END
 }
 
 float longLossRecoveryDomainAt(vec2 sampleUv) {
@@ -1060,56 +1085,13 @@ float longLossRecoveryDomainAt(vec2 sampleUv) {
     return shortUsable * physicalLoss;
 }
 
-// IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_BEGIN
-vec2 finalAppliedLocalResidualPixelsAt(vec2 sampleUv) {
-    if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) return vec2(0.0);
-    vec4 flowValue = stillLocalFlowAt(sampleUv);
-    vec2 residualPixels = (flowValue.rg * 2.0 - vec2(1.0)) * localFlowMaxPixels;
-    float directConfidence = stillLocalDirectRegistrationConfidenceAt(sampleUv);
-    return step(0.16, directConfidence) * residualPixels;
-}
-
-float topologyWarpConsistencyAt(vec2 sampleUv, vec4 topologyState) {
-    if (localFlowMaxPixels <= 0.0) return 1.0;
-    vec2 topologyResidual = (topologyState.ba * 2.0 - vec2(1.0)) * localFlowMaxPixels;
-    vec2 appliedResidual = finalAppliedLocalResidualPixelsAt(sampleUv);
-    float errorPixels = length(topologyResidual - appliedResidual);
-    // If a clipped component propagated a non-zero residual into a pane that has no
-    // direct final-warp authority, mode 5 would otherwise sample global-only SHORT at
-    // the wrong location. Refuse ownership instead of printing a displaced block/trail.
-    return 1.0 - smoothstep(0.45, 1.20, errorPixels);
-}
-
-float hardRecoveryBoundarySafetyAt(vec2 sampleUv) {
-    vec2 texel = 1.0 / vec2(textureSize(longTex, 0));
-    vec2 offsets[16] = vec2[16](
-        vec2( 2.0, 0.0), vec2(-2.0, 0.0), vec2(0.0,  2.0), vec2(0.0, -2.0),
-        vec2( 2.0, 2.0), vec2(-2.0, 2.0), vec2(2.0, -2.0), vec2(-2.0, -2.0),
-        vec2( 6.0, 0.0), vec2(-6.0, 0.0), vec2(0.0,  6.0), vec2(0.0, -6.0),
-        vec2( 5.0, 5.0), vec2(-5.0, 5.0), vec2(5.0, -5.0), vec2(-5.0, -5.0));
-    float boundaryVotes = 0.0;
-    float safeVotes = 0.0;
-    float safetySum = 0.0;
-    for (int i = 0; i < 16; ++i) {
-        vec2 q = clamp(sampleUv + offsets[i] * texel, vec2(0.0), vec2(1.0));
-        // Only an unsaturated/non-hard-loss neighbor can serve as a correspondence
-        // witness for a clipped center. Do not ask the destroyed LONG interior to
-        // radiometrically match the valid SHORT that is meant to reconstruct it.
-        float boundaryUsable = 1.0 - smoothstep(0.18, 0.55, longHardLossBaseAt(q));
-        if (boundaryUsable < 0.5) continue;
-        float staticEvidence = stillStaticCorrespondenceAt(q);
-        boundaryVotes += 1.0;
-        safetySum += staticEvidence;
-        safeVotes += step(0.16, staticEvidence);
-    }
-    // Deep inside a large clipped component there may be no usable witness within the
-    // safety belt. Preserve V2.39 interior recovery there; boundary pixels themselves
-    // must prove static correspondence and therefore cannot print colored double edges.
-    if (boundaryVotes < 1.5) return 1.0;
-    float meanSafety = safetySum / max(boundaryVotes, 1.0);
-    return smoothstep(0.08, 0.30, meanSafety) * smoothstep(1.0, 4.0, safeVotes);
-}
-// IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_END
+// IRIS_V241_STATIC_HDR_COMPONENT_COHERENCE_BEGIN
+// V2.40's final per-pixel hard-highlight safety belt is intentionally removed.
+// It could alternate SHORT/LONG/SHORT around a completely static clipped edge and
+// manufactured the observed white/grey contours. V2.41 moves motion rejection into
+// mode-3/mode-4 component formation using explicit strong motion-outlier provenance,
+// so a static recoverable component retains V2.39's coherent source ownership.
+// IRIS_V241_STATIC_HDR_COMPONENT_COHERENCE_END
 
 // IRIS_V238_FINAL_MOTION_DISOCCLUSION_BARRIER_BEGIN
 float finalLongLossRecoveryAt(vec2 sampleUv) {
@@ -1387,6 +1369,12 @@ void main() {
             smoothstep(0.08, 0.30, seedStats.x) * smoothstep(2.0, 7.0, seedStats.y),
             smoothstep(0.22, 0.52, seedStats.z) * smoothstep(1.0, 4.0, seedStats.y));
         float seed = step(0.30, seedStrength);
+        // IRIS_V241_COMPONENT_MOTION_REJECTION_BEGIN
+        // A strong measured scene-motion outlier cannot originate a SHORT component.
+        // Static clipped cells with weak/no local texture are not marked and preserve
+        // the exact V2.39 topology behavior.
+        seed *= 1.0 - stillLocalMotionRejectedAt(uv);
+        // IRIS_V241_COMPONENT_MOTION_REJECTION_END
         // V2.31 bathroom regression: strict seeds remain unchanged, but a connected
         // component may traverse moderately flattened exterior structure. The domain
         // is not ownership by itself; mode 4 still enforces coherent geometry and mode
@@ -1410,6 +1398,15 @@ void main() {
         vec4 centerState = texture(normalTex, uv);
         float currentOwned = step(0.5, centerState.r);
         float recoveryDomain = step(0.5, centerState.g);
+        // IRIS_V241_COMPONENT_MOTION_REJECTION_BEGIN
+        // Explicit strong static-model disagreement is a topology barrier. This is a
+        // region-level decision: the cell never becomes SHORT-owned, while ordinary
+        // featureless clipped cells (no marker) still inherit coherent component flow.
+        if (stillLocalMotionRejectedAt(uv) > 0.5) {
+            outColor = vec4(0.0, recoveryDomain, centerState.ba);
+            return;
+        }
+        // IRIS_V241_COMPONENT_MOTION_REJECTION_END
         if (currentOwned > 0.5 || recoveryDomain < 0.5) {
             outColor = vec4(currentOwned, recoveryDomain, centerState.ba);
             return;
@@ -1503,18 +1500,12 @@ void main() {
         float connectedRecovery = step(0.50, support.r);
         // Broad/connected highlight loss keeps the proven V2.38 topology route.
         float fullResolutionLoss = finalLongLossRecoveryAt(uv);
-        // IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_BEGIN
-        // V2.38 correctly stopped inferred local-flow cells from warping final SHORT,
-        // but a topology-connected hard-clipped cell could still select global-only
-        // SHORT even when the component itself had propagated a different residual.
-        // Require the transform actually used by mode 5 to agree with the component
-        // geometry, and require unsaturated pixels around a clipped boundary to prove
-        // static correspondence. Deep clipped interiors retain V2.39 recovery.
-        float connectedMotionSafe = topologyWarpConsistencyAt(uv, support)
-            * hardRecoveryBoundarySafetyAt(uv);
-        float connectedShortOwns = connectedRecovery
-            * step(0.08, fullResolutionLoss) * step(0.28, connectedMotionSafe);
-        // IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_END
+        // IRIS_V241_STATIC_HDR_COMPONENT_COHERENCE_BEGIN
+        // Restore V2.39's coherent final ownership for a component that has already
+        // survived V2.41 motion-aware topology formation. Motion safety must not punch
+        // a per-pixel LONG ring through a valid static SHORT highlight component.
+        float connectedShortOwns = connectedRecovery * step(0.08, fullResolutionLoss);
+        // IRIS_V241_STATIC_HDR_COMPONENT_COHERENCE_END
 
         // IRIS_V239_INDEPENDENT_FULL_RES_MICRODETAIL_OWNERSHIP_BEGIN
         // Fine 1-2px information is not a broad HDR component and therefore must not

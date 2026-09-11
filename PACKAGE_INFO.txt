@@ -1,4 +1,4 @@
-IRIS HDR VIEWFINDER TEST V1.4.11 V2.40 — MOTION-SAFE FUSION + STABLE LONG SNR + STATIC 1X AVERAGING
+IRIS HDR VIEWFINDER TEST V1.4.11 V2.41 — STATIC-HDR COHERENCE + COMPONENT MOTION REJECTION
 
 STATUS
 PREPARED / UPLOAD-READY only after final clean-extract replay passes.
@@ -8,46 +8,46 @@ No backup requested or created. No source commit or push is performed by this ha
 TARGET
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Target versionCode: 58
-Target versionName: 1.0-v1.4.11-v2.40
+Target versionCode: 59
+Target versionName: 1.0-v1.4.11-v2.41
 Application ID: com.skyking0007.irishdrviewfinder.v1411v2
 
 RUNTIME AUTHORITY — EXACT LAST SUCCESSFUL ACTIONS COMPILED CANDIDATE
-Commit: 092b1659d0e28560ea355d0e1f85e36f241802b7
-Compiled candidate tree: 68a8674486940ce9b067758770364cdb36233f7a
-GitHub Actions run: 34532782246 — SUCCESS
-Artifact ID: 10174233979
-Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.39
-Artifact ZIP digest: sha256:e47fbab225873f111750421e8adf79edfbf21baf4a80ce5c15416633417b4d88
-APK SHA-256: dcc15251a9cbcd92e2d3d5c1e3be4116ab38b841bd531056d206f4e4c75a0b83
-Source-candidate TAR SHA-256: b0682167ec7da1ce116e103eeaceb78bd0d3729a5aed2143d6f3a4549eeb4a57
-Runtime manifest SHA-256: 59e954a7bc3a0baebf79b80bcd4f2a9b9c5cc56951352ed5bdde12e2a89ec32e
-Repository manifest SHA-256: 42483cf62df702132f435aa03859552b186359965341e8c975321c8f306b50d7
-Regressions SHA-256: 4fe5ce2ca5fe17760bd2b6bcb6e57025ff11bd23c6fcc5aa5c93a7c5d68a02e7
+Commit: 5f178aa746c7ccffe1e0148a82df2b8018ceb737
+Compiled candidate tree: 696d34bf26725694faf5c177832a9b256e75e734
+GitHub Actions run: 34549873022 — SUCCESS
+Artifact ID: 10180424289
+Artifact name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.40
+Artifact ZIP digest: sha256:b1bad4a2cfcd4948c54ba48636b6f09812c7ba6b75fedbbab6cfe4a0c6813d47
+APK SHA-256: c506ec2f42b68492513a1df18157f58aef85333b924d0261700dce68aaa116a3
+Source-candidate TAR SHA-256: 2f2b099239a4fb56669c74195723f6d49cb195b00eecc59224dad14b35c3dadb
+Runtime manifest SHA-256: 597257702945da4454577f2f059a1b34627241664b767d5ec7c741c658f4aa37
+Repository manifest SHA-256: 7db208ea582398f795b41907b79ce175b59d41a8ceaa59770a37f97e385f06b1
+Regressions SHA-256: 39a2f8bc10f8b8fdfc5cff671def94201cf54c807dfc985ba41d81b5a026d260
 
 VERIFICATION-MECHANICS AUTHORITY
-Exact successful V2.39 procedure from Actions run 34532782246. Workflow ordering, action versions, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, complete reserved-identifier scan, exact runtime GLSL compile, real project Java compile, deterministic full-index patch proof at 7/12/40, GNU fuzz=0 replay, PRE-BUILD proof, full assembleDebug, exactly-one-APK/model proof, post-build invariance and artifact export are retained unchanged in mechanics.
+Exact successful V2.40 procedure from Actions run 34549873022. Workflow ordering, action versions, Java 17, Android 37, Gradle 9.6.0, pinned glslang-tools=15.1.0-2~ubuntu0.24.04.2, complete reserved-identifier scan, exact runtime GLSL compile, real project Java compile, deterministic full-index patch proof at 7/12/40, GNU fuzz=0 replay, PRE-BUILD proof, full assembleDebug, exactly-one-APK/model proof, post-build invariance and artifact export are retained unchanged in mechanics.
 
-DEVICE-PROVEN PROBLEMS
-1. Motion/camera-movement captures can produce colored doubled edges, blocks and trails because a cycle-consistent local match can belong to moving content, and topology-connected hard clipping could still select global-only SHORT where the propagated component geometry required a different residual.
-2. Static daylight scenes can diverge strongly in noise because the old high-DR guard required current digital highlight pressure. A genuinely wide-range scene could darken both exposures enough that clipping disappeared, then collapse to a low-photon 1x pair.
-3. A genuinely static equal-exposure smooth sky/wall can lack local texture and therefore fail to receive the intended second-frame temporal average even though global registration and radiometry are excellent.
+DEVICE-PROVEN V2.40 REGRESSION
+Static high-dynamic-range scenes could develop white borders and grey outlines around grow-light bars, pots, trim and other hard-highlight edges. The V2.40 final per-pixel boundary safety belt could switch a coherent static component SHORT -> LONG -> SHORT around the boundary, exposing damaged/flattened LONG pixels as a visible contour.
 
-V2.40 CORRECTION CONTRACT
-- Relative highlight/body separation can protect a real HDR bracket without requiring current digital clipping; LONG remains body/SNR owner and SHORT remains headroom owner.
-- JpegFusion fits a robust distributed first-order residual motion model to cycle-valid local matches after global registration. Direct final SHORT-warp authority is revoked from matches inconsistent with that static-background model.
-- Connected hard-highlight SHORT ownership must agree with the topology-carried residual actually required by the component. If final mode-5 sampling would use a materially different transform, LONG wins locally.
-- Unsaturated pixels around a hard-clipped boundary must prove static correspondence before SHORT can cross that boundary. Deep clipped interiors remain recoverable so this does not reintroduce V2.21 gray/white holes.
-- Near-1x static smooth regions may use strong global geometry plus pointwise RGB/radiometric agreement and real source bounds. At exact 1x/full support the temporal SHORT weight is 0.5, providing true two-frame averaging. Bright unsaturated smooth sky remains eligible; near saturation tapers the body average.
-- Motion blur from one coherent source is acceptable; incompatible temporal content is not blended merely to maximize HDR.
+V2.41 CORRECTION CONTRACT
+- Static connected HDR final ownership returns to the successful V2.39 selector after topology formation: connectedRecovery * step(0.08, fullResolutionLoss).
+- V2.40 topologyWarpConsistencyAt/hardRecoveryBoundarySafetyAt final per-pixel boundary gates are removed and forbidden.
+- V2.40 distributed residual modeling remains, but it no longer continuously attenuates ordinary static matches. Static/non-rejected local matches keep V2.39 confidence/direct authority exactly.
+- Only a strong high-confidence local measurement that is an extreme outlier from the distributed static-background residual model is marked as explicit scene motion.
+- Explicit motion-rejected cells cannot seed or accept connected SHORT topology, are not filled as missing-texture flow holes, and cannot receive equal-exposure temporal averaging. They retain one coherent LONG source/natural blur rather than incompatible temporal fusion.
+- Weak/ambiguous/repetitive static matches are ordinary unsupported cells, not scene-motion barriers, so static clipped interiors retain V2.39 topology behavior.
+- V2.40 CameraController stable LONG-SNR acquisition / no low-photon 1x collapse remains byte-identical.
+- V2.40 static smooth exact/near-1x true two-frame averaging remains unchanged for non-motion regions.
+- V2.39 RAW denoise, direct coherent microdetail, CFA/highlight reconstruction, WhiteLevel/BlackLevel, DNG, NAFNet, presentation and HdrGlView remain protected.
 
-INTENDED V2.39 -> V2.40 RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 3
+INTENDED V2.40 -> V2.41 RUNTIME CHANGED-FILE ALLOWLIST — EXACTLY 2
 - app/src/main/assets/shaders/hdr_display.frag [MODIFY]
-- app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java [MODIFY]
 - app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java [MODIFY]
 
-PROTECTED V2.39 RUNTIME — EXACTLY 19 BYTE-IDENTICAL FILES
-All other app/src files, including HdrGlView.java, RawFusion.java, raw_chroma_dealias.frag, CFA/highlight shaders, DNG/media owners, NAFNet and lifecycle code.
+PROTECTED V2.40 RUNTIME — EXACTLY 20 BYTE-IDENTICAL FILES
+All other app/src files, including CameraController.java, HdrGlView.java, RawFusion.java, raw_chroma_dealias.frag, CFA/highlight shaders, DNG/media owners, NAFNet and lifecycle code.
 
 BUILD / VERIFICATION INFRASTRUCTURE CHANGED-FILE LIST — EXACTLY 4
 - .github/workflows/build.yml
@@ -61,12 +61,12 @@ DELIVERY DOCUMENT CHANGES — EXACTLY 4
 - README.md
 - VSCODE_DEV_UPLOAD.txt
 
-TOTAL EXPECTED V2.39 -> V2.40 TRACKED CHANGESET — EXACTLY 11 PATHS
-Runtime: 3. Infrastructure: 4. Delivery documents: 4. Candidate universe remains exactly 35 files; runtime universe remains exactly 22 app/src files.
+TOTAL EXPECTED V2.40 -> V2.41 TRACKED CHANGESET — EXACTLY 10 PATHS
+Runtime: 2. Infrastructure: 4. Delivery documents: 4. Candidate universe remains exactly 35 files; runtime universe remains exactly 22 app/src files.
 
 COMPILER STATUS BEFORE ACTIONS
 REAL PINNED GLSL COMPILE: NOT RUN locally; mandatory Actions gate.
 REAL KOTLIN COMPILE: N/A.
 REAL PROJECT JAVA COMPILE: NOT RUN locally; mandatory Actions gate because Java runtime changes.
 FULL ANDROID :app:assembleDebug: NOT RUN locally; mandatory Actions gate.
-FINAL ACTIONS AUTHORITY: successful V2.39 run 34532782246 until V2.40 passes.
+FINAL ACTIONS AUTHORITY: successful V2.40 run 34549873022 until V2.41 passes.
