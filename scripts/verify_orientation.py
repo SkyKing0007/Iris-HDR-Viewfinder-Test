@@ -32,7 +32,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.39 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.40 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -62,7 +62,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.39 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.40 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -86,8 +86,8 @@ require(sha_text(frozen_shader_section(
             hdr_shader,
             '// IRIS_V217_REVERSED_V215_LONG_TRUTH_BEGIN',
             '// IRIS_V217_REVERSED_V215_LONG_TRUTH_END'))
-        == '42979d842825ff36c9864d8c8592793255a6c7ae5171e05de621a6bbe290dc3f',
-        'V2.39 fusion evidence/physical-loss section must equal the reviewed RAW-quality/microdetail candidate bytes')
+        == '542b0c05052298a0a1965d06210b8d582fba5b73b4fef6954a49c88b4a00d151',
+        'V2.40 fusion evidence/physical-loss section must equal the reviewed motion-safe candidate bytes')
 require(sha_text(frozen_shader_section(
             hdr_shader,
             '// IRIS_V222_INFORMATION_RELATIVE_REGION_RECONSTRUCTION_BEGIN',
@@ -98,8 +98,8 @@ require(sha_text(frozen_shader_prefix(
             hdr_shader,
             '    if (mode == 5) {',
             '        vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;'))
-        == '87038be5baa886e2666a18376d4290ad8a6709afb22ec7f0978634c74533ef72',
-        'V2.39 mode-5 SHORT/LONG source-selection prefix must equal the reviewed direct-microdetail candidate bytes')
+        == 'f493e39384ef8f500e8e68bd2709287de34acbb4d4104aac41887db666b5e70e',
+        'V2.40 mode-5 SHORT/LONG source-selection prefix must equal the reviewed motion-safe/direct-microdetail candidate bytes')
 require(sha_text(frozen_shader_prefix(
             hdr_shader,
             'vec3 adaptiveHdrToneMap(',
@@ -119,50 +119,83 @@ def normalized_v235_hdrgl(text):
 require(sha_text(normalized_v235_hdrgl(gl))
         == 'b6be39e9d6cbe6c3fe22cbf2dfc7d74ebe3eb2a098c5964ed330fca6ccfdce9c',
         'V2.35 may change only renderRawGreen calls/bindings inside V2.34 HdrGlView; allocation/lifetime/registration plumbing is frozen')
-require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java').read_bytes()).hexdigest()
-        == '1338ca1e5dd08d80c06a844edb012fc4920fd6f9099792c437eb95bf7f344d36',
-        'V2.39 must preserve V2.38 JpegFusion tiled-consensus/direct-support bytes exactly')
+def normalized_v240_jpegfusion_to_v239(text):
+    for begin_marker, end_marker in (
+            ('    // IRIS_V240_STATIC_RESIDUAL_MODEL_BEGIN',
+             '    // IRIS_V240_STATIC_RESIDUAL_MODEL_END\n'),
+            ('    // IRIS_V240_STATIC_RESIDUAL_MODEL_HELPERS_BEGIN',
+             '    // IRIS_V240_STATIC_RESIDUAL_MODEL_HELPERS_END\n'),
+            ('            // IRIS_V240_STATIC_RESIDUAL_MODEL_APPLY_BEGIN',
+             '            // IRIS_V240_STATIC_RESIDUAL_MODEL_APPLY_END\n')):
+        start = text.index(begin_marker)
+        end = text.index(end_marker, start) + len(end_marker)
+        if text[end:end + 1] == '\n':
+            end += 1
+        text = text[:start] + text[end:]
+    return text
 
-# V2.39 exact runtime freeze. The two intended runtime shaders are pinned to the
-# reviewed candidate bytes; all other 20 app/src files are pinned byte-for-byte to
-# successful V2.38. This is intentionally stronger than a changed-file allowlist.
-V239_RUNTIME_SHA256 = {
+require(sha_text(normalized_v240_jpegfusion_to_v239(fusion))
+        == '1338ca1e5dd08d80c06a844edb012fc4920fd6f9099792c437eb95bf7f344d36',
+        'V2.40 JpegFusion changes escaped the static-residual-model insertion allowlist')
+
+# V2.40 exact runtime freeze. The three intended runtime owners are pinned to the
+# reviewed candidate bytes; all other 19 app/src files are pinned byte-for-byte to
+# successful V2.39. This is intentionally stronger than a changed-file allowlist.
+V240_RUNTIME_SHA256 = {
     'app/src/main/AndroidManifest.xml': 'e1299d6cf61cfcb79cbfe3e1e7d46f3ab2a11b65ba116d7f2d328b51d4180a92',
     'app/src/main/assets/licenses/NAFNet_LICENSE.txt': '71e12b4b6218af984e66cca1c3be81c6774828bc14c6eadde42007e317784e4f',
     'app/src/main/assets/nafnet_sidd_width32_fp16.tflite': 'f8fbaa422411683c53e802cf7cc7cf9be0a0de00886ad4af057232e26b172a0c',
     'app/src/main/assets/shaders/copy_2d.frag': 'b6b890e3be034a0d4980fd324fe0f469c7a2b0a126e958607bc8c4b9fbf97a55',
     'app/src/main/assets/shaders/fullscreen.vert': '7d8ee58c4500a46dd9614404a17ea4c7e104a6bf43976ecb85795799fdcd7fb4',
-    'app/src/main/assets/shaders/hdr_display.frag': 'f52d2916423685063b9c0896156c2f89a558d4f83dd9aeb3e165716d11e80e1f',
+    'app/src/main/assets/shaders/hdr_display.frag': '957974c4b54bae4130c72f1bbd5fbf9bd233b7439fb23009413bc4fd17cb3c2d',
     'app/src/main/assets/shaders/oes_to_rgb.frag': '388d49929564efba24900794e035f88b461485f4da4f2e12caf71e3531ab6443',
     'app/src/main/assets/shaders/raw_chroma_dealias.frag': 'fe09f6520aa4db30f43c330cde6dbb451186f301d63efbb07c4238c7cbf3591b',
     'app/src/main/assets/shaders/raw_green.frag': '2e10f434b527041b4a499cc943b08b2e217c714f6cc3696ff6ca89bdf57e89cb',
     'app/src/main/assets/shaders/raw_preprocess.frag': '87f11cdd5f678977648cefadd181d21813c3bf23ee1107a3688772a4d46a3982',
     'app/src/main/assets/shaders/raw_proxy.frag': 'ec1ce9e4acd78f68d20a9ca54784f0ccb6006eff80fdb3a1277e7bc44f4a768d',
     'app/src/main/assets/shaders/raw_reconstruct.frag': '01594852fe05aa1f35676d99d0c26b3ec7523823e11ad3a880a62250c3a20427',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'ec0ecc32485b14fe5e41baf4796e6a16ce6895a1f8f5d27adad71e52f7315662',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/CameraController.java': 'f89c36cebf9c0f483b9e3b522607b97d00b8129181af68d341635ae084021c1f',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/CaptureSetSaver.java': '5d8fcc04bba01fcf9625922421a338f187c0897e0c84f131a1fc343db7e487ce',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/FrameMeta.java': 'e05484de966351424d3a5399eb159daccba766ed177c973b4b7529af014a60c5',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java': 'd3450b99b9737236ba61abd1f0c3f56ce1a2f220e858ce87878625eefc69046a',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrProcessingService.java': '28fce3e4f8450d7579c1622ff832b3073a4707a181578e69a8b6a32ee90f5f8e',
-    'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': '1338ca1e5dd08d80c06a844edb012fc4920fd6f9099792c437eb95bf7f344d36',
+    'app/src/main/java/com/skyking0007/irishdrviewfinder/JpegFusion.java': '2b6994e753bd4cf99225a5eaa1a68331cbfc5180f040640d072fb3a3ea0039ff',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/MainActivity.java': '5438003b339291a2999c214e86927ccda324eaee0d08cfe798c0d4eb366498df',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/MediaStoreWriter.java': 'a975fb65529c864a8bcefcded6c5df68fa881e7f97040734c6b0e326d27cc110',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/NafNetDenoiser.java': '2969216e4032d4845160db7940d612d18738f0731b612a035deebeb97aaad731',
     'app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java': 'd70c676456dc6083ff3fa8b8dc8edd19bbfa6f6b0b5515ba6c492e3784b33e0f',
 }
 runtime_files = sorted(p for p in (ROOT / 'app/src').rglob('*') if p.is_file())
-require(len(runtime_files) == 22, f'V2.39 exact runtime universe must contain 22 files, found {len(runtime_files)}')
-require(set(V239_RUNTIME_SHA256) == {p.relative_to(ROOT).as_posix() for p in runtime_files},
-        'V2.39 runtime SHA pin set must exactly equal the 22-file runtime universe')
-for rel, expected_sha in V239_RUNTIME_SHA256.items():
+require(len(runtime_files) == 22, f'V2.40 exact runtime universe must contain 22 files, found {len(runtime_files)}')
+require(set(V240_RUNTIME_SHA256) == {p.relative_to(ROOT).as_posix() for p in runtime_files},
+        'V2.40 runtime SHA pin set must exactly equal the 22-file runtime universe')
+for rel, expected_sha in V240_RUNTIME_SHA256.items():
     actual_sha = hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
-    require(actual_sha == expected_sha, f'V2.39 runtime byte freeze mismatch: {rel}')
+    require(actual_sha == expected_sha, f'V2.40 runtime byte freeze mismatch: {rel}')
 
 # V2.37 is a localized presentation-control change on exact successful V2.36.
 # Normalize ONLY the three agreed V2.37 runtime owners back to their V2.36 bytes and
 # hash the result. This prevents a UI repair or extreme-emitter style from silently
 # changing acquisition, CFA, fusion, saved HDR transfer, DNG, or unrelated lifecycle.
 def normalized_v237_camera(text):
+    # V2.40 intentionally changes only the exposure-invariant HDR classifier in
+    # CameraController. Normalize those exact marked bytes back to V2.39 before the
+    # older V2.37 presentation-only hash proof. This keeps the historical freeze
+    # strong instead of weakening it merely because a newer owner changed elsewhere.
+    start = text.index('    // IRIS_V240_EXPOSURE_INVARIANT_HDR_RANGE_BEGIN')
+    end_marker = '    // IRIS_V240_EXPOSURE_INVARIANT_HDR_RANGE_END\n'
+    end = text.index(end_marker, start) + len(end_marker)
+    text = text[:start] + text[end:]
+
+    start = text.index('        // IRIS_V240_EXPOSURE_INVARIANT_HDR_RANGE_BEGIN')
+    end_marker = '        // IRIS_V240_EXPOSURE_INVARIANT_HDR_RANGE_END\n'
+    end = text.index(end_marker, start) + len(end_marker)
+    old_guard = (
+        '        return highlightPressure\n'
+        '                && stats.longBodyP50Linear <= AUTO_HIGH_DR_BODY_P50_MAX\n'
+        '                && separationStops >= AUTO_HIGH_DR_MIN_SEPARATION_STOPS;\n'
+    )
+    text = text[:start] + old_guard + text[end:]
     constants_start = text.index('    // V2.37 extreme-emitter presentation is a narrowly gated AUTO style learned from')
     constants_end = text.index('    private static final float PRESENT_ENHANCEMENT_STEP = 0.06f;', constants_start)
     text = text[:constants_start] + text[constants_end:]
@@ -254,7 +287,73 @@ require(sha_text(normalized_v237_main(main))
         == '9699c51defa2a47e1d751f0c8d13d65da40677659fa87a448c1a0e71d2ba35ce',
         'V2.37 MainActivity changes escaped the manual presentation callback allowlist')
 
+def normalized_v240_hdr_shader_to_v239(text):
+    # Restore the exact V2.39 temporal-body geometry/body block.
+    new_block = (
+        '    float ordinaryBody = 1.0 - smoothstep(0.34, 0.67, max3(longScene));\n'
+        '    float localGeometry = smoothstep(\n'
+        '        0.20, 0.50, registrationNeighborhoodConfidenceAt(sampleUv));\n'
+        '    float radiometry = radiometricAgreementAt(sampleUv);\n'
+        '    float rgbAgreement = temporalRgbAgreement(shortScene, longScene);\n'
+        '    // IRIS_V240_STATIC_ONE_X_FULL_AVERAGING_BEGIN\n'
+        '    // A static smooth sky/wall has little local gradient and therefore may have no\n'
+        '    // strong local-flow cell even when the global two-frame registration is excellent.\n'
+        '    // For genuinely near-equal exposures only, allow the global transform to prove\n'
+        '    // geometry in a locally smooth region. Pointwise RGB/radiometric agreement and\n'
+        '    // real source bounds still reject moving/disoccluded content. At ratio==1 and full\n'
+        '    // support temporalShortWeight() becomes 0.5: a true two-frame average.\n'
+        '    float pairStops = max(log2(max(ratio, 1.0)), 0.0);\n'
+        '    float equalExposure = 1.0 - smoothstep(0.12, 0.42, pairStops);\n'
+        '    vec2 smoothRanges = localLinearRangeAtRadius(sampleUv, 3.0);\n'
+        '    float smoothInterior = 1.0 - smoothstep(0.010, 0.038,\n'
+        '        max(smoothRanges.x, smoothRanges.y));\n'
+        '    float globalGeometry = smoothstep(0.30, 0.62, stillRegistrationConfidence)\n'
+        '        * stillShortSourceBoundsValidityAt(sampleUv) * smoothInterior;\n'
+        '    float geometry = max(localGeometry, equalExposure * globalGeometry);\n'
+        '    // Equal exposures have no dedicated SHORT highlight role, so a bright but still\n'
+        '    // unsaturated smooth sky remains eligible for temporal averaging. Only the\n'
+        '    // near-saturation interval tapers the equal-pair body contribution.\n'
+        '    float equalExposureBody = 1.0 - smoothstep(0.86, 1.02, max3(longScene));\n'
+        '    float body = max(ordinaryBody, equalExposure * equalExposureBody);\n'
+        '    // IRIS_V240_STATIC_ONE_X_FULL_AVERAGING_END\n'
+    )
+    old_block = (
+        '    float body = 1.0 - smoothstep(0.34, 0.67, max3(longScene));\n'
+        '    float geometry = smoothstep(0.20, 0.50, registrationNeighborhoodConfidenceAt(sampleUv));\n'
+        '    float radiometry = radiometricAgreementAt(sampleUv);\n'
+        '    float rgbAgreement = temporalRgbAgreement(shortScene, longScene);\n'
+    )
+    require(text.count(new_block) == 1, 'V2.40 temporal-body normalization anchor missing')
+    text = text.replace(new_block, old_block, 1)
+
+    start = text.index('// IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_BEGIN')
+    end_marker = '// IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_END\n'
+    end = text.index(end_marker, start) + len(end_marker)
+    if text[end:end + 1] == '\n':
+        end += 1
+    text = text[:start] + text[end:]
+
+    new_mode5 = (
+        '        // IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_BEGIN\n'
+        '        // V2.38 correctly stopped inferred local-flow cells from warping final SHORT,\n'
+        '        // but a topology-connected hard-clipped cell could still select global-only\n'
+        '        // SHORT even when the component itself had propagated a different residual.\n'
+        '        // Require the transform actually used by mode 5 to agree with the component\n'
+        '        // geometry, and require unsaturated pixels around a clipped boundary to prove\n'
+        '        // static correspondence. Deep clipped interiors retain V2.39 recovery.\n'
+        '        float connectedMotionSafe = topologyWarpConsistencyAt(uv, support)\n'
+        '            * hardRecoveryBoundarySafetyAt(uv);\n'
+        '        float connectedShortOwns = connectedRecovery\n'
+        '            * step(0.08, fullResolutionLoss) * step(0.28, connectedMotionSafe);\n'
+        '        // IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_END\n'
+    )
+    old_mode5 = '        float connectedShortOwns = connectedRecovery * step(0.08, fullResolutionLoss);\n'
+    require(text.count(new_mode5) == 1, 'V2.40 mode-5 motion-safety normalization anchor missing')
+    return text.replace(new_mode5, old_mode5, 1)
+
+
 def normalized_v237_hdr_shader(text):
+    text = normalized_v240_hdr_shader_to_v239(text)
     new_split = (
         '        // IRIS_V237_SPLIT_MANUAL_BG_PREVIEW_BEGIN\n'
         '        // SPLIT remains the direct SHORT/LONG diagnostic view. It previews only the\n'
@@ -956,13 +1055,13 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# V2.39 runtime authority is the exact last successful compiler-tested V2.38
+# V2.40 runtime authority is the exact last successful compiler-tested V2.39
 # candidate/artifact. Older versions remain behavioral/reference evidence only.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.38' in workflow
-        and 'run-id: 34523350151' in workflow
-        and "authority='5c8f6d73fd071c5728f2e5d5d49a9c34c6498538'" in workflow
-        and "authority_tree='3f6c779866d5db75d25847d2ffbd9c6955c57546'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.38 Actions authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.39' in workflow
+        and 'run-id: 34532782246' in workflow
+        and "authority='092b1659d0e28560ea355d0e1f85e36f241802b7'" in workflow
+        and "authority_tree='68a8674486940ce9b067758770364cdb36233f7a'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.39 Actions authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -1671,11 +1770,13 @@ require('if (confidence < 0.28f)' in fusion
         and 'if (coherent >= 5 && rms <= 0.75f)' in fusion
         and 'if (disagreement > 1.0f) continue;' in fusion,
         "local residual field must fail closed and regularize only coherent camera motion")
-local_registration_slice = fusion[fusion.index('    static LocalRegistrationField estimateLocalRegistration('):
-                                  fusion.index('    private static LocalRegistrationField neutralLocalRegistration')]
+fusion_v239_normalized = normalized_v240_jpegfusion_to_v239(fusion)
+local_registration_slice = fusion_v239_normalized[
+    fusion_v239_normalized.index('    static LocalRegistrationField estimateLocalRegistration('):
+    fusion_v239_normalized.index('    private static LocalRegistrationField neutralLocalRegistration')]
 require(hashlib.sha256(local_registration_slice.encode()).hexdigest() ==
         'c1d94cff2d84c8f3525b4112e0b429547794de653d8ae62e2e35c8e3002ef8f8',
-        "V2.38 local bidirectional residual field must equal the reviewed direct-support candidate bytes")
+        "V2.40 must preserve the V2.38/V2.39 local residual field outside the reviewed static-world rejection insertion")
 require('GPU_STILL_RAW_LOCAL_REGISTRATION' in gl
         and 'uploadRgba8Texture(' in gl
         and 'localRegistration.rgba);' in gl
@@ -1782,12 +1883,14 @@ require('meanFlowPixels' in v222_recon
 require('IRIS_V229_FULL_RES_FINAL_SHORT_OWNERSHIP_BEGIN' in hdr_shader
         and 'float connectedRecovery = step(0.50, support.r);' in hdr_shader
         and 'float fullResolutionLoss = finalLongLossRecoveryAt(uv);' in hdr_shader
-        and 'float connectedShortOwns = connectedRecovery * step(0.08, fullResolutionLoss);' in hdr_shader
+        and 'float connectedMotionSafe = topologyWarpConsistencyAt(uv, support)' in hdr_shader
+        and 'float connectedShortOwns = connectedRecovery' in hdr_shader
+        and '* step(0.08, fullResolutionLoss) * step(0.28, connectedMotionSafe);' in hdr_shader
         and 'float directMicroOwns = step(0.18, directMicrodetail);' in hdr_shader
         and 'float shortOwns = max(connectedShortOwns, directMicroOwns);' in hdr_shader
         and 'vec4 shortRaw = directMicroOwns > 0.5' in hdr_shader
         and 'vec4 longRaw = savedLongLinearAt(uv);' in hdr_shader,
-        "V2.39 full-resolution LONG/SHORT source selector missing or direct microdetail was re-coupled to the 16x16 atlas")
+        "V2.40 full-resolution source selector must preserve independent microdetail and add motion-safe connected HDR ownership")
 v217_mode5 = hdr_shader[hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_BEGIN'):
                          hdr_shader.index('// IRIS_V217_REGION_SOURCE_OWNERSHIP_END')]
 require('support.ba' not in v217_mode5
@@ -1903,7 +2006,7 @@ require('renderRawPreprocess(\n                        presentationTexture, rawI
 require('registration.sampleDx, registration.sampleDy' in saved_fusion_slice
         and 'setTextureFilter(longTexture, GLES30.GL_NEAREST);' in saved_fusion_slice,
         "V2.30 must align only SHORT while retaining immutable LONG output geometry")
-require(hashlib.sha256(fusion.encode()).hexdigest() ==
+require(hashlib.sha256(normalized_v240_jpegfusion_to_v239(fusion).encode()).hexdigest() ==
         '1338ca1e5dd08d80c06a844edb012fc4920fd6f9099792c437eb95bf7f344d36',
         "V2.38 JpegFusion registration bytes must equal the reviewed motion-robust candidate")
 v226_mode4 = hdr_shader[hdr_shader.index('    if (mode == 4) {'):
@@ -1915,8 +2018,9 @@ v226_mode4_code = ' '.join(
 require(hashlib.sha256(v226_mode4_code.encode()).hexdigest() ==
         '3dc1958d0eedeed47405a386e319b24a78cb3ca3427ca46e9d5a0c4f96b1198b',
         "successful V2.25 geodesic topology propagation code changed")
-v229_mode5_select = hdr_shader[hdr_shader.index('    if (mode == 5) {'):
-                                hdr_shader.index('        float brightnessGain =', hdr_shader.index('    if (mode == 5) {'))]
+hdr_shader_v239_normalized = normalized_v240_hdr_shader_to_v239(hdr_shader)
+v229_mode5_select = hdr_shader_v239_normalized[hdr_shader_v239_normalized.index('    if (mode == 5) {'):
+                                hdr_shader_v239_normalized.index('        float brightnessGain =', hdr_shader_v239_normalized.index('    if (mode == 5) {'))]
 require('vec4 support = texture(normalTex, uv);' in v229_mode5_select
         and 'float connectedRecovery = step(0.50, support.r);' in v229_mode5_select
         and 'float connectedShortOwns = connectedRecovery * step(0.08, fullResolutionLoss);' in v229_mode5_select
@@ -2156,9 +2260,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 57' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.39"' in build_gradle,
-        "V2.39 version/build marker must be exact")
+require('versionCode = 58' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.40"' in build_gradle,
+        "V2.40 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2544,20 +2648,20 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillRaws(' not in service
         and 'fuseStillRaws(' not in nafnet,
         "V2.30 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.38_to_V1.4.11-V2.39.forward.patch' in workflow
-        and 'V1.4.11-V2.39_to_V1.4.11-V2.38.rollback.patch' in workflow,
-        "V2.39 final artifact must export correctly named V2.38<->V2.39 patches")
-require('sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.39-debug.apk' in workflow
-        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.39-source-candidate.tar' in workflow
-        and 'sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.38-debug.apk' not in workflow
-        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.38-source-candidate.tar \\' not in workflow,
-        "V2.39 final SHA256SUMS export must use V2.39 APK/source identities, never stale V2.38 output names")
-require("authority='5c8f6d73fd071c5728f2e5d5d49a9c34c6498538'" in workflow
-        and "authority_tree='3f6c779866d5db75d25847d2ffbd9c6955c57546'" in workflow
+require('V1.4.11-V2.39_to_V1.4.11-V2.40.forward.patch' in workflow
+        and 'V1.4.11-V2.40_to_V1.4.11-V2.39.rollback.patch' in workflow,
+        "V2.40 final artifact must export correctly named V2.39<->V2.40 patches")
+require('sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.40-debug.apk' in workflow
+        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.40-source-candidate.tar' in workflow
+        and 'sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.39-debug.apk' not in workflow
+        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.39-source-candidate.tar \\' not in workflow,
+        "V2.40 final SHA256SUMS export must use V2.40 APK/source identities, never stale V2.39 output names")
+require("authority='092b1659d0e28560ea355d0e1f85e36f241802b7'" in workflow
+        and "authority_tree='68a8674486940ce9b067758770364cdb36233f7a'" in workflow
         and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow,
-        "V2.39 must prove exact successful V2.38 direct-parent authority")
-require("authority = '5c8f6d73fd071c5728f2e5d5d49a9c34c6498538'" in workflow,
-        "V2.39 changed-file allowlist must compare against successful V2.38")
+        "V2.40 must prove exact successful V2.39 direct-parent authority")
+require("authority = '092b1659d0e28560ea355d0e1f85e36f241802b7'" in workflow,
+        "V2.40 changed-file allowlist must compare against successful V2.39")
 require('273 - Exact V2.36 R1 allowlist regression:' in workflow,
         "V2.36 R1 exact stale-allowlist-authority failure must remain a permanent regression")
 require('274 - V2.37 runtime authority is exactly successful V2.36 R1 commit 1268c56ae19bcff6a8c9bec42fdc9c911a8436d4' in workflow,
@@ -2566,22 +2670,21 @@ require('280 - V2.38 runtime authority is exactly successful V2.37 commit 020975
         "V2.38 exact successful-authority regression missing")
 require('288 - V2.39 runtime authority is exactly successful V2.38 commit 5c8f6d73fd071c5728f2e5d5d49a9c34c6498538' in workflow,
         "V2.39 exact successful-authority regression missing")
+require('298 - V2.40 runtime authority is exactly successful V2.39 commit 092b1659d0e28560ea355d0e1f85e36f241802b7' in workflow,
+        "V2.40 exact successful-authority regression missing")
 for regression_number, regression_text in (
-        ('289', 'V2.39 RAW-domain noise cleanup consumes the existing conservative Camera2 S*x+O scene-sigma carrier'),
-        ('290', 'V2.39 universal structure protection is semantic-independent'),
-        ('291', 'V2.39 direct full-resolution microdetail is independent of the 16x16 connected HDR atlas'),
-        ('292', 'A single noisy center excursion, noise-only/equal SHORT-LONG detail, weak/inferred geometry, or OOB source coordinates may not trigger V2.39 microdetail ownership'),
-        ('293', 'Only directly proven V2.39 microdetail may use bounded Catmull-Rom SHORT reconstruction'),
-        ('294', 'V2.38 JpegFusion tiled consensus/direct-vs-inferred local-flow mechanics and all other motion robustness bytes are protected unchanged in V2.39'),
-        ('295', 'V2.39 preserves the exact Camera2 RAW code domain and DNG metadata ownership'),
-        ('296', 'V2.38 presentation, extreme-emitter AUTO, common-quad CFA/highlight correction, saturation-transition chroma repair, exposure/acquisition, DNG/media ownership, NAFNet and GPU lifetime remain protected'),
-        ('297', 'V2.39 atlas-independent microdetail may not treat independently moving residual flow as source detail')):
+        ('299', 'V2.40 high-DR acquisition may not depend solely on current digital clipping'),
+        ('300', 'V2.40 direct local SHORT-warp authority requires agreement with a distributed static-background residual model'),
+        ('301', 'V2.40 topology-connected hard-clipped recovery may not select SHORT when the residual transform carried by the component materially disagrees'),
+        ('302', 'V2.40 hard-clipped boundary recovery requires unsaturated static correspondence witnesses'),
+        ('303', 'V2.40 exact/near-1x static smooth regions may use strong global registration when local texture is absent'),
+        ('304', 'V2.39 RAW denoise, direct coherent microdetail, CFA/highlight reconstruction, WhiteLevel/BlackLevel, DNG, NAFNet, presentation and HdrGlView plumbing remain protected')):
     require(f'{regression_number} - {regression_text}' in workflow,
-            f'V2.39 permanent regression {regression_number} missing')
+            f'V2.40 permanent regression {regression_number} missing')
 require("if len(tracked) != 35:" in workflow
-        and "V1.4.11 V2.38 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "V1.4.11 V2.39 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.39 must prove the 35-file V2.38 authority and exact 35-file candidate universe")
+        "V2.40 must prove the 35-file V2.39 authority and exact 35-file candidate universe")
 
 require('uniform vec2 stillGlobalShortOffsetPixels;' in hdr_shader
         and 'sampleUv + stillGlobalShortOffsetPixels / imageSize' in hdr_shader
@@ -2635,8 +2738,8 @@ require(bathroom_house_loss >= 0.08,
         "V2.32 bathroom house/siding fixture must remain eligible after physical noise subtraction")
 require(healthy_body_loss < 0.08,
         "V2.32 healthy near-equal body/noise fixture must remain LONG-owned")
-require('float recoveryDomain = step(0.16, broadRecoveryDomainAt(uv));' in hdr_shader
-        and 'float connectedShortOwns = connectedRecovery * step(0.08, fullResolutionLoss);' in hdr_shader,
+require('float recoveryDomain = step(0.16, broadRecoveryDomainAt(uv));' in hdr_shader_v239_normalized
+        and 'float connectedShortOwns = connectedRecovery * step(0.08, fullResolutionLoss);' in hdr_shader_v239_normalized,
         "V2.39 must retain V2.31/V2.38 strict-seed connected broad-HDR thresholds while keeping direct microdetail as a separate owner")
 
 # V2.31 exact device failure: a bright-window scene had SHORT=LONG=1/120 ISO50.
@@ -2935,11 +3038,13 @@ mode6_end = hdr_shader.index('        // IRIS_V217_TOPOLOGY_SAFE_PRESENTATION_EN
 require(sha_text(hdr_shader[mode6_start:mode6_end])
         == 'beefb67f773372e4011359b34f7d8a9b2f711a74bb7c36ffc7e4a30b4902f0c5',
         'V2.37 may not change successful V2.36 mode-6 saved post-fusion presentation')
-mode5_start = hdr_shader.index('    if (mode == 5) {')
-mode5_end = hdr_shader.index('        return;\n    }\n\n    // V2.27 live parity', mode5_start) + len('        return;\n    }')
-require(sha_text(hdr_shader[mode5_start:mode5_end])
+mode5_start_v239 = hdr_shader_v239_normalized.index('    if (mode == 5) {')
+mode5_end_v239 = hdr_shader_v239_normalized.index('        return;\n    }\n\n    // V2.27 live parity', mode5_start_v239) + len('        return;\n    }')
+require(sha_text(hdr_shader_v239_normalized[mode5_start_v239:mode5_end_v239])
         == '1eb2eeddf3d2cd777bc3bf393b9250e0aeca04b2827598f43d89c7356bd63c3f',
         'V2.39 saved FUSED mode-5 path must equal the reviewed V2.38-motion-safe plus direct-microdetail candidate')
+mode5_start = hdr_shader.index('    if (mode == 5) {')
+mode5_end = hdr_shader.index('        return;\n    }\n\n    // V2.27 live parity', mode5_start) + len('        return;\n    }')
 mode5_merged_start = hdr_shader.index(
     '        vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;', mode5_start)
 require(sha_text(hdr_shader[mode5_merged_start:mode5_end])
@@ -3141,6 +3246,72 @@ for y, cb, cr in ((0.72,0.04,-0.03),(0.35,-0.02,0.05),(0.90,0.01,0.00)):
     restored = 0.2126*r + 0.7152*g + 0.0722*b
     require(abs(restored-y) < 1e-9, 'V2.38 saturation-edge chroma correction changed center luma')
 
+# V2.40 motion/acquisition/equal-pair architecture contracts.
+require('IRIS_V240_EXPOSURE_INVARIANT_HDR_RANGE_BEGIN' in camera
+        and 'AUTO_HIGH_DR_RELATIVE_HIGHLIGHT_MIN = 0.045f' in camera
+        and 'boolean relativeRangeEvidence = highlight >= AUTO_HIGH_DR_RELATIVE_HIGHLIGHT_MIN' in camera
+        and 'return (highlightPressure || relativeRangeEvidence)' in camera,
+        'V2.40 exposure-invariant high-DR range guard missing')
+require('IRIS_V240_STATIC_RESIDUAL_MODEL_BEGIN' in fusion
+        and 'fitStaticResidualModel(' in fusion
+        and 'staticAgreement = 1.0f - smoothstep(0.60f, 1.35f, modelError);' in fusion
+        and 'directSupport[i] = rawConfidence[i] >= 0.16f' in fusion,
+        'V2.40 distributed static-background residual rejection missing')
+require('IRIS_V240_STATIC_ONE_X_FULL_AVERAGING_BEGIN' in hdr_shader
+        and 'float equalExposure = 1.0 - smoothstep(0.12, 0.42, pairStops);' in hdr_shader
+        and 'float globalGeometry = smoothstep(0.30, 0.62, stillRegistrationConfidence)' in hdr_shader
+        and 'float equalExposureBody = 1.0 - smoothstep(0.86, 1.02, max3(longScene));' in hdr_shader,
+        'V2.40 static smooth 1x global-registration averaging owner missing')
+require('IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_BEGIN' in hdr_shader
+        and 'topologyWarpConsistencyAt' in hdr_shader
+        and 'hardRecoveryBoundarySafetyAt' in hdr_shader
+        and 'float connectedMotionSafe = topologyWarpConsistencyAt(uv, support)' in hdr_shader
+        and '* step(0.28, connectedMotionSafe);' in hdr_shader,
+        'V2.40 connected hard-highlight final motion barrier missing')
+require(hashlib.sha256((ROOT / 'app/src/main/java/com/skyking0007/irishdrviewfinder/HdrGlView.java').read_bytes()).hexdigest()
+        == 'd3450b99b9737236ba61abd1f0c3f56ce1a2f220e858ce87878625eefc69046a',
+        'V2.40 must not change V2.39 HdrGlView plumbing')
+require(hashlib.sha256((ROOT / 'app/src/main/assets/shaders/raw_chroma_dealias.frag').read_bytes()).hexdigest()
+        == 'fe09f6520aa4db30f43c330cde6dbb451186f301d63efbb07c4238c7cbf3591b',
+        'V2.40 must not change V2.39 RAW denoise/chroma owner')
+
+def v240_high_dr_guard(highlight, body, near_clip=False):
+    separation = math.log(max(0.0005, highlight) / max(0.00025, body), 2.0)
+    highlight_pressure = highlight >= 0.55 or near_clip
+    relative = highlight >= 0.045 and separation >= 3.0
+    return (highlight_pressure or relative) and body <= 0.18 and separation >= 3.0
+
+# Exact static car-scene mechanism: current frames can be far from digital white while
+# still spanning >3EV. That must no longer erase the physical HDR bracket.
+require(v240_high_dr_guard(0.14, 0.0146),
+        'V2.40 low-photon 1x-collapse fixture failed to preserve wide scene range')
+require(not v240_high_dr_guard(0.08, 0.04),
+        'V2.40 genuinely low-DR fixture was incorrectly forced into HDR bracketing')
+
+def v240_static_residual_agreement(error_pixels):
+    return 1.0 - smoothstep_math(0.60, 1.35, error_pixels)
+require(v240_static_residual_agreement(0.20) > 0.95,
+        'V2.40 static-background local residual lost direct authority')
+require(v240_static_residual_agreement(1.60) == 0.0,
+        'V2.40 independently moving local residual retained direct SHORT-warp authority')
+
+def v240_topology_warp_consistency(error_pixels):
+    return 1.0 - smoothstep_math(0.45, 1.20, error_pixels)
+require(v240_topology_warp_consistency(0.10) > 0.95,
+        'V2.40 matched topology/final warp was incorrectly rejected')
+require(v240_topology_warp_consistency(1.40) == 0.0,
+        'V2.40 topology/final-warp mismatch still permits displaced SHORT blocks')
+
+# At exact 1x/full static support temporalShortWeight is 1/(1+1)=0.5. Bright smooth
+# unsaturated sky is no longer excluded by the old ordinary-body 0.67 cutoff.
+equal_pair = 1.0 - smoothstep_math(0.12, 0.42, 0.0)
+equal_body_060 = 1.0 - smoothstep_math(0.86, 1.02, 0.60)
+short_weight = 1.0 / (1.0 + 1.0)
+require(equal_pair == 1.0 and equal_body_060 == 1.0 and abs(short_weight - 0.5) < 1e-12,
+        'V2.40 static equal-exposure smooth-sky fixture does not receive true 50/50 averaging')
+require((1.0 - smoothstep_math(0.86, 1.02, 1.02)) == 0.0,
+        'V2.40 equal-pair averaging failed to taper at near-saturation')
+
 # V2.39 device-regression model: the reported pair is 16.67x / 4.06 EV. Temporal
 # body averaging is intentionally zero there, so RAW-domain cleanup and true SHORT
 # ownership—not universal SHORT averaging—must carry the quality improvement.
@@ -3323,4 +3494,4 @@ require(v234_hdr_peak(4.0) < 0.91 and v234_hdr_peak(5.6) <= 0.931,
 require(v234_hdr_peak(16.0) < 0.99,
         "V2.34 must reserve smooth headroom above the ceiling gradient for true lamp cores")
 
-print("V1.4.11 V2.39 REGRESSION PASS: exact successful V2.38 presentation/motion/CFA/acquisition owners preserved; RAW-domain sigma cleanup suppresses noise-like luma/chroma before tone while coherent structure remains protected; direct coherent full-resolution microdetail can recover SHORT independently of the 16x16 atlas only behind direct geometry/OOB/static support; bounded Catmull-Rom is limited to proven microdetail; V2.38 saturation-transition chroma and WhiteLevel/BlackLevel domains remain protected")
+print("V1.4.11 V2.40 REGRESSION PASS: exact successful V2.39 RAW denoise/microdetail/CFA/presentation owners preserved; relative-range acquisition prevents low-photon 1x HDR collapse; distributed residual consensus rejects moving local matches; connected hard-highlight ownership is transform/boundary motion-safe; exact 1x static smooth regions receive true two-frame averaging; WhiteLevel/BlackLevel, DNG, NAFNet and HdrGlView remain protected")

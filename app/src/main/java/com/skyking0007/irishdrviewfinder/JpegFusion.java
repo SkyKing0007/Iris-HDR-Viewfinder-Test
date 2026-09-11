@@ -143,6 +143,45 @@ final class JpegFusion {
     }
     // IRIS_V238_TILED_GLOBAL_CONSENSUS_END
 
+    // IRIS_V240_STATIC_RESIDUAL_MODEL_BEGIN
+    // After V2.38 global registration, true static camera/background residuals vary
+    // smoothly across the image (translation/rotation/small perspective can be
+    // represented to first order by an affine displacement field). Independently
+    // moving objects may still produce excellent forward/backward local matches, so
+    // cycle consistency alone is not sufficient source-ownership evidence. Fit one
+    // robust distributed residual model and revoke direct final-warp authority from
+    // local matches that materially disagree with that static-world consensus.
+    private static final class StaticResidualModel {
+        final float dx0;
+        final float dxX;
+        final float dxY;
+        final float dy0;
+        final float dyX;
+        final float dyY;
+        final boolean valid;
+
+        StaticResidualModel(
+                float dx0, float dxX, float dxY,
+                float dy0, float dyX, float dyY, boolean valid) {
+            this.dx0 = dx0;
+            this.dxX = dxX;
+            this.dxY = dxY;
+            this.dy0 = dy0;
+            this.dyX = dyX;
+            this.dyY = dyY;
+            this.valid = valid;
+        }
+
+        float dxAt(float x, float y) {
+            return dx0 + dxX * x + dxY * y;
+        }
+
+        float dyAt(float x, float y) {
+            return dy0 + dyX * x + dyY * y;
+        }
+    }
+    // IRIS_V240_STATIC_RESIDUAL_MODEL_END
+
     private static final class OneWayRegistration {
         final float sampleDx;
         final float sampleDy;
@@ -460,6 +499,141 @@ final class JpegFusion {
         return aligned;
     }
 
+    // IRIS_V240_STATIC_RESIDUAL_MODEL_HELPERS_BEGIN
+    private static StaticResidualModel fitStaticResidualModel(
+            float[] dx, float[] dy, float[] confidence, int gridWidth, int gridHeight) {
+        int supported = 0;
+        for (float c : confidence) if (c > 0.0f) supported++;
+        if (supported < 6) {
+            return new StaticResidualModel(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
+        }
+        boolean[] use = new boolean[confidence.length];
+        for (int i = 0; i < confidence.length; i++) use[i] = confidence[i] > 0.0f;
+        StaticResidualModel first = solveStaticResidualModel(
+                dx, dy, confidence, use, gridWidth, gridHeight);
+        if (!first.valid) return first;
+
+        int inliers = 0;
+        float minX = 1.0f;
+        float maxX = -1.0f;
+        float minY = 1.0f;
+        float maxY = -1.0f;
+        for (int gy = 0; gy < gridHeight; gy++) {
+            float yn = gridHeight > 1 ? (2.0f * gy / (gridHeight - 1.0f) - 1.0f) : 0.0f;
+            for (int gx = 0; gx < gridWidth; gx++) {
+                int i = gy * gridWidth + gx;
+                if (confidence[i] <= 0.0f) {
+                    use[i] = false;
+                    continue;
+                }
+                float xn = gridWidth > 1 ? (2.0f * gx / (gridWidth - 1.0f) - 1.0f) : 0.0f;
+                float error = (float) Math.hypot(
+                        dx[i] - first.dxAt(xn, yn), dy[i] - first.dyAt(xn, yn));
+                use[i] = error <= 1.35f;
+                if (use[i]) {
+                    inliers++;
+                    minX = Math.min(minX, xn);
+                    maxX = Math.max(maxX, xn);
+                    minY = Math.min(minY, yn);
+                    maxY = Math.max(maxY, yn);
+                }
+            }
+        }
+        if (inliers < Math.max(5, (int) Math.ceil(0.50 * supported))
+                || (maxX - minX) + (maxY - minY) < 1.55f) {
+            return new StaticResidualModel(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
+        }
+        StaticResidualModel refined = solveStaticResidualModel(
+                dx, dy, confidence, use, gridWidth, gridHeight);
+        if (!refined.valid) return refined;
+
+        double weightedError = 0.0;
+        double weightSum = 0.0;
+        for (int gy = 0; gy < gridHeight; gy++) {
+            float yn = gridHeight > 1 ? (2.0f * gy / (gridHeight - 1.0f) - 1.0f) : 0.0f;
+            for (int gx = 0; gx < gridWidth; gx++) {
+                int i = gy * gridWidth + gx;
+                if (!use[i]) continue;
+                float xn = gridWidth > 1 ? (2.0f * gx / (gridWidth - 1.0f) - 1.0f) : 0.0f;
+                float ex = dx[i] - refined.dxAt(xn, yn);
+                float ey = dy[i] - refined.dyAt(xn, yn);
+                float w = confidence[i];
+                weightedError += w * (ex * ex + ey * ey);
+                weightSum += w;
+            }
+        }
+        float rms = (float) Math.sqrt(weightedError / Math.max(weightSum, 0.0001));
+        if (rms > 0.85f) {
+            return new StaticResidualModel(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
+        }
+        return refined;
+    }
+
+    private static StaticResidualModel solveStaticResidualModel(
+            float[] dx, float[] dy, float[] confidence, boolean[] use,
+            int gridWidth, int gridHeight) {
+        double[][] normal = new double[3][3];
+        double[] rhsX = new double[3];
+        double[] rhsY = new double[3];
+        int count = 0;
+        for (int gy = 0; gy < gridHeight; gy++) {
+            double y = gridHeight > 1 ? (2.0 * gy / (gridHeight - 1.0) - 1.0) : 0.0;
+            for (int gx = 0; gx < gridWidth; gx++) {
+                int i = gy * gridWidth + gx;
+                if (!use[i] || confidence[i] <= 0.0f) continue;
+                double x = gridWidth > 1 ? (2.0 * gx / (gridWidth - 1.0) - 1.0) : 0.0;
+                double w = Math.max(0.05, confidence[i]);
+                double[] v = {1.0, x, y};
+                for (int r = 0; r < 3; r++) {
+                    rhsX[r] += w * v[r] * dx[i];
+                    rhsY[r] += w * v[r] * dy[i];
+                    for (int c = 0; c < 3; c++) normal[r][c] += w * v[r] * v[c];
+                }
+                count++;
+            }
+        }
+        if (count < 5) {
+            return new StaticResidualModel(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
+        }
+        double[] bx = solveSymmetric3x3(normal, rhsX);
+        double[] by = solveSymmetric3x3(normal, rhsY);
+        if (bx == null || by == null) {
+            return new StaticResidualModel(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, false);
+        }
+        return new StaticResidualModel(
+                (float) bx[0], (float) bx[1], (float) bx[2],
+                (float) by[0], (float) by[1], (float) by[2], true);
+    }
+
+    private static double[] solveSymmetric3x3(double[][] matrix, double[] rhs) {
+        double[][] a = new double[3][4];
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) a[r][c] = matrix[r][c];
+            a[r][3] = rhs[r];
+        }
+        for (int col = 0; col < 3; col++) {
+            int pivot = col;
+            for (int row = col + 1; row < 3; row++) {
+                if (Math.abs(a[row][col]) > Math.abs(a[pivot][col])) pivot = row;
+            }
+            if (Math.abs(a[pivot][col]) < 1.0e-7) return null;
+            if (pivot != col) {
+                double[] tmp = a[pivot];
+                a[pivot] = a[col];
+                a[col] = tmp;
+            }
+            double scale = a[col][col];
+            for (int c = col; c < 4; c++) a[col][c] /= scale;
+            for (int row = 0; row < 3; row++) {
+                if (row == col) continue;
+                double factor = a[row][col];
+                for (int c = col; c < 4; c++) a[row][c] -= factor * a[col][c];
+            }
+        }
+        return new double[] {a[0][3], a[1][3], a[2][3]};
+    }
+    // IRIS_V240_STATIC_RESIDUAL_MODEL_HELPERS_END
+
     static LocalRegistrationField estimateLocalRegistration(
             Bitmap alignedMoving, Bitmap referenceBitmap) {
         final float maxResidualPixels = 4.0f;
@@ -555,6 +729,34 @@ final class JpegFusion {
                     directSupport[i] = confidence > 0.0f;
                 }
             }
+
+            // IRIS_V240_STATIC_RESIDUAL_MODEL_APPLY_BEGIN
+            StaticResidualModel staticResidual = fitStaticResidualModel(
+                    rawDx, rawDy, rawConfidence, gridWidth, gridHeight);
+            if (staticResidual.valid) {
+                for (int gy = 0; gy < gridHeight; gy++) {
+                    float yn = gridHeight > 1
+                            ? (2.0f * gy / (gridHeight - 1.0f) - 1.0f) : 0.0f;
+                    for (int gx = 0; gx < gridWidth; gx++) {
+                        int i = gy * gridWidth + gx;
+                        if (rawConfidence[i] <= 0.0f) continue;
+                        float xn = gridWidth > 1
+                                ? (2.0f * gx / (gridWidth - 1.0f) - 1.0f) : 0.0f;
+                        float modelError = (float) Math.hypot(
+                                rawDx[i] - staticResidual.dxAt(xn, yn),
+                                rawDy[i] - staticResidual.dyAt(xn, yn));
+                        float staticAgreement = 1.0f - smoothstep(0.60f, 1.35f, modelError);
+                        rawConfidence[i] *= staticAgreement;
+                        // Alpha is final SHORT-warp authority, so a locally repeatable
+                        // but independently moving object may not keep alpha merely
+                        // because its own forward/backward match was cycle-consistent.
+                        directSupport[i] = rawConfidence[i] >= 0.16f
+                                && staticAgreement >= 0.35f;
+                        if (!directSupport[i]) rawConfidence[i] = 0.0f;
+                    }
+                }
+            }
+            // IRIS_V240_STATIC_RESIDUAL_MODEL_APPLY_END
 
             // First pass: smooth only neighbors that agree with a supported center.
             // Unsupported/clipped cells may be filled from a 5x5 coherent camera-

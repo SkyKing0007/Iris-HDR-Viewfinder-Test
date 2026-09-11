@@ -867,10 +867,32 @@ float stillTemporalBodySupportAt(vec2 sampleUv, float ratio) {
     vec4 shortRaw = savedShortEvidenceAt(sampleUv);
     vec3 longScene = longRaw.rgb;
     vec3 shortScene = shortRaw.rgb * stillShortScalarGain;
-    float body = 1.0 - smoothstep(0.34, 0.67, max3(longScene));
-    float geometry = smoothstep(0.20, 0.50, registrationNeighborhoodConfidenceAt(sampleUv));
+    float ordinaryBody = 1.0 - smoothstep(0.34, 0.67, max3(longScene));
+    float localGeometry = smoothstep(
+        0.20, 0.50, registrationNeighborhoodConfidenceAt(sampleUv));
     float radiometry = radiometricAgreementAt(sampleUv);
     float rgbAgreement = temporalRgbAgreement(shortScene, longScene);
+    // IRIS_V240_STATIC_ONE_X_FULL_AVERAGING_BEGIN
+    // A static smooth sky/wall has little local gradient and therefore may have no
+    // strong local-flow cell even when the global two-frame registration is excellent.
+    // For genuinely near-equal exposures only, allow the global transform to prove
+    // geometry in a locally smooth region. Pointwise RGB/radiometric agreement and
+    // real source bounds still reject moving/disoccluded content. At ratio==1 and full
+    // support temporalShortWeight() becomes 0.5: a true two-frame average.
+    float pairStops = max(log2(max(ratio, 1.0)), 0.0);
+    float equalExposure = 1.0 - smoothstep(0.12, 0.42, pairStops);
+    vec2 smoothRanges = localLinearRangeAtRadius(sampleUv, 3.0);
+    float smoothInterior = 1.0 - smoothstep(0.010, 0.038,
+        max(smoothRanges.x, smoothRanges.y));
+    float globalGeometry = smoothstep(0.30, 0.62, stillRegistrationConfidence)
+        * stillShortSourceBoundsValidityAt(sampleUv) * smoothInterior;
+    float geometry = max(localGeometry, equalExposure * globalGeometry);
+    // Equal exposures have no dedicated SHORT highlight role, so a bright but still
+    // unsaturated smooth sky remains eligible for temporal averaging. Only the
+    // near-saturation interval tapers the equal-pair body contribution.
+    float equalExposureBody = 1.0 - smoothstep(0.86, 1.02, max3(longScene));
+    float body = max(ordinaryBody, equalExposure * equalExposureBody);
+    // IRIS_V240_STATIC_ONE_X_FULL_AVERAGING_END
     float shortY = linearLuma(shortScene);
     float shortSigma = shortRaw.a * stillShortScalarGain;
     float shortSignal = smoothstep(0.00045, 0.0023, shortY)
@@ -1037,6 +1059,57 @@ float longLossRecoveryDomainAt(vec2 sampleUv) {
     float physicalLoss = max(hardLoss, max(nearHardInterior, effectiveLoss));
     return shortUsable * physicalLoss;
 }
+
+// IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_BEGIN
+vec2 finalAppliedLocalResidualPixelsAt(vec2 sampleUv) {
+    if (haveLocalFlow == 0 || localFlowMaxPixels <= 0.0) return vec2(0.0);
+    vec4 flowValue = stillLocalFlowAt(sampleUv);
+    vec2 residualPixels = (flowValue.rg * 2.0 - vec2(1.0)) * localFlowMaxPixels;
+    float directConfidence = stillLocalDirectRegistrationConfidenceAt(sampleUv);
+    return step(0.16, directConfidence) * residualPixels;
+}
+
+float topologyWarpConsistencyAt(vec2 sampleUv, vec4 topologyState) {
+    if (localFlowMaxPixels <= 0.0) return 1.0;
+    vec2 topologyResidual = (topologyState.ba * 2.0 - vec2(1.0)) * localFlowMaxPixels;
+    vec2 appliedResidual = finalAppliedLocalResidualPixelsAt(sampleUv);
+    float errorPixels = length(topologyResidual - appliedResidual);
+    // If a clipped component propagated a non-zero residual into a pane that has no
+    // direct final-warp authority, mode 5 would otherwise sample global-only SHORT at
+    // the wrong location. Refuse ownership instead of printing a displaced block/trail.
+    return 1.0 - smoothstep(0.45, 1.20, errorPixels);
+}
+
+float hardRecoveryBoundarySafetyAt(vec2 sampleUv) {
+    vec2 texel = 1.0 / vec2(textureSize(longTex, 0));
+    vec2 offsets[16] = vec2[16](
+        vec2( 2.0, 0.0), vec2(-2.0, 0.0), vec2(0.0,  2.0), vec2(0.0, -2.0),
+        vec2( 2.0, 2.0), vec2(-2.0, 2.0), vec2(2.0, -2.0), vec2(-2.0, -2.0),
+        vec2( 6.0, 0.0), vec2(-6.0, 0.0), vec2(0.0,  6.0), vec2(0.0, -6.0),
+        vec2( 5.0, 5.0), vec2(-5.0, 5.0), vec2(5.0, -5.0), vec2(-5.0, -5.0));
+    float boundaryVotes = 0.0;
+    float safeVotes = 0.0;
+    float safetySum = 0.0;
+    for (int i = 0; i < 16; ++i) {
+        vec2 q = clamp(sampleUv + offsets[i] * texel, vec2(0.0), vec2(1.0));
+        // Only an unsaturated/non-hard-loss neighbor can serve as a correspondence
+        // witness for a clipped center. Do not ask the destroyed LONG interior to
+        // radiometrically match the valid SHORT that is meant to reconstruct it.
+        float boundaryUsable = 1.0 - smoothstep(0.18, 0.55, longHardLossBaseAt(q));
+        if (boundaryUsable < 0.5) continue;
+        float staticEvidence = stillStaticCorrespondenceAt(q);
+        boundaryVotes += 1.0;
+        safetySum += staticEvidence;
+        safeVotes += step(0.16, staticEvidence);
+    }
+    // Deep inside a large clipped component there may be no usable witness within the
+    // safety belt. Preserve V2.39 interior recovery there; boundary pixels themselves
+    // must prove static correspondence and therefore cannot print colored double edges.
+    if (boundaryVotes < 1.5) return 1.0;
+    float meanSafety = safetySum / max(boundaryVotes, 1.0);
+    return smoothstep(0.08, 0.30, meanSafety) * smoothstep(1.0, 4.0, safeVotes);
+}
+// IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_END
 
 // IRIS_V238_FINAL_MOTION_DISOCCLUSION_BARRIER_BEGIN
 float finalLongLossRecoveryAt(vec2 sampleUv) {
@@ -1430,7 +1503,18 @@ void main() {
         float connectedRecovery = step(0.50, support.r);
         // Broad/connected highlight loss keeps the proven V2.38 topology route.
         float fullResolutionLoss = finalLongLossRecoveryAt(uv);
-        float connectedShortOwns = connectedRecovery * step(0.08, fullResolutionLoss);
+        // IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_BEGIN
+        // V2.38 correctly stopped inferred local-flow cells from warping final SHORT,
+        // but a topology-connected hard-clipped cell could still select global-only
+        // SHORT even when the component itself had propagated a different residual.
+        // Require the transform actually used by mode 5 to agree with the component
+        // geometry, and require unsaturated pixels around a clipped boundary to prove
+        // static correspondence. Deep clipped interiors retain V2.39 recovery.
+        float connectedMotionSafe = topologyWarpConsistencyAt(uv, support)
+            * hardRecoveryBoundarySafetyAt(uv);
+        float connectedShortOwns = connectedRecovery
+            * step(0.08, fullResolutionLoss) * step(0.28, connectedMotionSafe);
+        // IRIS_V240_CONNECTED_HIGHLIGHT_MOTION_SAFETY_END
 
         // IRIS_V239_INDEPENDENT_FULL_RES_MICRODETAIL_OWNERSHIP_BEGIN
         // Fine 1-2px information is not a broad HDR component and therefore must not

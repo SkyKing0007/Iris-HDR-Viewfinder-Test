@@ -117,6 +117,14 @@ final class CameraController {
     private static final float AUTO_HIGH_DR_NEAR_CLIP_FRACTION = 0.0015f;
     private static final float AUTO_HIGH_DR_BODY_P50_MAX = 0.18f;
     private static final double AUTO_HIGH_DR_MIN_SEPARATION_STOPS = 3.0;
+    // IRIS_V240_EXPOSURE_INVARIANT_HDR_RANGE_BEGIN
+    // Digital clipping is exposure-dependent and therefore cannot be the sole HDR
+    // classifier. A low-photon pair can make a genuinely wide-range scene look
+    // numerically "safe" and collapse LONG onto SHORT. Preserve a real bracket when
+    // the exposure-normalized scene itself still spans >=3EV and the upper tail is
+    // materially above the noise/black floor, even if neither current frame clips.
+    private static final float AUTO_HIGH_DR_RELATIVE_HIGHLIGHT_MIN = 0.045f;
+    // IRIS_V240_EXPOSURE_INVARIANT_HDR_RANGE_END
     // V2.25 semantic ownership: LONG owns body/SNR, SHORT owns highlight headroom,
     // and the bracket is the resulting physical LONG/SHORT ratio. These robust
     // LONG percentiles deliberately ignore the top highlight tail instead of letting
@@ -2717,9 +2725,19 @@ final class CameraController {
         boolean highlightPressure = stats.longP98Linear >= AUTO_HIGH_DR_HIGHLIGHT_P98
                 || stats.longNearClipFraction >= AUTO_HIGH_DR_NEAR_CLIP_FRACTION
                 || stats.shortNearClipFraction >= AUTO_HIGH_DR_NEAR_CLIP_FRACTION;
-        return highlightPressure
+        // IRIS_V240_EXPOSURE_INVARIANT_HDR_RANGE_BEGIN
+        // The 181254 device regression produced SHORT==LONG at ~1/3100s ISO50: the
+        // pair had >3EV highlight/body separation, but because both frames were already
+        // dark the absolute clip-pressure gate turned false and AUTO collapsed to 1x.
+        // Relative scene range is invariant to that failure mechanism. Keep the old
+        // clipping gate as one proof path, but no longer require current-exposure
+        // clipping when a real upper-tail/body separation is already measurable.
+        boolean relativeRangeEvidence = highlight >= AUTO_HIGH_DR_RELATIVE_HIGHLIGHT_MIN
+                && separationStops >= AUTO_HIGH_DR_MIN_SEPARATION_STOPS;
+        return (highlightPressure || relativeRangeEvidence)
                 && stats.longBodyP50Linear <= AUTO_HIGH_DR_BODY_P50_MAX
                 && separationStops >= AUTO_HIGH_DR_MIN_SEPARATION_STOPS;
+        // IRIS_V240_EXPOSURE_INVARIANT_HDR_RANGE_END
     }
 
     private ExposureSetting solveStillLongSnrSettingForProductLocked(
