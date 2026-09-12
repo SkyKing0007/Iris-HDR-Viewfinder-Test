@@ -1268,6 +1268,83 @@ vec3 applyAdaptiveClarity(vec3 rgb, vec2 sampleUv) {
 }
 // IRIS_V212_ADAPTIVE_CLARITY_END
 
+// IRIS_V243_SEPARATE_LUMA_CHROMA_AUTHORITY_BEGIN
+// V2.43 keeps V2.42 source ownership and HDR shoulder geometry intact.  The only
+// microdetail correction is post-shoulder color authority: a Catmull-Rom SHORT
+// sample may restore proven 1-2 px luminance structure, but unsupported RGB
+// opponent excursions are bounded against the conservative four-tap SHORT sample.
+// Luminance is restored exactly after the clamp, so this cannot flatten or brighten
+// the recovered cloud/foliage structure and cannot change the shoulder decision.
+vec3 v243BoundMicrodetailChroma(
+        vec3 displayLinear,
+        vec3 stableShortDisplayLinear,
+        float microEvidence) {
+    float y = linearLuma(displayLinear);
+    float stableY = linearLuma(stableShortDisplayLinear);
+    if (y <= 0.000001 || stableY <= 0.000001) return displayLinear;
+
+    vec3 stableAtY = stableShortDisplayLinear * (y / stableY);
+    vec3 chromaResidual = displayLinear - stableAtY;
+    // Permit real local color, but prevent a 1-2 px interpolation residual from
+    // becoming scene color.  The limit scales with signal, never with topology.
+    float residualLimit = 0.11 * max(y, 0.025);
+    vec3 boundedResidual = clamp(
+        chromaResidual,
+        vec3(-residualLimit),
+        vec3(residualLimit));
+    vec3 bounded = max(stableAtY + boundedResidual, vec3(0.0));
+    float boundedY = linearLuma(bounded);
+    if (boundedY > 0.000001) bounded *= y / boundedY;
+
+    // Use continuous proof strength rather than the binary ownership bit so color
+    // correction cannot print a new boundary where direct microdetail turns on.
+    float gate = smoothstep(0.18, 0.72, microEvidence);
+    return mix(displayLinear, bounded, gate);
+}
+
+// Integrated-Y DNG replay showed that the remaining yellow/green washed highlight
+// was presentation, not geometry.  Apply one monotonic pointwise transform after
+// the existing V2.42 shoulder.  The gate is physical LONG-loss pressure + usable
+// SHORT headroom; it never consumes the connected-component ownership mask and
+// therefore cannot draw a topology contour at a tree/cloud or window-frame edge.
+vec3 v243RecoveredPointwisePresentation(
+        vec3 displayLinear,
+        float physicalRecoveryPressure) {
+    float y = linearLuma(displayLinear);
+    if (y <= 0.000001) return displayLinear;
+
+    float recovery = clamp(physicalRecoveryPressure, 0.0, 1.0);
+    float radiometricGate = recovery * smoothstep(0.18, 0.35, y);
+    if (radiometricGate <= 0.000001) return displayLinear;
+
+    // Strictly monotonic recovered-highlight curve fitted to the validated DNG
+    // replay direction. Each interval maps between increasing endpoint luminances,
+    // so cloud/lamp radiance ordering cannot reverse. Body/shadows remain identity.
+    float mappedY = y;
+    if (y > 0.20 && y <= 0.40) {
+        mappedY = mix(0.20, 0.25, smoothstep(0.20, 0.40, y));
+    } else if (y > 0.40 && y <= 0.60) {
+        mappedY = mix(0.25, 0.30, smoothstep(0.40, 0.60, y));
+    } else if (y > 0.60 && y <= 0.80) {
+        mappedY = mix(0.30, 0.45, smoothstep(0.60, 0.80, y));
+    } else if (y > 0.80) {
+        mappedY = mix(0.45, 0.61, smoothstep(0.80, 1.00, clamp(y, 0.80, 1.00)));
+    }
+    float targetY = mix(y, mappedY, radiometricGate);
+
+    // Integrated-Y direction: reduce the recovered warm/red bias and restore blue
+    // without spatial filtering.  Re-normalize to targetY so the tint cannot alter
+    // the luminance/detail raster or feed back into the already-completed shoulder.
+    float colorGate = recovery * smoothstep(0.24, 0.58, y);
+    vec3 tint = mix(vec3(1.0), vec3(0.99, 1.00, 1.02), colorGate);
+    vec3 tinted = max(displayLinear * tint, vec3(0.0));
+    float tintedY = linearLuma(tinted);
+    if (tintedY <= 0.000001) return displayLinear;
+    vec3 corrected = tinted * (targetY / tintedY);
+    return max(corrected, vec3(0.0));
+}
+// IRIS_V243_SEPARATE_LUMA_CHROMA_AUTHORITY_END
+
 vec3 applyPhotographicBodyTone(vec3 rgb) {
     // IRIS_V229_PRE_SHOULDER_HDR_ENERGY_PRESERVATION_BEGIN
     // Body tone is upstream of adaptiveHdrToneMap and therefore must not project
@@ -1539,11 +1616,44 @@ void main() {
         vec3 temporalBody = mix(longScene, bodyShortScene, bodyShortWeight);
         vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;
 
+        // V2.43 color guide is evaluated only after V2.42 source ownership is final.
+        vec3 stableShortScene = savedShortLinearAt(uv).rgb * stillShortScalarGain;
+
         float brightnessGain = exp2(clamp(displayBrightnessEv, -16.0, 1.0));
         vec3 bodyToned = applyPhotographicBodyTone(mergedScene * brightnessGain);
         vec3 displayLinear = savedContinuousHdrToneMap(
             bodyToned, ratio, bracketStops);
         displayLinear = applyDisplayGamma(displayLinear, displayGamma);
+
+        // IRIS_V243_POST_SHOULDER_MICRO_CHROMA_BEGIN
+        // Evaluate the conservative SHORT color through the exact same V2.42 body /
+        // shoulder / gamma sequence.  It is a chroma guide only; the already-proven
+        // displayLinear luminance remains the output luminance authority.
+        if (directMicroOwns > 0.5) {
+            vec3 stableShortBody = applyPhotographicBodyTone(
+                stableShortScene * brightnessGain);
+            vec3 stableShortDisplay = savedContinuousHdrToneMap(
+                stableShortBody, ratio, bracketStops);
+            stableShortDisplay = applyDisplayGamma(stableShortDisplay, displayGamma);
+            displayLinear = v243BoundMicrodetailChroma(
+                displayLinear, stableShortDisplay, directMicrodetail);
+        }
+        // IRIS_V243_POST_SHOULDER_MICRO_CHROMA_END
+
+        // IRIS_V243_POINTWISE_RECOVERED_PRESENTATION_BEGIN
+        // Use continuous physical loss rather than the connected ownership bit.  This
+        // preserves the exact V2.41/V2.42 topology geometry while preventing a tone
+        // change from drawing a component-shaped halo or line.
+        float longRecoveryPressure = max(
+            savedLongSaturationAt(uv),
+            smoothstep(0.78, 1.00, max3(longScene)));
+        float shortColorHeadroom = 1.0 - savedShortEvidenceSaturationAt(uv);
+        float physicalRecoveryPressure = clamp(
+            longRecoveryPressure * shortColorHeadroom, 0.0, 1.0);
+        displayLinear = v243RecoveredPointwisePresentation(
+            displayLinear, physicalRecoveryPressure);
+        // IRIS_V243_POINTWISE_RECOVERED_PRESENTATION_END
+
         outColor = vec4(clamp(linearToSrgb(displayLinear), 0.0, 1.0), 1.0);
         // IRIS_V217_REGION_SOURCE_OWNERSHIP_END
         return;

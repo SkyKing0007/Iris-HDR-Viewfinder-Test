@@ -32,7 +32,7 @@ workflow = (ROOT / ".github/workflows/build.yml").read_text()
 
 def require(condition, message):
     if not condition:
-        raise SystemExit("V1.4.11 V2.42 REGRESSION FAIL: " + message)
+        raise SystemExit("V1.4.11 V2.43 REGRESSION FAIL: " + message)
 
 
 def verify_workflow_embedded_python():
@@ -62,7 +62,7 @@ def verify_workflow_embedded_python():
 
 verify_workflow_embedded_python()
 if os.environ.get("IRIS_WORKFLOW_SYNTAX_ONLY") == "1":
-    print("V1.4.11 V2.42 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
+    print("V1.4.11 V2.43 WORKFLOW EMBEDDED-PYTHON SYNTAX: PASS")
     raise SystemExit(0)
 
 
@@ -167,16 +167,16 @@ require(sha_text(normalized_v240_jpegfusion_to_v239(fusion))
         == '1338ca1e5dd08d80c06a844edb012fc4920fd6f9099792c437eb95bf7f344d36',
         'V2.40 JpegFusion changes escaped the static-residual-model insertion allowlist')
 
-# V2.42 exact runtime freeze. raw_reconstruct.frag is the sole intended runtime
-# owner; the other 21 app/src files are pinned byte-for-byte to successful V2.41 R2.
+# V2.43 exact runtime freeze. hdr_display.frag is the sole intended runtime
+# owner; the other 21 app/src files are pinned byte-for-byte to successful V2.42.
 # This is intentionally stronger than a changed-file allowlist.
-V242_RUNTIME_SHA256 = {
+V243_RUNTIME_SHA256 = {
     'app/src/main/AndroidManifest.xml': 'e1299d6cf61cfcb79cbfe3e1e7d46f3ab2a11b65ba116d7f2d328b51d4180a92',
     'app/src/main/assets/licenses/NAFNet_LICENSE.txt': '71e12b4b6218af984e66cca1c3be81c6774828bc14c6eadde42007e317784e4f',
     'app/src/main/assets/nafnet_sidd_width32_fp16.tflite': 'f8fbaa422411683c53e802cf7cc7cf9be0a0de00886ad4af057232e26b172a0c',
     'app/src/main/assets/shaders/copy_2d.frag': 'b6b890e3be034a0d4980fd324fe0f469c7a2b0a126e958607bc8c4b9fbf97a55',
     'app/src/main/assets/shaders/fullscreen.vert': '7d8ee58c4500a46dd9614404a17ea4c7e104a6bf43976ecb85795799fdcd7fb4',
-    'app/src/main/assets/shaders/hdr_display.frag': '96399f4931ac7ca195deeac8f2b33ea3c08c8aa81da274a73514cdd85f1d5ad3',
+    'app/src/main/assets/shaders/hdr_display.frag': '327523282836a0849ebd0983a6d02d360dae9dfe2adf4a6451646ea58642d695',
     'app/src/main/assets/shaders/oes_to_rgb.frag': '388d49929564efba24900794e035f88b461485f4da4f2e12caf71e3531ab6443',
     'app/src/main/assets/shaders/raw_chroma_dealias.frag': 'fe09f6520aa4db30f43c330cde6dbb451186f301d63efbb07c4238c7cbf3591b',
     'app/src/main/assets/shaders/raw_green.frag': '2e10f434b527041b4a499cc943b08b2e217c714f6cc3696ff6ca89bdf57e89cb',
@@ -195,12 +195,12 @@ V242_RUNTIME_SHA256 = {
     'app/src/main/java/com/skyking0007/irishdrviewfinder/RawFusion.java': 'd70c676456dc6083ff3fa8b8dc8edd19bbfa6f6b0b5515ba6c492e3784b33e0f',
 }
 runtime_files = sorted(p for p in (ROOT / 'app/src').rglob('*') if p.is_file())
-require(len(runtime_files) == 22, f'V2.42 exact runtime universe must contain 22 files, found {len(runtime_files)}')
-require(set(V242_RUNTIME_SHA256) == {p.relative_to(ROOT).as_posix() for p in runtime_files},
-        'V2.42 runtime SHA pin set must exactly equal the 22-file runtime universe')
-for rel, expected_sha in V242_RUNTIME_SHA256.items():
+require(len(runtime_files) == 22, f'V2.43 exact runtime universe must contain 22 files, found {len(runtime_files)}')
+require(set(V243_RUNTIME_SHA256) == {p.relative_to(ROOT).as_posix() for p in runtime_files},
+        'V2.43 runtime SHA pin set must exactly equal the 22-file runtime universe')
+for rel, expected_sha in V243_RUNTIME_SHA256.items():
     actual_sha = hashlib.sha256((ROOT / rel).read_bytes()).hexdigest()
-    require(actual_sha == expected_sha, f'V2.42 runtime byte freeze mismatch: {rel}')
+    require(actual_sha == expected_sha, f'V2.43 runtime byte freeze mismatch: {rel}')
 
 # V2.37 is a localized presentation-control change on exact successful V2.36.
 # Normalize ONLY the three agreed V2.37 runtime owners back to their V2.36 bytes and
@@ -317,6 +317,35 @@ require(sha_text(normalized_v237_main(main))
         'V2.37 MainActivity changes escaped the manual presentation callback allowlist')
 
 def normalized_v240_hdr_shader_to_v239(text):
+    # V2.43 intentionally changes only marked post-ownership saved presentation in
+    # hdr_display.frag. Strip those exact additions first, restoring the successful
+    # V2.42 byte shape before applying the older V2.41/V2.40 -> V2.39 normalizers.
+    v243_begin='// IRIS_V243_SEPARATE_LUMA_CHROMA_AUTHORITY_BEGIN\n'
+    v243_end='// IRIS_V243_SEPARATE_LUMA_CHROMA_AUTHORITY_END\n'
+    a=text.index(v243_begin); b=text.index(v243_end,a)+len(v243_end)
+    if text[b:b+1]=='\n': b+=1
+    text=text[:a]+text[b:]
+
+    guide=(
+        '        // V2.43 color guide is evaluated only after V2.42 source ownership is final.\n'
+        '        vec3 stableShortScene = savedShortLinearAt(uv).rgb * stillShortScalarGain;\n\n'
+    )
+    require(text.count(guide)==1,'V2.43 stable SHORT color-guide normalization anchor missing')
+    text=text.replace(guide,'',1)
+
+    for begin_marker,end_marker in (
+            ('        // IRIS_V243_POST_SHOULDER_MICRO_CHROMA_BEGIN\n',
+             '        // IRIS_V243_POST_SHOULDER_MICRO_CHROMA_END\n'),
+            ('        // IRIS_V243_POINTWISE_RECOVERED_PRESENTATION_BEGIN\n',
+             '        // IRIS_V243_POINTWISE_RECOVERED_PRESENTATION_END\n')):
+        a=text.index(begin_marker); b=text.index(end_marker,a)+len(end_marker)
+        if text[b:b+1]=='\n': b+=1
+        text=text[:a]+text[b:]
+    post_gamma = '        displayLinear = applyDisplayGamma(displayLinear, displayGamma);\n\n        outColor = vec4('
+    require(text.count(post_gamma)==1,'V2.43 post-gamma normalization whitespace anchor missing')
+    text=text.replace(post_gamma,
+        '        displayLinear = applyDisplayGamma(displayLinear, displayGamma);\n        outColor = vec4(',1)
+
     # Normalize the actual V2.41 shader directly to V2.39: remove V2.41 motion
     # provenance/topology additions and V2.40 equal-pair averaging, while preserving
     # every older byte. The V2.40 per-pixel boundary ring is intentionally NOT
@@ -1078,13 +1107,13 @@ require(max(flat_long_output) - min(flat_long_output) == 0.0
         and structured_output[-1] - structured_output[0] > 0.05,
         "visual-detail regression fixture must distinguish true SHORT detail from a flat LONG plateau")
 
-# V2.42 runtime authority is the exact last successful compiler-tested V2.41 R2
+# V2.43 runtime authority is the exact last successful compiler-tested V2.42
 # candidate/artifact. Earlier candidates remain regression/reference evidence only.
-require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.41' in workflow
-        and 'run-id: 34557568126' in workflow
-        and "authority='866665c5add2af78c75b8d159f28e2fca23dd0d3'" in workflow
-        and "authority_tree='552cd9ee43ce1c2fafaa12140798054fd2092e1c'" in workflow,
-        "workflow must download the exact successful V1.4.11 V2.41 R2 Actions authority")
+require('name: Iris-HDR-Viewfinder-Test-V1.4.11-V2.42' in workflow
+        and 'run-id: 34604879192' in workflow
+        and "authority='b71d46a5734cbbd98bdde53647e874f8bff3e6cd'" in workflow
+        and "authority_tree='2410e6638a779003e042fef22a71bed2497b52a6'" in workflow,
+        "workflow must download the exact successful V1.4.11 V2.42 Actions authority")
 require('branches: [ experiment-v1.4.11-v2-brightness-4ev ]' in workflow,
         "V1.4.11 V2 workflow must remain isolated to its experimental branch")
 
@@ -2285,9 +2314,9 @@ require('statusText.setSingleLine(true);' in main
 require('applicationId = "com.skyking0007.irishdrviewfinder.v1411v2"' in Path('app/build.gradle.kts').read_text()
         and 'android:label="Iris HDR 1.4.11 V2"' in Path('app/src/main/AndroidManifest.xml').read_text(),
         "V1.4.11 V2 must have a side-by-side application identity and visible label")
-require('versionCode = 60' in build_gradle
-        and 'versionName = "1.0-v1.4.11-v2.42"' in build_gradle,
-        "V2.42 version/build marker must be exact")
+require('versionCode = 61' in build_gradle
+        and 'versionName = "1.0-v1.4.11-v2.43"' in build_gradle,
+        "V2.43 version/build marker must be exact")
 
 # 040 - Exact V1.4.8 capture/remeter race: shutter press freezes one immutable pair.
 begin_capture = camera[camera.index('private void beginCaptureLocked()'):camera.index('private void issueStillBurstLocked()')]
@@ -2673,21 +2702,21 @@ require('JpegFusion.fuse' not in saver
         and 'fuseStillRaws(' not in service
         and 'fuseStillRaws(' not in nafnet,
         "V2.30 may not introduce a second HDR fusion owner")
-require('V1.4.11-V2.41_to_V1.4.11-V2.42.forward.patch' in workflow
-        and 'V1.4.11-V2.42_to_V1.4.11-V2.41.rollback.patch' in workflow,
-        "V2.42 final artifact must export correctly named V2.41<->V2.42 patches")
-require('sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.42-debug.apk' in workflow
-        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.42-source-candidate.tar' in workflow
-        and 'sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.41-debug.apk' not in workflow,
-        "V2.42 final SHA256SUMS export must use V2.42 APK/source identities")
+require('V1.4.11-V2.42_to_V1.4.11-V2.43.forward.patch' in workflow
+        and 'V1.4.11-V2.43_to_V1.4.11-V2.42.rollback.patch' in workflow,
+        "V2.43 final artifact must export correctly named V2.42<->V2.43 patches")
+require('sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.43-debug.apk' in workflow
+        and 'output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.43-source-candidate.tar' in workflow
+        and 'sha256sum output/Iris-HDR-Viewfinder-Test-V1.4.11-V2.42-debug.apk' not in workflow,
+        "V2.43 final SHA256SUMS export must use V2.43 APK/source identities")
 require('fetch-depth: 4' in workflow
-        and "authority='866665c5add2af78c75b8d159f28e2fca23dd0d3'" in workflow
-        and "authority_tree='552cd9ee43ce1c2fafaa12140798054fd2092e1c'" in workflow
+        and "authority='b71d46a5734cbbd98bdde53647e874f8bff3e6cd'" in workflow
+        and "authority_tree='2410e6638a779003e042fef22a71bed2497b52a6'" in workflow
         and 'test "$(git rev-parse HEAD^)" = "$authority"' in workflow
         and 'test "$(git rev-parse "$authority^{tree}")" = "$authority_tree"' in workflow,
-        "V2.42 must prove exact successful V2.41 R2 direct-parent authority without weakening R2 mechanics")
-require("authority = '866665c5add2af78c75b8d159f28e2fca23dd0d3'" in workflow,
-        "V2.42 changed-file allowlist must compare against successful V2.41 R2")
+        "V2.43 must prove exact successful V2.42 direct-parent authority without weakening V2.42 mechanics")
+require("authority = 'b71d46a5734cbbd98bdde53647e874f8bff3e6cd'" in workflow,
+        "V2.43 changed-file allowlist must compare against successful V2.42")
 require('273 - Exact V2.36 R1 allowlist regression:' in workflow,
         "V2.36 R1 exact stale-allowlist-authority failure must remain a permanent regression")
 require('274 - V2.37 runtime authority is exactly successful V2.36 R1 commit 1268c56ae19bcff6a8c9bec42fdc9c911a8436d4' in workflow,
@@ -2711,6 +2740,105 @@ require('316 - Chandelier/office saturated-CFA regression:' in workflow
         and 'sensorValid is the per-channel authority' in workflow
         and 'whole-RGB neutral fallback is forbidden' in workflow,
         "V2.42 opponent-only saturated-CFA regression missing")
+
+require('317 - V2.43 runtime authority is exactly successful V2.42 commit b71d46a5734cbbd98bdde53647e874f8bff3e6cd' in workflow,
+        "V2.43 exact successful-authority regression missing")
+require('318 - V2.43 direct microdetail may restore proven SHORT luminance/detail' in workflow
+        and '319 - V2.43 recovered-highlight presentation is post-shoulder, pointwise and strictly monotonic' in workflow
+        and '320 - V2.42 opponent-only RAW reconstruction' in workflow,
+        "V2.43 integrated-Y permanent regressions missing")
+
+# V2.43 integrated-Y implementation contract. V2.42 ownership/topology remains frozen
+# above; V2.43 begins only after mergedScene/source selection is final.
+require(hdr_shader.count('IRIS_V243_SEPARATE_LUMA_CHROMA_AUTHORITY_BEGIN') == 1
+        and hdr_shader.count('IRIS_V243_SEPARATE_LUMA_CHROMA_AUTHORITY_END') == 1
+        and hdr_shader.count('IRIS_V243_POST_SHOULDER_MICRO_CHROMA_BEGIN') == 1
+        and hdr_shader.count('IRIS_V243_POST_SHOULDER_MICRO_CHROMA_END') == 1
+        and hdr_shader.count('IRIS_V243_POINTWISE_RECOVERED_PRESENTATION_BEGIN') == 1
+        and hdr_shader.count('IRIS_V243_POINTWISE_RECOVERED_PRESENTATION_END') == 1,
+        "V2.43 integrated-Y owner markers must each exist exactly once")
+
+v243_micro = hdr_shader[
+    hdr_shader.index('vec3 v243BoundMicrodetailChroma('):
+    hdr_shader.index('// Integrated-Y DNG replay showed', hdr_shader.index('vec3 v243BoundMicrodetailChroma('))]
+require('stableAtY = stableShortDisplayLinear * (y / stableY);' in v243_micro
+        and 'float residualLimit = 0.11 * max(y, 0.025);' in v243_micro
+        and 'bounded *= y / boundedY;' in v243_micro
+        and 'smoothstep(0.18, 0.72, microEvidence)' in v243_micro,
+        "V2.43 microdetail chroma clamp must use conservative SHORT color and restore exact luminance")
+
+v243_pointwise = hdr_shader[
+    hdr_shader.index('vec3 v243RecoveredPointwisePresentation('):
+    hdr_shader.index('// IRIS_V243_SEPARATE_LUMA_CHROMA_AUTHORITY_END', hdr_shader.index('vec3 v243RecoveredPointwisePresentation('))]
+require('texture(' not in v243_pointwise
+        and 'connectedRecovery' not in v243_pointwise
+        and 'shortOwns' not in v243_pointwise
+        and 'support.r' not in v243_pointwise
+        and 'physicalRecoveryPressure' in v243_pointwise,
+        "V2.43 recovered presentation must be pointwise/physical, never topology-mask driven")
+require('mix(0.20, 0.25, smoothstep(0.20, 0.40, y))' in v243_pointwise
+        and 'mix(0.25, 0.30, smoothstep(0.40, 0.60, y))' in v243_pointwise
+        and 'mix(0.30, 0.45, smoothstep(0.60, 0.80, y))' in v243_pointwise
+        and 'mix(0.45, 0.61, smoothstep(0.80, 1.00, clamp(y, 0.80, 1.00)))' in v243_pointwise
+        and 'vec3(0.99, 1.00, 1.02)' in v243_pointwise,
+        "V2.43 pointwise tone/color constants drifted from validated Integrated-Y direction")
+
+mode5_v243 = hdr_shader[hdr_shader.index('    if (mode == 5) {'):hdr_shader.index('    // V2.27 live parity:')]
+require(mode5_v243.index('vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;')
+        < mode5_v243.index('vec3 stableShortScene = savedShortLinearAt(uv).rgb * stillShortScalarGain;')
+        < mode5_v243.index('IRIS_V243_POST_SHOULDER_MICRO_CHROMA_BEGIN'),
+        "V2.43 color guide may not precede or alter V2.42 source ownership")
+require(mode5_v243.index('displayLinear = applyDisplayGamma(displayLinear, displayGamma);')
+        < mode5_v243.index('IRIS_V243_POST_SHOULDER_MICRO_CHROMA_BEGIN')
+        < mode5_v243.index('IRIS_V243_POINTWISE_RECOVERED_PRESENTATION_BEGIN'),
+        "V2.43 chroma/presentation correction must occur only after the V2.42 shoulder+gamma")
+require('savedLongSaturationAt(uv)' in mode5_v243
+        and 'savedShortEvidenceSaturationAt(uv)' in mode5_v243
+        and 'physicalRecoveryPressure' in mode5_v243,
+        "V2.43 presentation must be gated by physical LONG loss and SHORT headroom")
+
+# Exact mathematical regressions from the DNG simulation failures: the recovered
+# tone must be monotonic, and chroma bounding must preserve luminance exactly.
+def v243_smoothstep(a, b, x):
+    t = min(max((x - a) / (b - a), 0.0), 1.0)
+    return t * t * (3.0 - 2.0 * t)
+def v243_tone(y):
+    if y <= 0.20:
+        return y
+    if y <= 0.40:
+        return 0.20 + (0.25 - 0.20) * v243_smoothstep(0.20, 0.40, y)
+    if y <= 0.60:
+        return 0.25 + (0.30 - 0.25) * v243_smoothstep(0.40, 0.60, y)
+    if y <= 0.80:
+        return 0.30 + (0.45 - 0.30) * v243_smoothstep(0.60, 0.80, y)
+    return 0.45 + (0.61 - 0.45) * v243_smoothstep(0.80, 1.00, min(max(y, 0.80), 1.00))
+prev = -1.0
+for i in range(10001):
+    y = i / 10000.0
+    mapped = v243_tone(y)
+    require(mapped + 1e-12 >= prev,
+            "V2.43 recovered pointwise tone must remain strictly monotonic/non-reversing")
+    prev = mapped
+require(abs(v243_tone(0.20) - 0.20) < 1e-12
+        and abs(v243_tone(0.40) - 0.25) < 1e-12
+        and abs(v243_tone(0.60) - 0.30) < 1e-12
+        and abs(v243_tone(0.80) - 0.45) < 1e-12
+        and abs(v243_tone(1.00) - 0.61) < 1e-12,
+        "V2.43 recovered tone knot fixture drifted")
+
+def v243_luma(rgb):
+    return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+display = [0.62, 0.50, 0.39]
+stable = [0.54, 0.52, 0.46]
+y0 = v243_luma(display); sy = v243_luma(stable)
+stable_at_y = [c * y0 / sy for c in stable]
+limit = 0.11 * max(y0, 0.025)
+bounded = [max(stable_at_y[i] + min(max(display[i] - stable_at_y[i], -limit), limit), 0.0)
+           for i in range(3)]
+by = v243_luma(bounded)
+bounded = [c * y0 / by for c in bounded]
+require(abs(v243_luma(bounded) - y0) < 1e-12,
+        "V2.43 micro-chroma clamp must preserve the proven display luminance exactly")
 for regression_number, regression_text in (
         ('299', 'V2.40 high-DR acquisition may not depend solely on current digital clipping'),
         ('300', 'V2.40 direct local SHORT-warp authority requires agreement with a distributed static-background residual model'),
@@ -2729,9 +2857,9 @@ for regression_number, regression_text in (
     require(f'{regression_number} - {regression_text}' in workflow,
             f'V2.41 permanent regression {regression_number} missing')
 require("if len(tracked) != 35:" in workflow
-        and "V1.4.11 V2.41 AUTHORITY REPOSITORY COUNT FAIL" in workflow
+        and "V1.4.11 V2.42 AUTHORITY REPOSITORY COUNT FAIL" in workflow
         and "POST-BUILD TRACKED COUNT FAIL" in workflow,
-        "V2.42 must prove the 35-file V2.41 R2 authority and exact 35-file candidate universe")
+        "V2.43 must prove the 35-file V2.42 authority and exact 35-file candidate universe")
 
 require('uniform vec2 stillGlobalShortOffsetPixels;' in hdr_shader
         and 'sampleUv + stillGlobalShortOffsetPixels / imageSize' in hdr_shader
@@ -3107,13 +3235,14 @@ mode5_end_v239 = hdr_shader_v239_normalized.index('        return;\n    }\n\n   
 require(sha_text(hdr_shader_v239_normalized[mode5_start_v239:mode5_end_v239])
         == '1eb2eeddf3d2cd777bc3bf393b9250e0aeca04b2827598f43d89c7356bd63c3f',
         'V2.39 saved FUSED mode-5 path must equal the reviewed V2.38-motion-safe plus direct-microdetail candidate')
-mode5_start = hdr_shader.index('    if (mode == 5) {')
-mode5_end = hdr_shader.index('        return;\n    }\n\n    // V2.27 live parity', mode5_start) + len('        return;\n    }')
-mode5_merged_start = hdr_shader.index(
+mode5_start = hdr_shader_v239_normalized.index('    if (mode == 5) {')
+mode5_end = hdr_shader_v239_normalized.index(
+    '        return;\n    }\n\n    // V2.27 live parity', mode5_start) + len('        return;\n    }')
+mode5_merged_start = hdr_shader_v239_normalized.index(
     '        vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;', mode5_start)
-require(sha_text(hdr_shader[mode5_merged_start:mode5_end])
+require(sha_text(hdr_shader_v239_normalized[mode5_merged_start:mode5_end])
         == 'd39ed4e8cd9c7c848f7bead3b1b7467f71663a19a937944279cce9a51046f771',
-        'V2.38 may not change V2.37 saved FUSED presentation after source selection')
+        'V2.43 normalization must restore exact V2.37/V2.38 saved FUSED presentation after source selection')
 live_start = hdr_shader.index('    // V2.27 live parity:')
 require(sha_text(hdr_shader[live_start:])
         == 'd6e7a12c86e37fbe25fdf5b8a607c57f38329c5f19051c2f5fe7034d98f8ca43',
@@ -3536,16 +3665,19 @@ require(v234_carrier_decode(carrier_max) <= 32.000001,
 # Saved presentation is now a single continuous radiance transfer after fusion. It may
 # not consume shortOwns or any topology mask; this removes the V2.33 owner-boundary ring
 # mechanism while keeping the shared/live V2.33 adaptiveHdrToneMap byte-identical.
-require('// IRIS_V234_CONTINUOUS_SAVED_HIGHLIGHT_PRESENTATION_BEGIN' in hdr_shader
-        and 'savedContinuousHdrToneMap(' in hdr_shader
-        and 'savedRecoveredHdrToneMap(' not in hdr_shader
-        and hdr_shader.count('savedContinuousHdrToneMap(') == 2
-        and hdr_shader.count('adaptiveHdrToneMap(bodyToned, ratio, bracketStops)') == 1,
-        "V2.34 saved presentation must use one owner-independent transfer; live remains inherited")
-mode5_after_merge=mode5[mode5.index('vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;'):]
+require('// IRIS_V234_CONTINUOUS_SAVED_HIGHLIGHT_PRESENTATION_BEGIN' in hdr_shader_v239_normalized
+        and 'savedContinuousHdrToneMap(' in hdr_shader_v239_normalized
+        and 'savedRecoveredHdrToneMap(' not in hdr_shader_v239_normalized
+        and hdr_shader_v239_normalized.count('savedContinuousHdrToneMap(') == 2
+        and hdr_shader_v239_normalized.count('adaptiveHdrToneMap(bodyToned, ratio, bracketStops)') == 1,
+        "V2.43 normalization must restore exact V2.34 owner-independent saved presentation; live remains inherited")
+mode5_normalized = hdr_shader_v239_normalized[
+    hdr_shader_v239_normalized.index('    if (mode == 5) {'):
+    hdr_shader_v239_normalized.index('    // V2.27 live parity')]
+mode5_after_merge=mode5_normalized[mode5_normalized.index('vec3 mergedScene = shortOwns > 0.5 ? shortScene : temporalBody;'):]
 require('savedContinuousHdrToneMap(\n            bodyToned, ratio, bracketStops);' in mode5_after_merge
         and 'savedContinuousHdrToneMap(\n            bodyToned, ratio, bracketStops, shortOwns' not in mode5_after_merge,
-        "V2.34 post-fusion presentation may not expose the binary shortOwns mask")
+        "V2.43 normalization must restore exact V2.34 post-fusion presentation without binary shortOwns input")
 
 def v234_hdr_peak(scene_peak, detail_stops=3.0):
     knee=0.70; top=0.930; bias=0.35
@@ -3577,4 +3709,4 @@ require(v234_hdr_peak(4.0) < 0.91 and v234_hdr_peak(5.6) <= 0.931,
 require(v234_hdr_peak(16.0) < 0.99,
         "V2.34 must reserve smooth headroom above the ceiling gradient for true lamp cores")
 
-print("V1.4.11 V2.42 REGRESSION PASS: successful V2.41 R2 fusion/motion/registration/acquisition/presentation mechanics preserved; raw_reconstruct uses sensorValid per-channel opponent-only missing-support authority; broad whole-RGB neutral fallback is forbidden; all other runtime owners remain byte-pinned")
+print("V1.4.11 V2.43 REGRESSION PASS: successful V2.42 RAW reconstruction/registration/topology/ownership preserved; post-shoulder microdetail chroma is luminance-safe; recovered presentation is physical, pointwise and monotonic; all non-hdr_display runtime owners remain byte-pinned")

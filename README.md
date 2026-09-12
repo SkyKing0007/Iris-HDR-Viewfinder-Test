@@ -1,11 +1,11 @@
-# Iris HDR Viewfinder Test V1.4.11 V2.42
+# Iris HDR Viewfinder Test V1.4.11 V2.43
 
-V2.42 is a narrow RAW highlight-color correction on the exact successful V2.41 R2 compiled candidate: commit `866665c5add2af78c75b8d159f28e2fca23dd0d3`, tree `552cd9ee43ce1c2fafaa12140798054fd2092e1c`, Actions run `34557568126`, artifact `10183167176`.
+V2.43 is a narrowly scoped saved-HDR fusion/presentation correction on the exact successful V2.42 compiled candidate: commit `b71d46a5734cbbd98bdde53647e874f8bff3e6cd`, tree `2410e6638a779003e042fef22a71bed2497b52a6`, Actions run `34604879192`, artifact `10264804925`.
 
-The device/DNG regression is square green/cyan/magenta color contamination around saturated chandelier/light housings. Strict SHORT+LONG DNG fusion replay isolated the sufficient correction to `raw_reconstruct.frag`: the existing per-channel `sensorValid` result becomes authoritative. Invalid/censored R/B opponent information falls back only to reconstructed green in calculation-WB coordinates; valid channels and the green/luminance guide remain unchanged.
+The office SHORT/LONG DNG replay was first brought close to the actual V2.42 saved JPEG using the V2.42 RAW pipeline, registration, appearance gain, mode-3/4 topology, mode-5 ownership and mode-6 presentation. The remaining failure was then isolated: directly proven SHORT microdetail could grant complete high-frequency RGB authority, and recovered-highlight color/tone correction performed before or through a component-shaped mask could create peach/orange chroma, washed yellow/green foliage, or visible tree/cloud/window contours.
 
-The V2.35/V2.36 broad whole-RGB neutral fallback (`smoothCensoredFractionAt` / `neutralFallbackBalanced` / `neutralMix`) is removed so a saturated Bayer neighborhood cannot repaint all RGB into a visible grey/yellow border. Existing common-quad opponent rejection and the V2.38 `raw_chroma_dealias.frag` saturation-transition cleanup remain protected unchanged.
+V2.43 leaves the V2.42 ownership backbone unchanged. After the existing V2.42 shoulder and gamma, directly proven microdetail has only its unsupported chroma residual bounded against the conservative four-tap SHORT color guide; output luminance is restored exactly. A separate recovered-highlight presentation is pointwise, physically gated by continuous LONG-loss/SHORT-headroom evidence, strictly monotonic, and never consumes the connected topology mask.
 
-Runtime change is exactly one file: `app/src/main/assets/shaders/raw_reconstruct.frag`. V2.41 R2 fusion topology, motion rejection, registration, appearance-gain normalization, exposure acquisition, presentation, DNG, NAFNet, Java owners and all other runtime files are protected byte-for-byte.
+Runtime change is exactly one file: `app/src/main/assets/shaders/hdr_display.frag`. V2.42 `raw_reconstruct.frag`, registration, mode-3/4 topology, mode-5 source-selection prefix, acquisition, DNG, NAFNet, Java owners and every other runtime file are protected byte-for-byte.
 
 Before GitHub Actions succeeds, this package is prepared/upload-ready only. GitHub Actions remains authoritative for the pinned real GLSL compiler, real project Java compiler and full `:app:assembleDebug`.

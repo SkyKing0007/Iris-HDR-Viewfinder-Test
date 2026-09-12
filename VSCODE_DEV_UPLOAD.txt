@@ -1,22 +1,22 @@
-VSCODE.DEV UPLOAD — V1.4.11 V2.42
+VSCODE.DEV UPLOAD — V1.4.11 V2.43
 
 Repository: SkyKing0007/Iris-HDR-Viewfinder-Test
 Branch: experiment-v1.4.11-v2-brightness-4ev
-Runtime authority: successful V2.41 R2 commit 866665c5add2af78c75b8d159f28e2fca23dd0d3 / Actions 34557568126 / artifact 10183167176.
+Runtime authority: successful V2.42 commit b71d46a5734cbbd98bdde53647e874f8bff3e6cd / Actions 34604879192 / artifact 10264804925.
 
 Replace the files from this handoff ZIP at the repository root, preserving paths.
 Source Control must show exactly 9 modified files, 0 added, 0 deleted.
 Do not upload an APK to the repository.
 
 Expected runtime modification: exactly 1
-- app/src/main/assets/shaders/raw_reconstruct.frag
+- app/src/main/assets/shaders/hdr_display.frag
 
-All other app/src files must remain byte-identical to successful V2.41 R2.
+All other app/src files must remain byte-identical to successful V2.42.
 
-Target versionCode: 60
-Target versionName: 1.0-v1.4.11-v2.42
+Target versionCode: 61
+Target versionName: 1.0-v1.4.11-v2.43
 
 Suggested commit message:
-V1.4.11 V2.42 opponent-only saturated CFA reconstruction
+V1.4.11 V2.43 Integrated-Y luma chroma authority and recovered presentation
 
-After push, GitHub Actions must prove the exact V2.41 R2 authority, deterministic candidate, semantic regressions, all runtime GLSL with the pinned real compiler, real project Java compiler, deterministic 7/12/40 forward/rollback patches, PRE-BUILD safety, full :app:assembleDebug, exactly one APK, post-build invariance and final artifact export.
+After push, GitHub Actions must prove the exact V2.42 authority, deterministic candidate, semantic regressions, all runtime GLSL with the pinned real compiler, real project Java compiler, deterministic 7/12/40 forward/rollback patches, PRE-BUILD safety, full :app:assembleDebug, exactly one APK, post-build invariance and final artifact export.
